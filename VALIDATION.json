@@ -27,5 +27,6 @@
     "No real paid model request or new end-to-end video task in this release run",
     "Upgrade branch tested using lower-version registry metadata, not a prior public Studio binary",
     "No complete TypeScript or lint pass claimed"
-  ]
+  ],
+  "committed_source_comparison": "323 files match after CRLF/LF normalization; Git normalized line endings in 221 files"
 }
