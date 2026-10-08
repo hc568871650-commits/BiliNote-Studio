@@ -1,0 +1,17 @@
+.preview-banner { height: 28px; display: flex; align-items: center; gap: 16px; padding: 0 14px; background: var(--card); border-bottom: 1px solid var(--border); font-size: 10px; color: var(--muted-foreground); }
+.preview-banner > span:first-child { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); }
+.preview-banner i { width: 5px; height: 5px; border-radius: 50%; background: var(--primary); }
+.preview-banner button { margin-left: auto; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.preview-banner a { white-space:nowrap; text-decoration:underline; text-underline-offset:3px; }
+.preview-banner select { color:var(--foreground); background:var(--background); border:1px solid var(--border); border-radius:4px; max-width:150px; }
+@media(max-width:900px) { .preview-banner { gap:9px; }.preview-banner > span:nth-child(2) { display:none; } }
+.preview-app .workspace, .preview-app .settings-workspace, .preview-app .settings-shell { height: calc(100dvh - 28px); }
+.preview-confirm-backdrop { position: fixed; inset: 0; z-index: 100; background: #0005; display: grid; place-items: center; }
+.preview-confirm { max-width: calc(100vw - 32px); width: 390px; padding: 24px; background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 15px 50px #0003; }
+.preview-confirm h2 { font-size: 18px; font-weight: 500; }.preview-confirm p { font-size: 13px; color: var(--muted-foreground); margin: 14px 0 24px; }
+.preview-confirm > div { display: flex; justify-content: flex-end; gap: 10px; }.preview-confirm button { border-radius: 7px; border: 1px solid var(--border); padding: 7px 14px; font-size: 13px; cursor: pointer; }.preview-confirm button:last-child { background: var(--primary); color: var(--primary-foreground); }
+@media(max-width:650px) { .preview-banner > span:nth-child(2) { display: none; } }
+
+
+.preview-app .startup-screen { min-height: calc(100dvh - 28px); }
+.preview-app .onboarding-screen { height: calc(100dvh - 28px); }

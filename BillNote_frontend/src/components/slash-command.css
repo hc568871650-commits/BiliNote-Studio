@@ -1,0 +1,7 @@
+.reading-chat-composer,.organizer-composer { position: relative; }
+.slash-command-menu { position: absolute; bottom: calc(100% + 6px); left: 0; width: min(310px, 100%); z-index: 46; border: 1px solid var(--border); border-radius: 10px; padding: 4px; background: var(--popover); color: var(--popover-foreground); box-shadow: 0 5px 18px #0002; }
+.slash-command-menu > button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border: 0; border-radius: 7px; background: var(--accent); color: inherit; text-align: left; cursor: pointer; }
+.slash-command-menu span { flex: 1; min-width: 0; }
+.slash-command-menu strong { display: block; font-size: 12px; font-weight: 500; }
+.slash-command-menu small { display: block; margin-top: 1px; font-size: 11px; color: var(--muted-foreground); }
+.slash-command-menu kbd { font-size: 10px; color: var(--muted-foreground); }

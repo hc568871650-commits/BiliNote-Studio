@@ -1,0 +1,21 @@
+.startup-screen { min-height: 100dvh; display: flex; flex-direction: column; background: var(--background); color: var(--foreground); padding: 24px 32px; }
+.startup-brand { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
+.startup-brand-caption { color: var(--muted-foreground); font-size: 12px; font-weight: 400; padding-left: 12px; border-left: 1px solid var(--border); margin-left: 4px; }
+.startup-card { width: 100%; max-width: 480px; margin: auto; padding: 40px 0; display: flex; flex-direction: column; gap: 22px; }
+.startup-title { display: flex; align-items: center; gap: 10px; font-size: 23px; font-weight: 500; letter-spacing: -.03em; }
+.startup-description { color: var(--muted-foreground); font-size: 13px; line-height: 1.8; margin-top: 12px; overflow-wrap: anywhere; }
+.startup-wait { display: flex; align-items: center; gap: 9px; color: var(--muted-foreground); font-size: 12px; padding-top: 20px; border-top: 1px solid var(--border); }
+.startup-pulse { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: startup-pulse 1.8s ease-in-out infinite; }
+.startup-footer { text-align: center; color: var(--muted-foreground); font-size: 11px; letter-spacing: .12em; }
+.onboarding-screen { height: 100dvh; overflow: auto; display: flex; align-items: flex-start; justify-content: center; background: var(--background); color: var(--foreground); padding: 48px 24px; }
+.onboarding-card { width: 100%; max-width: 580px; margin-block: auto; background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 28px; box-shadow: 0 8px 32px #00000006; }
+.onboarding-symbol { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 12px; background: var(--background); }
+.onboarding-card input:not([type=radio]) { background: var(--background); min-height: 36px; border-color: var(--border); border-radius: 7px; }
+.onboarding-card input[type=radio] { accent-color: var(--primary); }
+.onboarding-card :is(button,input,a):focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+@keyframes startup-pulse { 50% { opacity: .25; } }
+html[data-reduced-motion=true] .startup-screen :is(.startup-pulse,.animate-spin) { animation: none; }
+@media(prefers-reduced-motion:reduce) { .startup-screen :is(.startup-pulse,.animate-spin) { animation: none; } }
+@media(max-width:560px) { .startup-screen { padding: 20px; } .startup-title { font-size: 20px; } .onboarding-screen { padding: 20px 12px; } .onboarding-card { padding: 20px; } }
+
+body:has(.startup-screen) .global-theme-toggle { display: none; }

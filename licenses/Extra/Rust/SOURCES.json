@@ -1,0 +1,279 @@
+{
+  "checked_at": "2026-10-08",
+  "scope": "14 requested locally cached crates only; other-platform uncached crates not processed",
+  "version_evidence": "Fixed commits read from each crate .cargo_vcs_info.json and version/license from Cargo.toml",
+  "hash_algorithm": "SHA-256",
+  "entries": [
+    {
+      "group": "borsh",
+      "repo": "near/borsh-rs",
+      "ref": "abb9582c70b2afd54eef302c23b6e6d3a0b2c1c4",
+      "source_url": "https://raw.githubusercontent.com/near/borsh-rs/abb9582c70b2afd54eef302c23b6e6d3a0b2c1c4/LICENSE-MIT",
+      "source_blob_sha": "31aa79387f27e730e33d871925e152e35e428031",
+      "source_path": "LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "file": "borsh-LICENSE-MIT.txt",
+      "crates": [
+        [
+          "borsh",
+          "1.5.7"
+        ],
+        [
+          "borsh-derive",
+          "1.5.7"
+        ]
+      ]
+    },
+    {
+      "group": "borsh",
+      "repo": "near/borsh-rs",
+      "ref": "abb9582c70b2afd54eef302c23b6e6d3a0b2c1c4",
+      "source_url": "https://raw.githubusercontent.com/near/borsh-rs/abb9582c70b2afd54eef302c23b6e6d3a0b2c1c4/LICENSE-APACHE",
+      "source_blob_sha": "263ddc7741f1ba45dfd5cb83510afe4711a24231",
+      "source_path": "LICENSE-APACHE",
+      "sha256": "7b724c8fa4a82af733caccabdaa21e2bf8bcb0822fe62d5cf03f99d458438705",
+      "file": "borsh-LICENSE-APACHE.txt",
+      "crates": [
+        [
+          "borsh",
+          "1.5.7"
+        ],
+        [
+          "borsh-derive",
+          "1.5.7"
+        ]
+      ]
+    },
+    {
+      "group": "tauri-plugin",
+      "repo": "tauri-apps/tauri",
+      "ref": "e5ae5b93cdd310045191cc0526f253140ad64b87",
+      "source_url": "https://raw.githubusercontent.com/tauri-apps/tauri/e5ae5b93cdd310045191cc0526f253140ad64b87/LICENSE_MIT",
+      "source_blob_sha": "b08530d59433b3060f4fad8751ac2610c0b0aff3",
+      "source_path": "LICENSE_MIT",
+      "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d",
+      "file": "tauri-plugin-LICENSE_MIT.txt",
+      "crates": [
+        [
+          "tauri-plugin",
+          "2.6.1"
+        ]
+      ]
+    },
+    {
+      "group": "tauri-plugin",
+      "repo": "tauri-apps/tauri",
+      "ref": "e5ae5b93cdd310045191cc0526f253140ad64b87",
+      "source_url": "https://raw.githubusercontent.com/tauri-apps/tauri/e5ae5b93cdd310045191cc0526f253140ad64b87/LICENSE_APACHE-2.0",
+      "source_blob_sha": "f433b1a53f5b830a205fd2df78e2b34974656c7b",
+      "source_path": "LICENSE_APACHE-2.0",
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "file": "tauri-plugin-LICENSE_APACHE-2.0.txt",
+      "crates": [
+        [
+          "tauri-plugin",
+          "2.6.1"
+        ]
+      ]
+    },
+    {
+      "group": "unic-main",
+      "repo": "open-i18n/rust-unic",
+      "ref": "5878605364af97a3358368a6eaef02104af2e016",
+      "source_url": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+      "source_blob_sha": "31aa79387f27e730e33d871925e152e35e428031",
+      "source_path": "LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "file": "unic-main-LICENSE-MIT.txt",
+      "crates": [
+        [
+          "unic-char-property",
+          "0.9.0"
+        ],
+        [
+          "unic-char-range",
+          "0.9.0"
+        ],
+        [
+          "unic-common",
+          "0.9.0"
+        ],
+        [
+          "unic-ucd-version",
+          "0.9.0"
+        ]
+      ]
+    },
+    {
+      "group": "unic-main",
+      "repo": "open-i18n/rust-unic",
+      "ref": "5878605364af97a3358368a6eaef02104af2e016",
+      "source_url": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+      "source_blob_sha": "16fe87b06e802f094b3fbb0894b137bca2b16ef1",
+      "source_path": "LICENSE-APACHE",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "file": "unic-main-LICENSE-APACHE.txt",
+      "crates": [
+        [
+          "unic-char-property",
+          "0.9.0"
+        ],
+        [
+          "unic-char-range",
+          "0.9.0"
+        ],
+        [
+          "unic-common",
+          "0.9.0"
+        ],
+        [
+          "unic-ucd-version",
+          "0.9.0"
+        ]
+      ]
+    },
+    {
+      "group": "unic-ident",
+      "repo": "open-i18n/rust-unic",
+      "ref": "8a6ce83063d90b91ae2ce59eddb803edd393fca9",
+      "source_url": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/LICENSE-MIT",
+      "source_blob_sha": "31aa79387f27e730e33d871925e152e35e428031",
+      "source_path": "LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "file": "unic-main-LICENSE-MIT.txt",
+      "crates": [
+        [
+          "unic-ucd-ident",
+          "0.9.0"
+        ]
+      ]
+    },
+    {
+      "group": "unic-ident",
+      "repo": "open-i18n/rust-unic",
+      "ref": "8a6ce83063d90b91ae2ce59eddb803edd393fca9",
+      "source_url": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/LICENSE-APACHE",
+      "source_blob_sha": "16fe87b06e802f094b3fbb0894b137bca2b16ef1",
+      "source_path": "LICENSE-APACHE",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "file": "unic-main-LICENSE-APACHE.txt",
+      "crates": [
+        [
+          "unic-ucd-ident",
+          "0.9.0"
+        ]
+      ]
+    },
+    {
+      "group": "webview2-main",
+      "repo": "wravery/webview2-rs",
+      "ref": "b74dc5e2b394044bea5191052868ce7a106c202c",
+      "source_url": "https://raw.githubusercontent.com/wravery/webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+      "source_blob_sha": "de9a7e660e173136b351982a34f715af424ff812",
+      "source_path": "LICENSE",
+      "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73",
+      "file": "webview2-main-LICENSE.txt",
+      "crates": [
+        [
+          "webview2-com",
+          "0.38.2"
+        ],
+        [
+          "webview2-com-sys",
+          "0.38.2"
+        ]
+      ]
+    },
+    {
+      "group": "webview2-macros",
+      "repo": "wravery/webview2-rs",
+      "ref": "dffa41a8a46d3f5565eefbff2de57d38d399f158",
+      "source_url": "https://raw.githubusercontent.com/wravery/webview2-rs/dffa41a8a46d3f5565eefbff2de57d38d399f158/LICENSE",
+      "source_blob_sha": "de9a7e660e173136b351982a34f715af424ff812",
+      "source_path": "LICENSE",
+      "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73",
+      "file": "webview2-main-LICENSE.txt",
+      "crates": [
+        [
+          "webview2-com-macros",
+          "0.8.1"
+        ]
+      ]
+    },
+    {
+      "group": "alloc-stdlib",
+      "source_url": "https://raw.githubusercontent.com/dropbox/rust-alloc-no-stdlib/6032b6a9b20e03737135c55a0270ccffcc1438ef/LICENSE",
+      "file": "alloc-stdlib-LICENSE.txt",
+      "sha256": "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae",
+      "crates": [
+        [
+          "alloc-stdlib",
+          "0.2.2"
+        ]
+      ]
+    },
+    {
+      "group": "selectors",
+      "source_url": "https://www.mozilla.org/media/MPL/2.0/index.txt",
+      "file": "selectors-MPL-2.0.txt",
+      "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+      "crates": [
+        [
+          "selectors",
+          "0.36.1"
+        ]
+      ]
+    },
+    {
+      "file": "selectors-0.36.1-SOURCE-HEADER.txt",
+      "source": "E:/AI-Tools/BiliNote-build/toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.36.1/lib.rs",
+      "group": "selectors",
+      "sha256": "766674381e88a468d55e07de3596987391cf0e8beebe51baf4fddf11078785b3",
+      "crates": [
+        [
+          "selectors",
+          "0.36.1"
+        ]
+      ]
+    },
+    {
+      "file": "seahash-4.1.0-Cargo.toml.orig.txt",
+      "source": "E:/AI-Tools/BiliNote-build/toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/seahash-4.1.0/Cargo.toml.orig",
+      "group": "seahash",
+      "sha256": "dd213de338ca98b7ef7a2562bcf4e4214d215d1a8277750a6a72b4e809c8d0dd",
+      "crates": [
+        [
+          "seahash",
+          "4.1.0"
+        ]
+      ]
+    },
+    {
+      "group": "seahash",
+      "source_url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT.txt",
+      "file": "seahash-MIT-STANDARD-TERMS.txt",
+      "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+      "note": "Standard MIT text from SPDX supplied based on exact-version Cargo manifest; not a recovered upstream copyright notice. Placeholder copyright is retained verbatim and not claimed to describe SeaHash.",
+      "crates": [
+        [
+          "seahash",
+          "4.1.0"
+        ]
+      ]
+    }
+  ],
+  "notes": [
+    "unic-ident and unic-main licenses have identical source blob hashes, as do webview2-main and webview2-macros; files deduplicated while both commit sources retained.",
+    "borsh-derive is Apache-2.0 only according to its manifest; the shared repository MIT text is not an assertion that borsh-derive is dual licensed.",
+    "selectors carries the original MPL-2.0 source header; full terms retrieved from Mozilla, not guessed from a generic license name. Source available at https://static.crates.io/crates/selectors/selectors-0.36.1.crate . Binary redistribution requires source availability notice under MPL-2.0.",
+    "seahash original upstream license file could not be retrieved (GitLab raw/API returned HTTP 403). Exact 4.1.0 manifest explicitly declares MIT, and authors ticki <ticki@users.noreply.github.com>, Tom Almeida <tom@tommoa.me>. SPDX standard MIT terms supplied as an explicitly labeled standard-text fallback, not represented as original upstream text. Copyright year not invented; SPDX placeholder retained verbatim.",
+    "No explicit prohibition on redistribution found. Notices alone do not prove full distribution compliance."
+  ],
+  "unrecovered_original_license_files": [
+    "seahash==4.1.0"
+  ],
+  "manifest_and_standard_fallback": [
+    "seahash==4.1.0"
+  ],
+  "crate_count": 14
+}

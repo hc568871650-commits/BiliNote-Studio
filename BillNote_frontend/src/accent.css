@@ -1,0 +1,118 @@
+/* Shared by the workspace and portal dialogs; keep neutral surfaces neutral. */
+:root[data-accent="blue"] { --accent-light-value: #45679e; --accent-dark-value: #9ab6e4; }
+:root[data-accent="slate"] { --accent-light-value: #333333; --accent-dark-value: #ffffff; }
+:root[data-accent="indigo"] { --accent-light-value: #5058b8; --accent-dark-value: #acb2ff; }
+:root[data-accent="violet"] { --accent-light-value: #7950b0; --accent-dark-value: #c6a5ed; }
+:root[data-accent="green"] { --accent-light-value: #34734a; --accent-dark-value: #99cca7; }
+:root[data-accent="teal"] { --accent-light-value: #247477; --accent-dark-value: #8fced0; }
+:root[data-accent="orange"] { --accent-light-value: #9a5b1b; --accent-dark-value: #e9bd82; }
+:root[data-accent="rose"] { --accent-light-value: #a34467; --accent-dark-value: #e6a1ba; }
+html[data-accent] {
+  --primary: var(--accent-light-value);
+  --primary-light: color-mix(in srgb, var(--primary) 12%, white);
+  --primary-foreground: #ffffff;
+  --ring: var(--primary);
+}
+html.dark[data-accent] {
+  --primary: var(--accent-dark-value);
+  --primary-light: color-mix(in srgb, var(--primary) 15%, #181818);
+  --primary-foreground: #181818;
+}
+/* A single surface palette keeps workspace, settings and portal dialogs aligned. */
+html[data-accent] {
+  --surface-page:#fafafa; --surface-card:#f2f2f2; --surface-muted:#e9e9e9;
+  --surface-border:#dfdfdf; --surface-text:#252525; --surface-description:#666666;
+  --background:var(--surface-page); --card:var(--surface-card); --card-foreground:var(--surface-text);
+  --popover:var(--surface-card); --popover-foreground:var(--surface-text);
+  --foreground:var(--surface-text); --muted:var(--surface-muted); --muted-foreground:var(--surface-description);
+  --border:var(--surface-border); --input:var(--surface-border); --accent:var(--surface-muted); --accent-foreground:var(--surface-text);
+  --secondary:var(--surface-muted); --secondary-foreground:var(--surface-text);
+  --sidebar-foreground:var(--surface-text); --sidebar-ring:var(--primary);
+  --sidebar:var(--surface-card); --sidebar-primary:var(--primary); --sidebar-primary-foreground:var(--primary-foreground);
+  --sidebar-accent:var(--primary-light); --sidebar-accent-foreground:var(--primary); --sidebar-border:var(--surface-border);
+}
+html.dark[data-accent] {
+  --surface-page:#181818; --surface-card:#222222; --surface-muted:#2c2e2f;
+  --surface-border:#2b2b2b; --surface-text:#cbcbcb; --surface-description:#cbcbcb;
+  --text-emphasis:#ffffff;
+}
+html[data-accent] :is(.workspace,.settings-shell) {
+  --background:var(--surface-page); --card:var(--surface-card); --foreground:var(--surface-text);
+  --border:var(--surface-border); --muted:var(--surface-muted); --muted-foreground:var(--surface-description); --accent:var(--surface-muted);
+}
+html[data-accent] .settings-button.is-primary { background:var(--primary); border-color:var(--primary); color:var(--primary-foreground); }
+html[data-accent] :is(.workspace-icon--active,.settings-menu-item.is-active,.settings-provider-item.is-active) { background:var(--primary-light); color:var(--primary); }
+html[data-accent] .markdown-body a:not(.origin-link a) { color: var(--primary); }
+html[data-accent] .markdown-body .origin-link a { background: var(--primary-light); color: var(--primary); }
+
+/* Semantic emphasis follows the same palette in notes and their mindmap. */
+html[data-accent] :is(.reader-body .markdown-body, .mindmap-reader .markmap-foreign) :is(strong, b) {
+  color: var(--primary);
+}
+html[data-accent] :is(.reader-body .markdown-body, .mindmap-reader .markmap-foreign) :is(strong, b) code {
+  color: inherit;
+}
+html[data-accent] :is(.reader-body .markdown-body, .mindmap-reader .markmap-foreign) mark {
+  color: var(--primary);
+  background: var(--primary-light);
+  border-radius: 3px;
+  padding-inline: .15em;
+}
+
+/* Backtick labels (shortcuts, commands and parameter values), not code fences. */
+html[data-accent] :is(.reader-body .markdown-body, .mindmap-reader .markmap-foreign) code:not(pre code) {
+  color: var(--foreground);
+  background-color: color-mix(in srgb, var(--primary) 20%, var(--background));
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 24%, transparent);
+}
+
+/* Dark palette sampled directly from the user's Codex screenshot (2026-10-08).
+   Sidebar is translucent in the reference; use its most frequent visible RGB. */
+html.dark[data-accent="slate"] { --primary-light: #2c2e2f; }
+html.dark[data-accent] { --sidebar: #1a1c1d; }
+html.dark[data-accent] :is(.workspace,.workspace-rail,.workspace-sidebar,.settings-shell) { background-color: #1a1c1d; }
+html.dark[data-accent] :is(.workspace-composer,.reading-chat-composer,.organizer-composer) { background-color: #363636; }
+
+/* Two neutral text tiers in dark mode. Accent/status colors and inverse text
+   on filled buttons keep their own semantic contrast. */
+html.dark[data-accent] :is(
+  .startup-title, .workspace-tab, .workspace-compose-heading h1, .workspace-empty h1,
+  .settings-page h1, .settings-page-header h1, .settings-categories h1, .onboarding-card h1,
+  .organizer-title, .organizer-welcome h1, .reading-chat-header strong,
+  [data-slot="dialog-title"], [data-slot="alert-dialog-title"]
+) { color: var(--text-emphasis); }
+html.dark[data-accent] :is(input:not([type=checkbox]):not([type=radio]),textarea,[contenteditable=true]):focus {
+  color: var(--text-emphasis);
+}
+html.dark[data-accent] :is(input,textarea)::placeholder {
+  color: var(--surface-text); opacity: 1;
+}
+html.dark[data-accent] :is(
+  .workspace-icon, .workspace-toolbar-button, .settings-rail-icon,
+  .settings-menu-item, .settings-back-arrow, .settings-advanced-heading button,
+  .reading-chat-header button, .reading-chat-prompts button,
+  .organizer-text-button, .reader-collapse-toggle
+):not(:disabled):hover { color: var(--text-emphasis); }
+html.dark[data-accent] :is(
+  .workspace-icon--active, .settings-rail-icon.is-active, .settings-menu-item.is-active,
+  .settings-provider-item.is-active, [data-note-select][aria-current=true],
+  [role=tab][data-state=active]
+) { color: var(--text-emphasis); }
+html.dark[data-accent] .settings-menu-item.is-active svg { color: inherit; }
+html.dark[data-accent] :is(.settings-menu-item,.settings-rail-icon):hover svg { color: inherit; }
+
+html.dark[data-accent] [data-slot=button]:not(.bg-primary):not(.bg-destructive):not(.text-destructive):not(:disabled):hover {
+  color: var(--text-emphasis);
+}
+html.dark[data-accent] [data-slot=select-trigger]:not(:disabled) > svg { opacity: 1; }
+html.dark[data-accent] [data-slot=select-item]:is([data-highlighted],[data-state=checked]) svg { color: inherit; }
+
+/* Reading toolbar toggles share one selected treatment, including compact mode. */
+html[data-accent] :is(.workspace-note-header,.reader-tools) button[aria-pressed=true] {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+html.dark[data-accent] :is(.workspace-note-header,.reader-tools) button[aria-pressed=true] {
+  color: var(--text-emphasis);
+}

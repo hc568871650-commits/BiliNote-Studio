@@ -1,0 +1,57 @@
+.reader-body .markdown-body { font-size: inherit; line-height: 1.85; }
+.reader-body .markdown-body p { line-height: inherit; }
+.reader-body .markdown-body h1 { font-size: 2em; }
+.reader-body .markdown-body h2 { font-size: 1.5em; }
+.reader-body .markdown-body h3 { font-size: 1.25em; }
+.reader-body .markdown-body h4 { font-size: 1.1em; }
+.reader-body .markdown-body :is(h1,h2,h3,h4,h5,h6) { scroll-margin-top: 16px; }
+.reader-body .markdown-body img { max-width: 100%; }
+.reader-body .markdown-body .note-outline { margin: 12px 0 24px; padding: 16px 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--muted); font-size: .9em; }
+.reader-body .markdown-body .note-outline-title { margin: 0 0 8px; font-size: 1em; font-weight: 600; }
+.reader-body .markdown-body .note-outline ul { list-style: none; margin: 0; padding: 0; }
+.reader-body .markdown-body .note-outline li { margin: 3px 0; padding-left: calc(var(--outline-depth, 0) * 16px); }
+.reader-body .markdown-body .note-outline li[data-outline-depth="1"] { --outline-depth: 1; }
+.reader-body .markdown-body .note-outline li[data-outline-depth="2"] { --outline-depth: 2; }
+.reader-body .markdown-body .note-outline li[data-outline-depth="3"] { --outline-depth: 3; }
+.reader-body .markdown-body .note-outline a { display: block; padding: 3px 4px; font-weight: 400; text-decoration: none; line-height: 1.6; }
+.reader-body .markdown-body .note-outline a:hover { text-decoration: underline; }
+.reader-body .markdown-body .note-outline a:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 3px; }
+.workspace-note-header[hidden] { display: none; }
+.reader-tools { position: relative; display: flex; flex-shrink: 0; align-items: center; gap: 6px; height: 39px; padding: 4px 48px 4px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.reader-tools-content { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.reader-tools-content > * { flex-shrink: 0; }
+.reader-tools-content::-webkit-scrollbar { display: none; }
+.reader-progress { white-space: nowrap; }
+.reader-tools button { height: 30px; font-size: 12px; }
+.reader-tools .reader-collapse-toggle { position: absolute; top: 4px; right: 8px; width: 30px; padding: 0; }
+.reader-tools [data-slot=select-trigger].choice-trigger { min-height:30px;height:30px;font-size:12px;padding:3px 8px;line-height:1.4;gap:6px; }
+.reader-tools [data-slot=select-value] { min-width:0;line-height:18px; }
+.reader-tools .reader-chapter-choice { min-width: 90px; width: auto; max-width: 200px; flex: 1; }
+.reader-tools .reader-size-choice { width:84px;min-width:84px;flex:0 0 84px; }
+.reader-tools .reader-status-choice { width: 104px; }
+.reader-tools-compact { flex-wrap: nowrap; height: 39px; gap: 4px; }
+.reader-tools-compact .reader-chapter-choice { max-width: 220px; min-width: 65px; }
+.reader-tools-compact .reader-progress { margin-left: auto; white-space: nowrap; }
+.reader-tools-compact button { flex-shrink: 0; padding-left: 8px; padding-right: 8px; }
+@media (max-width: 640px) { .reader-tools-compact .reader-compact-label { display: none; } }
+.mindmap-reader .markmap {
+  --markmap-text-color: var(--foreground);
+  --markmap-a-color: var(--primary);
+  --markmap-a-hover-color: var(--primary);
+  --markmap-code-bg: var(--muted);
+  --markmap-code-color: var(--foreground);
+  --markmap-circle-open-bg: var(--background);
+  --markmap-highlight-bg: var(--primary-light);
+  --markmap-highlight-node-bg: color-mix(in srgb, var(--primary) 16%, transparent);
+  cursor: grab;
+  user-select: none;
+}
+.mindmap-reader .markmap:active { cursor: grabbing; }
+.mindmap-reader .markmap-foreign { user-select: none; }
+.mindmap-reader.mindmap-selectable .markmap-foreign { user-select: text; cursor: text; }
+.mindmap-chapter-bar { padding-right:12px; }
+.mindmap-chapter-bar .mindmap-hint { flex:1;min-width:0;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.mindmap-context-menu { position: absolute; z-index: 30; width: 166px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--popover); color: var(--popover-foreground); box-shadow: 0 6px 24px #0003; font-size: 12px; }
+.mindmap-context-menu button { display: block; width: 100%; padding: 8px; text-align: left; border-radius: 4px; }
+.mindmap-context-menu button:hover { background: var(--accent); }
+.mindmap-context-menu button:disabled { opacity: .4; }

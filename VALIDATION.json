@@ -1,0 +1,31 @@
+{
+  "version": "0.1.0-preview.1",
+  "platform": "Windows x64",
+  "installer": "BiliNote-Studio-0.1.0-preview.1-windows-x64-setup.exe",
+  "bytes": 76172745,
+  "sha256": "e4f4017b82d500616bc00bc46943d92a3c8b32ea7e5975eb9d9106e2aa73642f",
+  "signed": false,
+  "acceptance_checks": [
+    "fresh NSIS installation exit 0",
+    "installed Studio business health code 0",
+    "backend remains healthy without external FFmpeg",
+    "library and organizer metadata endpoints returned business code 0",
+    "online transcribers advertised and local configuration rejected",
+    "database, browser profile, config and logs isolated from program files",
+    "graceful desktop quit also stopped backend",
+    "upgrade from simulated lower-version installer metadata completed exit 0",
+    "reinstall and relaunch preserved user config and database before launch",
+    "uninstall completed and retained user data",
+    "production process identity unchanged"
+  ],
+  "synthetic_backend_tests": 52,
+  "runtime_isolation_tests": 10,
+  "source_files_matched_to_build": 323,
+  "secret_scan": "Gitleaks 8.30.1: no findings",
+  "limits": [
+    "No clean Windows VM acceptance",
+    "No real paid model request or new end-to-end video task in this release run",
+    "Upgrade branch tested using lower-version registry metadata, not a prior public Studio binary",
+    "No complete TypeScript or lint pass claimed"
+  ]
+}

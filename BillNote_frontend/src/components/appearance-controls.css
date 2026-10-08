@@ -1,0 +1,17 @@
+.appearance-modes { display:flex; gap:12px; flex-wrap:wrap; }
+.appearance-modes button { display:flex; flex-direction:column; align-items:center; gap:9px; color:var(--muted-foreground); font-size:12px; cursor:pointer; }
+.appearance-mini { display:flex; width:76px; height:56px; border:2px solid #8a8a8a; border-radius:10px; padding:5px; background:#181818; }
+.appearance-mini > i { width:16px; background:#1a1c1d; border-right:1px solid #2b2b2b; }
+.appearance-mini > span { display:flex; flex:1; flex-direction:column; align-items:flex-end; gap:4px; padding:5px; }
+.appearance-mini b { width:24px; height:3px; background:#8a8a8a; border-radius:2px; }.appearance-mini b:first-child { background:var(--primary); width:19px; }
+.appearance-mini em { width:30px; height:9px; border:1px solid #363636; border-radius:4px; }
+.appearance-mini--light { background:#fafafa; border-color:#cccccc; }.appearance-mini--light > i { background:#f2f2f2; border-color:#dedede; }.appearance-mini--light b { background:#bbbbbb; }
+.appearance-mini--system { background:linear-gradient(90deg,#fafafa 50%,#181818 50%); }
+.appearance-modes button[aria-pressed=true] { color:var(--primary); }.appearance-modes button[aria-pressed=true] .appearance-mini { outline:2px solid var(--primary); outline-offset:3px; }
+.appearance-colors { display:grid; grid-template-columns:repeat(4,minmax(52px,1fr)); gap:8px; max-width:320px; }
+.appearance-colors button { display:flex; flex-direction:column; align-items:center; gap:6px; border:1px solid transparent; padding:8px 4px; border-radius:9px; color:var(--muted-foreground); font-size:11px; cursor:pointer; }
+.appearance-colors i { display:flex; align-items:center; justify-content:center; width:25px; height:25px; border-radius:50%; color:var(--primary-foreground); }
+.appearance-colors button[aria-pressed=true] { background:var(--primary-light); border-color:color-mix(in srgb,var(--primary) 35%,transparent); color:var(--primary); }
+.appearance-colors button:hover { background:var(--accent); }.appearance-modes button:focus-visible,.appearance-colors button:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+.appearance-dialog { font-family:var(--ui-font); font-size:var(--ui-font-size); }.appearance-dialog fieldset { padding:16px 0; }.appearance-dialog legend { font-weight:500; margin-bottom:12px; }
+.appearance-dialog-footer { display:flex; justify-content:space-between; gap:12px; border-top:1px solid var(--border); padding-top:16px; color:var(--muted-foreground); font-size:12px; }.appearance-dialog-footer a,.appearance-dialog-footer button { color:var(--primary); }

@@ -1,0 +1,106 @@
+{
+  "checked_at": "2026-10-08",
+  "scope": "Only requested top-level package license texts. Does not constitute a complete Rust/native transitive-dependency license audit.",
+  "hash_algorithm": "SHA-256",
+  "text_storage": "Original UTF-8 text, LF line endings; hashes apply to the saved license file bytes.",
+  "entries": [
+    {
+      "name": "langsmith",
+      "version": "0.3.45",
+      "license": "MIT",
+      "source_url": "https://raw.githubusercontent.com/langchain-ai/langsmith-sdk/e6cce7d147d2959eb3bf4a66055b577d06ad497a/LICENSE",
+      "retrieval_url": "https://api.github.com/repos/langchain-ai/langsmith-sdk/contents/LICENSE?ref=e6cce7d147d2959eb3bf4a66055b577d06ad497a",
+      "source_ref": "e6cce7d147d2959eb3bf4a66055b577d06ad497a",
+      "source_blob_sha": "136a251bf3a98cd47ba4c4cf5d2517d37236eaa1",
+      "file": "langsmith-0.3.45-LICENSE.txt",
+      "sha256": "34e0b9842c7a31d34e53bc7eb224e81e07a34996106e029bbc72dea2d449f496",
+      "version_verified": true,
+      "status": "retrieved_version_corresponding_license"
+    },
+    {
+      "name": "sqlite-vec",
+      "version": "0.1.9",
+      "license": "MIT",
+      "source_url": "https://raw.githubusercontent.com/asg017/sqlite-vec/e9f598abfa0c06b328d8fe5da9c3760cce74be10/LICENSE-MIT",
+      "retrieval_url": "https://api.github.com/repos/asg017/sqlite-vec/contents/LICENSE-MIT?ref=e9f598abfa0c06b328d8fe5da9c3760cce74be10",
+      "source_ref": "e9f598abfa0c06b328d8fe5da9c3760cce74be10",
+      "source_blob_sha": "9c106bc48c760f7ed9f5b8255dea7adeef029cbe",
+      "file": "sqlite-vec-0.1.9-LICENSE-MIT.txt",
+      "sha256": "6ce72bbe12d975bd5286e5ab0a064c069693300c47bccbc57bec18485f1621ea",
+      "version_verified": true,
+      "status": "retrieved_version_corresponding_license"
+    },
+    {
+      "name": "sqlite-vec",
+      "version": "0.1.9",
+      "license": "Apache-2.0",
+      "source_url": "https://raw.githubusercontent.com/asg017/sqlite-vec/e9f598abfa0c06b328d8fe5da9c3760cce74be10/LICENSE-APACHE",
+      "retrieval_url": "https://api.github.com/repos/asg017/sqlite-vec/contents/LICENSE-APACHE?ref=e9f598abfa0c06b328d8fe5da9c3760cce74be10",
+      "source_ref": "e9f598abfa0c06b328d8fe5da9c3760cce74be10",
+      "source_blob_sha": "abbef71fa08fc8040d469ea4e6e99f0ff8edd6cb",
+      "file": "sqlite-vec-0.1.9-LICENSE-APACHE.txt",
+      "sha256": "a38070a94d4afd9cd710e3ce67bd1de78097cfe1784c1f0109ac95d3c196bfdc",
+      "version_verified": true,
+      "status": "retrieved_version_corresponding_license"
+    },
+    {
+      "name": "hf-xet",
+      "version": "1.0.0",
+      "license": "Apache-2.0",
+      "source_url": "https://raw.githubusercontent.com/huggingface/xet-core/d50c42d5406f698b57dbf79ea5b053d8df1ab2f9/LICENSE",
+      "retrieval_url": "https://api.github.com/repos/huggingface/xet-core/contents/LICENSE?ref=d50c42d5406f698b57dbf79ea5b053d8df1ab2f9",
+      "source_ref": "d50c42d5406f698b57dbf79ea5b053d8df1ab2f9",
+      "source_blob_sha": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64",
+      "file": "hf-xet-1.0.0-LICENSE.txt",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "version_verified": true,
+      "status": "retrieved_version_corresponding_license"
+    },
+    {
+      "name": "gmssl",
+      "version": "3.2.2",
+      "license": "MIT-current-source-only",
+      "source_url": "https://raw.githubusercontent.com/py-gmssl/py-gmssl/master/License",
+      "retrieval_url": "https://api.github.com/repos/py-gmssl/py-gmssl/contents/License?ref=master",
+      "source_ref": "master",
+      "source_blob_sha": "0ebc698994fc7cc6fa7132d4bb545f5c1eb55912",
+      "sha256": "09cccf2e999537be2e9d65307220280182ef3915bdb94b109f32af1b8391d329",
+      "version_verified": false,
+      "status": "excluded_not_bundled",
+      "notes": "PyPI 3.2.2 archive has no license file. Official v3.2.2 tag 4072cbb917d6b36a06f1216d6f403f45d791edf8 has no license file; setup.py says BSD without variant or terms. Current master has MIT text copyright 2022 Nemo. This text is reference only; it does not establish the license of gmssl 3.2.2. Resolve with upstream or omit this package from distribution.",
+      "version_evidence_url": "https://raw.githubusercontent.com/py-gmssl/py-gmssl/4072cbb917d6b36a06f1216d6f403f45d791edf8/setup.py",
+      "bundled": false
+    },
+    {
+      "name": "jiter",
+      "version": "0.9.0",
+      "license": "MIT",
+      "source_url": "https://files.pythonhosted.org/packages/1e/c2/e4562507f52f0af7036da125bb699602ead37a2332af0788f8e0a3417f36/jiter-0.9.0.tar.gz",
+      "archive_sha256": "aadba0964deb424daa24492abc3d229c60c4a31bfee205aedbf1acc7639d7893",
+      "source_member": "jiter-0.9.0/crates/jiter/LICENSE",
+      "file": "jiter-0.9.0-LICENSE.txt",
+      "sha256": "7c7134b9f7b978c03fca875517cf398db91f19bbb8109b6685e742aa3f57468e",
+      "version_verified": true,
+      "status": "retrieved_version_corresponding_license"
+    },
+    {
+      "name": "tokenizers",
+      "version": "0.21.1",
+      "license": "Apache-2.0",
+      "source_url": "https://files.pythonhosted.org/packages/92/76/5ac0c97f1117b91b7eb7323dcd61af80d72f790b4df71249a7850c195f30/tokenizers-0.21.1.tar.gz",
+      "archive_sha256": "a1bb04dc5b448985f86ecd4b05407f5a8d97cb2c0532199b2a302a604a0165ab",
+      "source_member": "tokenizers-0.21.1/tokenizers/LICENSE",
+      "file": "tokenizers-0.21.1-LICENSE.txt",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "version_verified": true,
+      "status": "retrieved_version_corresponding_license"
+    }
+  ],
+  "unresolved_packages": [],
+  "forbidden_distribution_found": [],
+  "notes": [
+    "No explicit prohibition on redistribution found in retrieved permissive license texts.",
+    "gmssl 3.2.2 permission terms remain unresolved, not proven forbidden.",
+    "ctranslate2 intentionally not processed."
+  ]
+}

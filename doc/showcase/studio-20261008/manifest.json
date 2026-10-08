@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-08",
+  "source": "Mixed: maintainer-provided screenshots and isolated synthetic UI preview",
+  "format": "PNG and JPEG",
+  "images": [
+    {
+      "file": "01-workspace.png",
+      "bytes": 425031,
+      "sha256": "4177e9a4d9f490f5e3fd1504fe9b9a144018d44958226d5c1c89eeec1e4d75ba",
+      "source": "Maintainer-provided screenshot; copied unchanged",
+      "format": "PNG"
+    },
+    {
+      "file": "02-create.jpg",
+      "bytes": 44208,
+      "sha256": "91984d175562f5dc29efae87271ced3d181a3b9888eab8aae9282386d80aa1ab",
+      "source": "Isolated UI preview; synthetic data",
+      "format": "JPEG"
+    },
+    {
+      "file": "03-reading-assistant.png",
+      "bytes": 500232,
+      "sha256": "06687033a5d82f07fb1263f573d97bdfe46e598b96740e07beb2dccd338fca84",
+      "source": "Maintainer-provided screenshot; copied unchanged",
+      "format": "PNG"
+    },
+    {
+      "file": "04-organizer.jpg",
+      "bytes": 50555,
+      "sha256": "c716f37e50feff42e1a791c741aa9277f5fe19d5c6d01d413e6933f1e2122b5b",
+      "source": "Isolated UI preview; synthetic data",
+      "format": "JPEG"
+    },
+    {
+      "file": "05-models.jpg",
+      "bytes": 65182,
+      "sha256": "9b64582a57ee88d2ab6a7165ecde87fc3d867d2927afa377ac9bc6b48626e407",
+      "source": "Isolated UI preview; synthetic data",
+      "format": "JPEG"
+    },
+    {
+      "file": "06-appearance.jpg",
+      "bytes": 56367,
+      "sha256": "9d2ba9bb7bd311d9f40f2f7514ad3510fe322385497f01fd3ef421e87176e3f1",
+      "source": "Isolated UI preview; synthetic data",
+      "format": "JPEG"
+    }
+  ]
+}
