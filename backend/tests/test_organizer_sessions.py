@@ -38,6 +38,8 @@ class OrganizerSessionsTest(unittest.TestCase):
         library.update_entries(['b'], {'favorite': True, 'remark': 'SECRET_REMARK'})
         self.calls = []
         self.answer_calls = []
+        self.clients = []
+        self.closed_clients = []
         self.delay_start = threading.Event()
         self.delay_end = threading.Event()
         self.delay = False
@@ -50,7 +52,8 @@ class OrganizerSessionsTest(unittest.TestCase):
         app.include_router(routes.router, prefix='/api')
         self.http = TestClient(app)
 
-    def client(self, provider, model):
+    def client(self, provider, model, protocol='openai-chat'):
+        self.clients.append(protocol)
         def create(**kwargs):
             payload = json.loads(kwargs['messages'][-1]['content'])
             if payload.get('reply_only'):
@@ -75,7 +78,8 @@ class OrganizerSessionsTest(unittest.TestCase):
                 operations = [{'type': 'move_notes', 'task_ids': ids, 'folder_id': destination['folder_id']}]
             return types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(content=json.dumps(
                 {'explanation': '安全范围计划', 'operations': operations, 'query_note_ids': []})))])
-        return types.SimpleNamespace(client=types.SimpleNamespace(chat=types.SimpleNamespace(
+        return types.SimpleNamespace(client=types.SimpleNamespace(protocol=protocol,
+            close=lambda: self.closed_clients.append(protocol), chat=types.SimpleNamespace(
             completions=types.SimpleNamespace(create=create))))
 
     def message(self, text, **extra):
@@ -261,13 +265,14 @@ class OrganizerSessionsTest(unittest.TestCase):
         self.assertNotEqual(before['runtime_id'], after['runtime_id'])
         self.assertEqual(before['sessions'], after['sessions'])
 
-    def test_query_never_inherits_archive_and_reads_only_query_scope(self):
+    def test_query_never_inherits_archive_or_old_query_scope(self):
         self.message('归档办公效率')
         result = self.message('找出尚未归档的笔记', scope={'kind': 'selected', 'task_ids': ['c']})
         self.assertEqual(result['status'], 'completed')
         self.assertIsNone(result['plan'])
         payload = json.loads(self.answer_calls[-1]['messages'][-1]['content'])
-        self.assertEqual([n['id'] for n in payload['notes']], ['c'])
+        self.assertEqual(payload['notes'], [])
+        self.assertNotIn('note_ids', payload['library_results'])
         for forbidden in ('SECRET_BODY', 'SECRET_TRANSCRIPT', 'SECRET_KEY', 'SECRET_PATH', 'SECRET_REMARK'):
             self.assertNotIn(forbidden, str(payload))
 
@@ -367,7 +372,7 @@ class OrganizerSessionsTest(unittest.TestCase):
         self.assertEqual(self.message('改整理学习资料，归档')['plan']['operations'][0]['task_ids'], ['c'])
 
     def test_new_empty_logical_folder_does_not_authorize_all_notes(self):
-        def folder_client(provider, model):
+        def folder_client(provider, model, protocol='openai-chat'):
             def create(**kwargs):
                 self.calls.append(kwargs)
                 payload = json.loads(kwargs['messages'][-1]['content'])
@@ -620,9 +625,9 @@ class OrganizerSessionsTest(unittest.TestCase):
         from langsmith.run_helpers import get_tracing_context
         seen = []
         original_client = self.client
-        def inspect_client(provider, model):
+        def inspect_client(provider, model, protocol='openai-chat'):
             seen.append(get_tracing_context()['enabled'])
-            return original_client(provider, model)
+            return original_client(provider, model, protocol=protocol)
         with patch.dict(os.environ, {'LANGSMITH_TRACING': 'true', 'LANGCHAIN_TRACING_V2': 'true'}), \
                 patch.object(organizer, 'get_client', side_effect=inspect_client):
             self.message('归档办公效率')
@@ -635,8 +640,8 @@ class OrganizerSessionsTest(unittest.TestCase):
         count_lock = threading.Lock()
         count = [0]
         original_client = self.client
-        def staggered_client(provider, model):
-            client = original_client(provider, model)
+        def staggered_client(provider, model, protocol='openai-chat'):
+            client = original_client(provider, model, protocol=protocol)
             original = client.client.chat.completions.create
             def create(**kwargs):
                 with count_lock:
@@ -668,6 +673,193 @@ class OrganizerSessionsTest(unittest.TestCase):
                 sessions.action(sid, 'recover', {'expected_revision': current['revision'], 'request_id': 'recover', 'plan_id': None})
             new_end.set()
             self.assertEqual(new.result(timeout=10)['status'], 'awaiting_approval')
+
+    def test_protocol_survives_answer_plan_checkpoint_and_compaction(self):
+        for protocol in ('openai-chat', 'openai-responses', 'anthropic'):
+            with self.subTest(protocol=protocol):
+                self.message('解释模型连接问题', protocol=protocol)
+                self.assertEqual(self.clients[-1], protocol)
+                self.assertEqual(self.closed_clients[-1], protocol)
+                self.assertEqual(self.session['protocol'], protocol)
+                self.message('归档办公效率', protocol=protocol)
+                before = self.session
+                with sessions._graph() as graph:
+                    checkpoint = graph.get_state({'configurable': {'thread_id': before['session_id'] + ':' + str(before['revision'])}})
+                self.assertEqual(checkpoint.values['protocol'], protocol)
+                self.seed_history(8)
+                with patch.object(sessions, 'compact_history', side_effect=self.fake_compaction):
+                    after = sessions.compact(before['session_id'], {**self.compact_data(), 'protocol': protocol})
+                self.assertEqual(self.clients[-1], protocol)
+                self.assertEqual(self.closed_clients[-1], protocol)
+                self.assertEqual(after['plan'], before['plan'])
+                self.assertEqual(after['revision'], before['revision'])
+                self.session = after
+                self.action('cancel')
+
+    def test_safe_errors_preserve_http_request_id_and_protocol_without_retry(self):
+        from app.utils.ai_errors import SafeAIError
+        for status in (400, 401, 429, 503):
+            details = {'kind': 'upstream_http', 'http_status': status, 'upstream_code': 'unavailable',
+                       'request_id': 'request-example', 'occurred_at': '2026-10-10T00:00:00+00:00',
+                       'protocol': 'openai-responses', 'detail': f'供应商拒绝请求（HTTP {status}）'}
+            with patch.object(organizer, 'complete', side_effect=SafeAIError(details)) as completion:
+                result = self.message('解释错误', protocol='openai-responses')
+            self.assertEqual(result['status'], 'failed')
+            self.assertEqual(result['error'], details['detail'])
+            self.assertEqual(result['error_details'], details)
+            self.assertEqual(sessions.get(result['session_id'])['error_details'], details)
+            self.assertEqual(completion.call_count, 1)
+            self.assertEqual(self.closed_clients[-1], 'openai-responses')
+
+    def test_read_query_finds_archived_outside_old_scope_without_authorizing_writes(self):
+        for note_id in ('a', 'c'):
+            notes.save_task({'id': note_id, 'status': 'SUCCESS', 'audioMeta': {'title': 'UV技术' + note_id},
+                             'markdown': '# UV烘焙\nUV接缝应避开显眼区域。'})
+        notes.set_archived('c', True)
+        self.session = sessions.create({'kind': 'selected', 'folder_id': None, 'task_ids': ['a']})
+        with patch.object(organizer, '_snapshot', side_effect=AssertionError('query must not migrate note metadata')):
+            result = self.message('查找全库UV接缝', scope={'kind': 'selected', 'task_ids': ['a']})
+        self.assertEqual(result['status'], 'completed')
+        self.assertFalse(result['scope']['authorized'])
+        self.assertIsNone(result['plan'])
+        sources = result['history'][-1]['sources']
+        self.assertTrue({'a', 'c'} <= {s['note_id'] for s in sources})
+        self.assertTrue(next(s for s in sources if s['note_id'] == 'c')['archived'])
+        payload = json.loads(self.answer_calls[-1]['messages'][-1]['content'])
+        self.assertNotIn('SECRET_KEY', json.dumps(payload))
+
+    def test_read_query_does_not_expand_existing_write_scope(self):
+        self.message('归档办公效率')
+        previous = self.session['scope']
+        result = self.message('查找整个资料库的内容')
+        self.assertEqual(result['scope'], previous)
+        self.assertIsNone(result['plan'])
+        self.assertEqual(self.message('那帮我归档')['plan']['operations'][0]['task_ids'], ['a', 'b'])
+
+    def test_tool_pagination_sources_are_server_records_and_tool_paths_are_rejected(self):
+        from app.services import library_search
+        actual = {'source_id': 'note:c:v:s1', 'note_id': 'c', 'version_id': 'v', 'section_id': 's1',
+                  'title': '真实检索', 'text': '有依据的内容', 'archived': False}
+        tool_response = types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(
+            content=None, tool_calls=[types.SimpleNamespace(id='call-1', function=types.SimpleNamespace(
+                name='search_library', arguments='{"query":"UV","offset":8,"limit":8}'))]))])
+        bad_tool_response = types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(
+            content=None, tool_calls=[types.SimpleNamespace(id='call-2', function=types.SimpleNamespace(
+                name='read_note_sections', arguments='{"note_id":"c","file_path":"C:/secret"}'))]))])
+        final_response = types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(
+            content='参考真实检索结果。模型声称来源 fabricated-source。'))])
+        sources = []
+        result = {'results': [actual], 'offset': 0, 'has_more': True, 'next_offset': 8}
+        with patch.object(library_search, 'search_library', return_value=result) as search, \
+                patch.object(library_search, 'read_note_sections', return_value={'results': []}), \
+                patch.object(organizer, 'complete', side_effect=[(tool_response, {}), (bad_tool_response, {}), (final_response, {})]) as completion:
+            organizer.answer('UV', 'fake', 'fake', [], '', {}, sources_sink=sources)
+        self.assertEqual(search.call_args_list[-1].kwargs['offset'], 8)
+        self.assertEqual(completion.call_count, 3)
+        self.assertEqual([s['source_id'] for s in sources], ['note:c:v:s1'])
+        tool_messages = completion.call_args.args[2]
+        self.assertIn('只允许资料库只读工具', tool_messages[-1]['content'])
+
+    def test_reading_tool_context_and_model_rounds_have_hard_budgets(self):
+        from app.services import library_search
+        oversized = {'results': [{'note_id': 'c', 'version_id': 'v', 'section_id': 's1',
+                                  'source_id': 'note:c:v:s1', 'text': 'U' * 100000}]}
+        sources, budget = [], [organizer.LIBRARY_TEXT_BUDGET]
+        with patch.object(library_search, 'search_library', return_value=oversized):
+            result = organizer._run_library_tool('search_library', {'query': 'UV'}, sources, budget)
+        self.assertEqual(sum(len(s['text']) for s in result['results']), organizer.LIBRARY_TEXT_BUDGET)
+        self.assertEqual(budget[0], 0)
+        self.assertTrue(result['budget_exhausted'])
+        repeating = types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(
+            content=None, tool_calls=[types.SimpleNamespace(id='call', function=types.SimpleNamespace(
+                name='search_library', arguments='{"query":"UV"}'))]))])
+        with patch.object(library_search, 'search_library', return_value={'results': []}), \
+                patch.object(organizer, 'complete', return_value=(repeating, {})) as completion:
+            with self.assertRaisesRegex(ValueError, '预算'):
+                organizer.answer('UV', 'fake', 'fake', [], '', {})
+        self.assertEqual(completion.call_count, organizer.LIBRARY_MODEL_ROUNDS + 1)
+        self.assertTrue(completion.call_args.kwargs['final'])
+
+    def test_old_protocol_defaults_and_request_max_reasoning_web_types(self):
+        from app.models.organizer_requests import PlanRequest, SessionCompactRequest
+        request = PlanRequest(instruction='查询', provider_id='fake', model_name='fake', reasoning_effort='max')
+        self.assertEqual(request.protocol, 'openai-chat')
+        self.assertFalse(request.web_search)
+        self.assertEqual(request.web_search_mode, 'native')
+        with sessions.LOCK, sessions._db() as db:
+            old = sessions._load(db, self.session['session_id'])
+            old.pop('protocol', None)
+            old.pop('error_details', None)
+            sessions._save(db, old)
+        self.assertEqual(sessions.get(old['session_id'])['protocol'], 'openai-chat')
+        self.assertEqual(SessionCompactRequest(**self.compact_data()).protocol, 'openai-chat')
+
+    def test_native_tool_history_keeps_protocol_blocks_and_web_sources(self):
+        from app.services.protocol_clients import Message
+        from app.services import library_search
+        call = types.SimpleNamespace(id='call-1', function=types.SimpleNamespace(
+            name='search_library', arguments='{"query":"UV"}'))
+        native = Message('', [call], native=[{'type': 'reasoning', 'encrypted_content': 'SYNTHETIC_REASONING'},
+                                            {'type': 'function_call', 'call_id': 'call-1', 'name': 'search_library', 'arguments': '{"query":"UV"}'}])
+        source = {'source_type': 'web', 'source_id': 'web-1', 'title': '真实工具网页', 'url': 'https://example.com/official'}
+        first = types.SimpleNamespace(choices=[types.SimpleNamespace(message=native)], web_sources=[source], web_search_used=True)
+        second = types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(content='基于来源回答。'))])
+        with patch.object(library_search, 'search_library', return_value={'results': []}), \
+                patch.object(organizer, 'complete', side_effect=[(first, {}), (second, {})]) as completion:
+            result = self.message('查询UV', protocol='openai-responses', web_search=True)
+        self.assertEqual(result['status'], 'completed')
+        self.assertIn(native, completion.call_args.args[2])
+        self.assertEqual(result['history'][-1]['sources'], [source])
+        self.assertTrue(result['context']['web_search_used'])
+        self.assertTrue(completion.call_args_list[0].kwargs['web_search'])
+        self.assertFalse(completion.call_args_list[1].kwargs['web_search'])
+        self.assertEqual(completion.call_args_list[0].kwargs['search_query'], '查询UV')
+
+    def test_failed_provider_keeps_retrieved_sources_without_plan(self):
+        from app.services import library_search
+        from app.utils.ai_errors import SafeAIError
+        actual = {'source_id': 'note:c:v:s1', 'note_id': 'c', 'version_id': 'v', 'section_id': 's1',
+                  'text': '参考内容', 'archived': False}
+        with patch.object(library_search, 'search_library', return_value={'results': [actual]}), \
+                patch.object(library_search, 'read_note_sections', return_value={'results': []}), \
+                patch.object(organizer, 'complete', side_effect=SafeAIError({'detail': '上游失败', 'http_status': 503})):
+            result = self.message('查找UV')
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['history'][-1]['sources'][0]['source_id'], actual['source_id'])
+        self.assertIsNone(result['plan'])
+
+    def test_readonly_summary_with_tag_word_never_proposes_writes(self):
+        result = self.message('总结全部笔记的标签和UV流程')
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual(self.calls, [])
+        self.assertFalse(result['scope']['authorized'])
+
+    def test_metadata_browse_and_natural_folder_query_are_bounded(self):
+        result = self.message('列出尚未归档的笔记')
+        self.assertEqual(result['status'], 'completed')
+        payload = json.loads(self.answer_calls[-1]['messages'][-1]['content'])
+        self.assertEqual(payload['library_results']['matching_note_count'], 3)
+        self.assertTrue(payload['library_results']['metadata_only'])
+        self.assertEqual(payload['section_reads'], [])
+        notes.save_task({'id': 'a', 'status': 'SUCCESS', 'audioMeta': {'title': 'UV技巧'},
+                         'markdown': '# UV接缝\n接缝避开显眼区域。'})
+        result = self.message('查找办公效率文件夹中的UV接缝')
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual({s['note_id'] for s in result['history'][-1]['sources']}, {'a'})
+
+    def test_real_unverified_tool_model_uses_presearch_without_function_parameters(self):
+        from app.services import model_capabilities
+        original = self.client
+        def real_identity(provider, model, protocol='openai-chat'):
+            client = original(provider, model, protocol)
+            client.client.bilinote_provider_id = provider
+            return client
+        for features in ({}, {'tools': {'status': 'unsupported'}}):
+            with patch.object(organizer, 'get_client', side_effect=real_identity), \
+                    patch.object(model_capabilities, 'get_capabilities', return_value={'features': features}):
+                result = self.message('查找UV')
+            self.assertEqual(result['status'], 'completed')
+            self.assertNotIn('tools', self.answer_calls[-1])
 
 
 if __name__ == '__main__':

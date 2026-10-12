@@ -226,7 +226,8 @@
     },
     {
       "file": "selectors-0.36.1-SOURCE-HEADER.txt",
-      "source": "E:/AI-Tools/BiliNote-build/toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.36.1/lib.rs",
+      "source": "https://crates.io/api/v1/crates/selectors/0.36.1/download",
+      "source_file": "selectors-0.36.1/lib.rs",
       "group": "selectors",
       "sha256": "766674381e88a468d55e07de3596987391cf0e8beebe51baf4fddf11078785b3",
       "crates": [
@@ -238,7 +239,8 @@
     },
     {
       "file": "seahash-4.1.0-Cargo.toml.orig.txt",
-      "source": "E:/AI-Tools/BiliNote-build/toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/seahash-4.1.0/Cargo.toml.orig",
+      "source": "https://crates.io/api/v1/crates/seahash/4.1.0/download",
+      "source_file": "seahash-4.1.0/Cargo.toml.orig",
       "group": "seahash",
       "sha256": "dd213de338ca98b7ef7a2562bcf4e4214d215d1a8277750a6a72b4e809c8d0dd",
       "crates": [

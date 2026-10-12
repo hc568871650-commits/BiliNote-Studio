@@ -120,7 +120,9 @@ class TestCreateMessagesContentFormat(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["role"], "user")
         self.assertIsInstance(messages[0]["content"], str)
-        self.assertEqual(messages[0]["content"], "PROMPT_BODY")
+        self.assertTrue(messages[0]["content"].startswith("PROMPT_BODY"))
+        self.assertIn("本次未提供图片", messages[0]["content"])
+        self.assertIn("不得描述所见画面", messages[0]["content"])
 
     def test_empty_image_list_emits_string_content(self):
         """显式传入空列表也要走纯文本分支，避免图片字段误触发。"""
@@ -129,6 +131,24 @@ class TestCreateMessagesContentFormat(unittest.TestCase):
         messages = gpt.create_messages(segments=[], video_img_urls=[])
 
         self.assertIsInstance(messages[0]["content"], str)
+
+    def test_frame_candidates_are_not_claimed_as_visual_input(self):
+        gpt = _make_gpt()
+        messages = gpt.create_messages(segments=[], frame_evidence=[{'time': '01:23', 'reason': '参数变化'}])
+        self.assertIn('01:23', messages[0]['content'])
+        self.assertIn('参数变化', messages[0]['content'])
+        self.assertIn('不是视觉证据', messages[0]['content'])
+        self.assertIn('本次未提供图片', messages[0]['content'])
+
+    def test_range_aligned_chunk_filters_out_unrelated_frame_evidence(self):
+        gpt = _make_gpt()
+        messages = gpt.create_messages(segments=[], video_img_urls=['image'],
+            video_image_ranges=[{'start': 3600, 'end': 3608}],
+            frame_evidence=[{'time': 2, 'reason': '不相关早期菜单'}, {'time': 3605, 'reason': '对应时段参数'}])
+        text = messages[0]['content'][0]['text']
+        self.assertNotIn('不相关早期菜单', text)
+        self.assertIn('对应时段参数', text)
+        self.assertIn('不能据此声称看到其他时段', text)
 
     def test_with_images_emits_multimodal_array(self):
         """有图片时保留多模态 array 形态，确保多模态模型功能不退化。"""
@@ -142,7 +162,9 @@ class TestCreateMessagesContentFormat(unittest.TestCase):
         content = messages[0]["content"]
         self.assertIsInstance(content, list)
         self.assertEqual(len(content), 3)  # 1 text + 2 images
-        self.assertEqual(content[0], {"type": "text", "text": "PROMPT_BODY"})
+        self.assertEqual(content[0]["type"], "text")
+        self.assertTrue(content[0]["text"].startswith("PROMPT_BODY"))
+        self.assertIn("本次已提供图片", content[0]["text"])
         self.assertEqual(content[1]["type"], "image_url")
         self.assertEqual(content[1]["image_url"]["url"], "https://example.com/a.jpg")
         self.assertEqual(content[1]["image_url"]["detail"], "auto")
@@ -157,6 +179,17 @@ class TestCreateMessagesContentFormat(unittest.TestCase):
         import json
         serialized = json.dumps(messages, ensure_ascii=False)
         self.assertNotIn("image_url", serialized)
+
+
+class TestEvidenceBoundary(unittest.TestCase):
+    def test_paths_are_private_and_decimal_seconds_have_timecodes(self):
+        gpt = _make_gpt()
+        text = gpt.create_messages([], frame_evidence=[{'time': 28.08, 'reason': '稳定画面',
+            'path': 'PRIVATE_SOURCE_DIRECTORY/frame.jpg', 'fingerprint': 'PRIVATE_FRAME_HASH'}])[0]['content']
+        self.assertIn('00:28', text)
+        self.assertIn('28.08', text)
+        self.assertNotIn('PRIVATE_SOURCE_DIRECTORY', text)
+        self.assertNotIn('PRIVATE_FRAME_HASH', text)
 
 
 class TestBuildMergeMessagesContentFormat(unittest.TestCase):

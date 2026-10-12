@@ -20,7 +20,14 @@ export interface ChatMessage {
 
 export interface ChatSource {
   text: string
-  source_type: 'markdown' | 'transcript'
+  source_type: 'markdown' | 'transcript' | 'note' | 'web'
+  source_id?: string
+  note_id?: string
+  version_id?: string
+  section_id?: string
+  title?: string
+  url?: string
+  archived?: boolean
   section_title?: string
   start_time?: number
   end_time?: number

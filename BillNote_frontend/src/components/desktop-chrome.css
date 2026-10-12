@@ -1,0 +1,18 @@
+.studio-chrome { min-height:100dvh; }
+.studio-chrome--enabled { --studio-titlebar-height:32px; padding-top:var(--studio-titlebar-height); }
+.studio-titlebar { position:fixed; top:0; left:0; right:0; z-index:60; height:var(--studio-titlebar-height); display:flex; align-items:center; background:var(--surface-shell); color:var(--surface-description); user-select:none; border-bottom:1px solid color-mix(in srgb,var(--surface-border) 60%,transparent); font-size:12px; }
+.studio-titlebar-drag { flex:1; min-width:32px; height:100%; display:flex; align-items:center; gap:8px; padding-left:14px; }
+.studio-titlebar-logo { width:24px; height:24px; flex-shrink:0; pointer-events:none; display:inline-flex; color:#252525; }
+.studio-titlebar-logo svg { width:100%; height:100%; display:block; pointer-events:none; }
+html.dark .studio-titlebar-logo { color:#f2f2f2; }
+.studio-titlebar-name { font-size:12px; font-weight:400; color:var(--surface-description); letter-spacing:.01em; pointer-events:none; }
+.studio-window-controls { height:100%; display:flex; flex-shrink:0; }
+.studio-window-controls button { width:46px; height:100%; display:grid; place-items:center; color:var(--surface-text); cursor:default; border-radius:0; }
+.studio-window-controls button:hover { background:var(--surface-hover); }
+.studio-window-controls .studio-window-close:hover { background:#c42b1c; color:#fff; }
+.studio-titlebar button:focus-visible { outline:2px solid var(--focus-ring); outline-offset:-3px; }
+.studio-chrome--enabled .workspace,.studio-chrome--enabled .settings-shell,.studio-chrome--enabled .onboarding-screen { height:calc(100dvh - var(--studio-titlebar-height)); }
+.studio-chrome--enabled .startup-screen { min-height:calc(100dvh - var(--studio-titlebar-height)); }
+.studio-chrome--preview .preview-banner { display:none; }
+.studio-chrome--preview .preview-app :is(.workspace,.settings-shell,.onboarding-screen) { height:calc(100dvh - var(--studio-titlebar-height)); }
+@media(max-width:600px) { .studio-window-controls button { width:38px; } }

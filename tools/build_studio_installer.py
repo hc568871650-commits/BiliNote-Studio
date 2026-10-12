@@ -62,7 +62,11 @@ def bundled_notices(args, work):
             if any(token in str(file).lower() for token in ("license", "licence", "copying", "copyright", "notice")):
                 source = Path(distribution.locate_file(file))
                 if source.is_file() and source.suffix.lower() not in (".pyc", ".py", ".pyd", ".dll"):
-                    target = destination / str(file).replace("../", "parent/").replace("..\\", "parent\\")
+                    # Flatten wheel metadata paths: NSIS still has a traditional
+                    # Windows path limit and repeated dist-info names exceed it.
+                    target = destination / source.name
+                    if target.exists() and target.read_bytes() != source.read_bytes():
+                        target = destination / (hashlib.sha256(str(file).encode()).hexdigest()[:12] + "-" + source.name)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, target)
                     license_paths.append(target.relative_to(notices).as_posix())
@@ -135,7 +139,10 @@ def desktop(args, work):
     shutil.copytree(bundled_notices(args, work), payload / "licenses/Python", dirs_exist_ok=True)
     # A release owner must supply reviewed dependency notices, never private configuration.
     if args.notices:
-        shutil.copytree(args.notices, payload / "licenses", dirs_exist_ok=True)
+        # Python notices above describe this exact frozen dependency inventory.
+        # A previous release's Python inventory must not overwrite that evidence.
+        shutil.copytree(args.notices, payload / "licenses", dirs_exist_ok=True,
+                        ignore=lambda directory, names: ["Python"] if Path(directory) == args.notices else [])
     for notice_name in ("THIRD_PARTY_NOTICES.frontend.txt", "THIRD_PARTY_NOTICES.rust.txt"):
         notice = ROOT / "docs/studio" / notice_name
         if notice.exists():

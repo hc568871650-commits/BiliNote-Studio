@@ -68,6 +68,8 @@ const TranscriptViewer = () => {
                 {task.transcript.segments.map((segment, index) => (
                     <div
                         key={index}
+                        data-transcript-start={segment.start}
+                        data-transcript-end={segment.end}
                         ref={(el) => (segmentRefs.current[index] = el)}
                         className={cn(
                             "group grid grid-cols-[80px_1fr] gap-2 rounded-md p-2 transition-colors hover:bg-accent",

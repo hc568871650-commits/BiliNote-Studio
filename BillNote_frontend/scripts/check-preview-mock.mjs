@@ -239,3 +239,56 @@ assert.equal(sessionStorage.getItem('unrelated-session'), 'keep')
 assert.equal(location.hash, '/')
 assert.equal(reloads, 1)
 console.log('PASS: legacy mock + stateful sessions/refusal-retains-target/narrow archive/favorite exclusion/empty rejection/revision/idempotency/refresh/old approval rejection/cancel/undo/no secrets/no network/reset boundaries')
+
+// Virtual time verifies the entire 45-second fixture without waiting or calling any model.
+const originalNow = Date.now, originalTimer = globalThis.setTimeout
+let fixtureNow = originalNow()
+const delays = []
+Date.now = () => fixtureNow
+globalThis.setTimeout = (callback, ms, ...args) => {
+  if (ms === 2000) { delays.push(ms); queueMicrotask(() => callback(...args)); return 0 }
+  return originalTimer(callback, ms, ...args)
+}
+try {
+  location.search = '?generation=slow'
+  const slow = await import(`${moduleUrl}#generation-slow`)
+  const id = crypto.randomUUID(), requestId = crypto.randomUUID(), startedAt = fixtureNow
+  const admission = await request('/generate_note', { task_id: id, request_id: requestId, provider_id: 'preview-1', model_name: '通用示例模型', video_url: 'https://example.invalid/synthetic' }, 'post', slow.previewAdapter)
+  assert.equal(admission.task_id, id)
+  assert.equal(admission.request_id, requestId)
+  assert.equal(delays.length, 1, 'admission intentionally waits two simulated seconds')
+  for (const [at, phase] of [[0, 'PENDING'], [5000, 'PARSING'], [10000, 'DOWNLOADING'], [17000, 'TRANSCRIBING'], [27000, 'FORMATTING'], [32000, 'SUMMARIZING'], [40000, 'SAVING'], [45000, 'SUCCESS']]) {
+    fixtureNow = startedAt + at
+    const status = await request(`/task_status/${id}`, {}, 'get', slow.previewAdapter)
+    assert.equal(status.status, phase)
+    assert.equal(status.request_id, requestId)
+    const detail = await request(`/notes/${id}`, {}, 'get', slow.previewAdapter)
+    assert.equal(detail.status, phase)
+    assert.equal((await request('/notes', {}, 'get', slow.previewAdapter)).find(task => task.id === id).status, phase)
+    if (phase === 'SUCCESS') assert(detail.markdown[0].content.includes('模拟示例笔记'))
+    else assert.equal(detail.markdown, '')
+  }
+  const completedDelayCount = delays.length
+  await request(`/task_status/${id}`, {}, 'get', slow.previewAdapter)
+  assert.equal(delays.length, completedDelayCount, 'completed tasks return normally')
+  await request('/generate_note', { task_id: id, request_id: requestId, provider_id: 'preview-1', model_name: '通用示例模型' }, 'post', slow.previewAdapter)
+  assert.equal((await request(`/notes/${id}`, {}, 'get', slow.previewAdapter)).status, 'SUCCESS', 'same request does not restart the fixture')
+  const refresh = await import(`${moduleUrl}#generation-slow-refresh`)
+  assert(refresh.getPreviewTasks().some(task => task.id === id), 'UUID fixture survives reload in its isolated storage')
+  location.search = '?generation=offline'
+  const offline = await import(`${moduleUrl}#generation-offline`)
+  const offlineId = crypto.randomUUID(), offlineRequest = crypto.randomUUID()
+  await request('/generate_note', { task_id: offlineId, request_id: offlineRequest, provider_id: 'preview-1', model_name: '通用示例模型' }, 'post', offline.previewAdapter)
+  for (let i = 0; i < 3; i++) {
+    await assert.rejects(offline.previewAdapter({ url: `/task_status/${offlineId}`, method: 'get' }), error => error.code === 'ERR_NETWORK' && !error.response)
+    assert.equal((await request(`/notes/${offlineId}`, {}, 'get', offline.previewAdapter)).status, 'PENDING', 'transport outage never becomes business failure')
+  }
+  const recovered = await request(`/task_status/${offlineId}`, {}, 'get', offline.previewAdapter)
+  assert.equal(recovered.status, 'PENDING')
+  assert.equal(recovered.request_id, offlineRequest)
+  console.log('PASS: generation slow timeline/admission/status delays/final versions/UUID reload/request dedup/offline network errors/recovery/no real network')
+} finally {
+  Date.now = originalNow
+  globalThis.setTimeout = originalTimer
+  location.search = ''
+}

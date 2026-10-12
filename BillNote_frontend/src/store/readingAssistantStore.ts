@@ -14,6 +14,9 @@ export interface ReadingAttachment {
   taskId?: string
   versionId?: string
   blockId?: string
+  sourceText?: string
+  blockCount?: number
+  blocks?: { blockId?: string; start: number; end: number }[]
 }
 export interface ReadingMessage {
   id: string

@@ -92,6 +92,48 @@ class TestRequestChunker(unittest.TestCase):
         groups = chunker.group_texts_by_budget(["aaaaa", "bbbbb", "ccccc"], build_text_messages)
         self.assertEqual(groups, [["aaaaa", "bbbbb"], ["ccccc"]])
 
+    def test_dynamic_nonuniform_frames_use_actual_time_not_index(self):
+        chunker = RequestChunker(build_messages, 8, size_estimator)
+        segments = [DummySeg(0, 10, 'aaaaaa'), DummySeg(10, 20, 'bbbbbb'), DummySeg(20, 30, 'cccccc')]
+        chunks = chunker.chunk(segments, ['A', 'B'], video_image_ranges=[{'start': 22, 'end': 22}, {'start': 25, 'end': 25}])
+        self.assertEqual([c.image_urls for c in chunks], [[], [], ['A', 'B']])
+        self.assertEqual([c.segments[0].start for c in chunks], [0, 10, 20])
+
+    def test_long_video_and_grid_crossing_boundary_repeat_only_matching_chunks(self):
+        chunker = RequestChunker(build_messages, 8, size_estimator)
+        chunks = chunker.chunk([DummySeg(3590, 3600, 'aaaaaa'), DummySeg(3600, 3610, 'bbbbbb'), DummySeg(3610, 3620, 'cccccc')],
+            ['G'], video_image_ranges=[{'start': 3595, 'end': 3605}])
+        self.assertEqual([c.image_urls for c in chunks], [['G'], ['G'], []])
+        self.assertEqual(chunks[1].video_image_ranges, [{'start': 3595, 'end': 3605}])
+
+    def test_point_frame_on_boundary_goes_to_later_subtitle(self):
+        chunks = RequestChunker(build_messages, 8, size_estimator).chunk(
+            [DummySeg(0, 10, 'aaaaaa'), DummySeg(10, 20, 'bbbbbb')], ['P'], video_image_ranges=[{'start': 10, 'end': 10}])
+        self.assertEqual([c.image_urls for c in chunks], [[], ['P']])
+
+    def test_image_budget_splits_matching_text_without_dropping_frames(self):
+        chunks = RequestChunker(build_messages, 8, size_estimator).chunk(
+            [DummySeg(0, 10, 'abcdefghij')], ['IMAGE'], video_image_ranges=[{'start': 5, 'end': 5}])
+        self.assertEqual(''.join(s.text for c in chunks for s in c.segments), 'abcdefghij')
+        self.assertTrue(all(c.image_urls == ['IMAGE'] for c in chunks))
+        self.assertTrue(all(size_estimator(build_messages(c.segments, c.image_urls)) <= 8 for c in chunks))
+
+    def test_unmatched_frame_is_not_attached_to_unrelated_subtitles(self):
+        chunks = RequestChunker(build_messages, 8, size_estimator).chunk(
+            [DummySeg(0, 10, 'aaaaaa')], ['I'], video_image_ranges=[{'start': 20, 'end': 20}])
+        self.assertEqual(chunks[0].image_urls, [])
+        self.assertEqual(chunks[1].segments, [])
+        self.assertEqual(chunks[1].video_image_ranges, [{'start': 20, 'end': 20}])
+
+    def test_oversized_visual_and_invalid_ranges_are_explicit_errors(self):
+        chunker = RequestChunker(build_messages, 8, size_estimator)
+        with self.assertRaisesRegex(ValueError, '超过请求预算'):
+            chunker.chunk([DummySeg(0, 1, 'a')], ['TOO-LARGE-IMAGE'], video_image_ranges=[{'start': 0, 'end': 1}])
+        with self.assertRaisesRegex(ValueError, '数量不一致'):
+            chunker.chunk([], ['I'], video_image_ranges=[])
+        with self.assertRaisesRegex(ValueError, '时间范围无效'):
+            chunker.chunk([], ['I'], video_image_ranges=[{'start': float('nan'), 'end': 1}])
+
 
 if __name__ == "__main__":
     unittest.main()

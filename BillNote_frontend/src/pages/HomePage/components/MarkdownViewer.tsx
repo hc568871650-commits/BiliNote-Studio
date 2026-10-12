@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useMemo, memo, FC } from 'react'
+import { useSourceNavigationStore } from '@/store/sourceNavigationStore'
+import { resolveQuoteTargets } from '@/utils/quoteSource'
 import ReactMarkdown from 'react-markdown'
 import { Button } from '@/components/ui/button.tsx'
 import { Copy, Download, ArrowRight, Play, ExternalLink } from 'lucide-react'
 import { toast } from 'react-hot-toast'
-import Error from '@/components/Lottie/error.tsx'
-import Loading from '@/components/Lottie/Loading.tsx'
 import Idle from '@/components/Lottie/Idle.tsx'
-import StepBar from '@/pages/HomePage/components/StepBar.tsx'
+import GenerationProgress from './GenerationProgress'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { atomDark as codeStyle } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import Zoom from 'react-medium-image-zoom'
@@ -29,6 +29,7 @@ import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
 import ReaderPane from '@/pages/HomePage/components/ReaderPane'
 import { rehypeNoteOutline, resolveChapter, scrollToChapter } from '@/utils/noteOutline'
 import ReadingSelection, { rehypeReadingBlocks } from './ReadingSelection'
+import RefineNoteDialog from './RefineNoteDialog'
 import { useReadingAssistantStore, permanentSessionKey, temporarySessionKey, type ReadingAttachment } from '@/store/readingAssistantStore'
 
 interface VersionNote {
@@ -42,14 +43,6 @@ interface VersionNote {
 interface MarkdownViewerProps {
   status: 'idle' | 'loading' | 'success' | 'failed'
 }
-
-const steps = [
-  { label: '解析链接', key: 'PARSING' },
-  { label: '下载音频', key: 'DOWNLOADING' },
-  { label: '转写文字', key: 'TRANSCRIBING' },
-  { label: '总结内容', key: 'SUMMARIZING' },
-  { label: '保存完成', key: 'SUCCESS' },
-]
 
 const remarkPlugins = [gfm, remarkMath]
 const rehypePlugins = [rehypeKatex, rehypeSlug, rehypeNoteOutline, rehypeReadingBlocks]
@@ -303,18 +296,22 @@ function createMarkdownComponents(baseURL: string, resourceBase?: string) {
 }
 
 const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
+  const source = useSourceNavigationStore(state => state.source)
   const [copied, setCopied] = useState(false)
   const [currentVerId, setCurrentVerId] = useState<string>('')
+  const [refinement, setRefinement] = useState<{ taskId: string; versionId: string; texts: string[] } | null>(null)
   // 确保baseURL没有尾部斜杠
   const baseURL = (String(import.meta.env.VITE_API_BASE_URL || '').replace('/api','') || '').replace(/\/$/, '')
   const getCurrentTask = useTaskStore.getState().getCurrentTask
   const currentTask = useTaskStore(state => state.getCurrentTask())
-  const taskStatus = currentTask?.status || 'PENDING'
+  useEffect(() => { setRefinement(null) }, [currentTask?.id, currentVerId])
   const retryTask = useTaskStore.getState().retryTask
   const isMultiVersion = Array.isArray(currentTask?.markdown)
   const selectedVersion = currentTask && Array.isArray(currentTask.markdown) ? currentTask.markdown.find(v => v.ver_id === currentVerId) || currentTask.markdown[0] : null
+  const activeVersionId = selectedVersion?.ver_id || ''
   const selectedContent = typeof currentTask?.markdown === 'string' ? currentTask.markdown : selectedVersion?.content || ''
   const modelName = selectedVersion?.model_name || currentTask?.formData?.model_name || ''
+  const refinementProvider = selectedVersion?.provider_id || currentTask?.formData?.provider_id || ''
   const style = selectedVersion?.style || currentTask?.formData?.style || ''
   const createTime = selectedVersion?.created_at || currentTask?.createdAt || ''
   const resourceBase = selectedVersion?.resource_base || currentTask?.resource_base
@@ -322,14 +319,15 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const [showChat, setShowChat] = useState<false | 'half' | 'full'>(false)
   const [temporaryOpen, setTemporaryOpen] = useState(false)
   const addQuotes = (quotes: ReadingAttachment[], temporary: boolean) => {
-    if (!currentTask) return
-    if (quotes.some(q => (q.text?.length || 0) > 50000)) { toast.error('单次引用最多 5 万字，请减少选中内容'); return }
+    if (!currentTask) return false
+    if (quotes.some(q => (q.text?.length || 0) > 50000)) { toast.error('单次引用最多 5 万字，请减少选中内容'); return false }
     const key = temporary ? temporarySessionKey(currentTask.id) : permanentSessionKey(currentTask.id)
     const current = useReadingAssistantStore.getState().sessions[key]?.attachments || []
-    if (current.length + quotes.length > 8) { toast.error('每条消息最多 8 个附件'); return }
+    if (current.length + quotes.length > 8) { toast.error('每条消息最多 8 份引用或附件，每次选段合为 1 份'); return false }
     useReadingAssistantStore.getState().attach(key, quotes)
     if (temporary) setTemporaryOpen(true)
     else setShowChat('half')
+    return true
   }
   const closeTemporary = () => { if (currentTask) useReadingAssistantStore.getState().remove(temporarySessionKey(currentTask.id)); setTemporaryOpen(false) }
   useEffect(() => {
@@ -346,8 +344,52 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
 
   // Derive content from the selected task directly, never display another task's stale body.
   useEffect(() => {
-    setCurrentVerId(Array.isArray(currentTask?.markdown) ? currentTask.markdown[0]?.ver_id || '' : '')
+    setCurrentVerId(source?.note_id === currentTask?.id && source?.version_id ? source.version_id : Array.isArray(currentTask?.markdown) ? currentTask.markdown[0]?.ver_id || '' : '')
   }, [currentTask?.id])
+  useEffect(() => {
+    const versions = currentTask?.markdown
+    if (Array.isArray(versions) && versions.length && !versions.some(version => version.ver_id === currentVerId)) {
+      setCurrentVerId(versions[0].ver_id)
+    }
+  }, [currentTask?.id, currentTask?.markdown, currentVerId])
+  useEffect(() => {
+    if (!source || !currentTask || source.note_id !== currentTask.id || !selectedContent) return
+    const clear = useSourceNavigationStore.getState().clear
+    if (source.version_id && Array.isArray(currentTask.markdown)) {
+      if (!currentTask.markdown.some(version => version.ver_id === source.version_id)) { toast.error('来源版本已不可用，原引用片段仍保留在对话中'); clear(); return }
+      if (currentVerId !== source.version_id) { setCurrentVerId(source.version_id); return }
+    }
+    setViewMode('preview')
+    if (source.start_time != null) setShowTranscribe(true)
+    let inner = 0
+    const outer = requestAnimationFrame(() => { inner = requestAnimationFrame(() => {
+      let target: HTMLElement | undefined
+      let quoteTargets: HTMLElement[] = []
+      if (source.start_time != null) {
+        target = Array.from(document.querySelectorAll<HTMLElement>('[data-transcript-start]')).find(el => Number(el.dataset.transcriptEnd) >= source.start_time!)
+      } else {
+        const root = Array.from(document.querySelectorAll<HTMLElement>('[data-note-task]')).find(el => el.dataset.noteTask === source.note_id)
+        const clean = (value = '') => value.replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
+        if (source.quote_parts) {
+          if (root && (!source.version_id || root.dataset.noteVersion === source.version_id)) quoteTargets = resolveQuoteTargets(root, source.quote_parts)
+          target = quoteTargets[0]
+        } else {
+          target = Array.from(root?.querySelectorAll<HTMLElement>('[data-note-heading]') || []).find(el => clean(el.dataset.noteLabel || el.textContent || '') === clean(source.section_title))
+          if (!target && source.text) target = Array.from(root?.querySelectorAll<HTMLElement>('[data-note-block]') || []).find(el => clean(el.textContent || '').includes(clean(source.text).slice(0, 60)))
+        }
+      }
+      if (target) {
+        if (source.quote_parts) scrollToChapter(target, scrollMotion())
+        else target.scrollIntoView({behavior:scrollMotion(),block:'center'})
+        const highlights = quoteTargets.length ? quoteTargets : [target]
+        highlights.forEach(el => el.classList.add('reading-block--flash'))
+        setTimeout(()=>highlights.forEach(el=>el.classList.remove('reading-block--flash')),2400)
+      }
+      else toast(source.quote_parts ? '原文位置可能已变化，可用引用旁的小箭头查看保留内容' : '已打开来源笔记，片段位置可能已变化，请参照对话中的原文核对')
+      clear()
+    }) })
+    return () => { cancelAnimationFrame(outer); cancelAnimationFrame(inner) }
+  }, [source, currentTask?.id, currentVerId, selectedContent, showTranscribe, viewMode])
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(selectedContent)
@@ -397,17 +439,14 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     document.body.removeChild(link)
   }
 
-  if (status === 'loading') {
-    return (
-      <div className="flex h-full min-h-0 w-full flex-col items-center justify-center space-y-4 text-neutral-500 dark:text-muted-foreground">
-        <StepBar steps={steps} currentStep={taskStatus} />
-        <Loading className="h-5 w-5" />
-        <div className="text-center text-sm">
-          <p className="text-lg font-bold">正在生成笔记，请稍候…</p>
-          <p className="mt-2 text-xs text-neutral-500 dark:text-muted-foreground">这可能需要几秒钟时间，取决于视频长度</p>
-        </div>
-      </div>
-    )
+  if ((status === 'loading' || status === 'failed') && currentTask) {
+    return <GenerationProgress key={currentTask.id} task={currentTask} onResume={async () => {
+      try { await useTaskStore.getState().resumeSubmission(currentTask.id) }
+      catch (error) { const e = error as { msg?: string; message?: string }; toast.error(e.msg || e.message || '提交结果仍未确认，请等待自动核对') }
+    }} onRetry={async () => {
+      try { await retryTask(currentTask.id) }
+      catch (error) { const e = error as { msg?: string; message?: string }; toast.error(e.msg || e.message || '提交失败，请稍后检查任务状态') }
+    }} />
   }
 
   if (status === 'idle') {
@@ -422,22 +461,6 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     )
   }
 
-  if (status === 'failed') {
-    return (
-      <div className="flex h-full min-h-0 w-full flex-col items-center justify-center gap-4 space-y-3">
-        <Error />
-        <div className="text-center">
-          <p className="text-lg font-bold text-red-500">笔记生成失败</p>
-          <p className="mt-2 mb-2 text-xs text-red-400">请检查后台或稍后再试</p>
-
-          <Button onClick={() => retryTask(currentTask.id)} size="lg" disabled={Boolean(currentTask.archived_at)}>
-            {currentTask.archived_at ? '请先恢复笔记' : '重试'}
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="reading-workspace relative flex h-full min-h-0 w-full overflow-hidden">
       <div className={`reading-note-column flex min-h-0 min-w-0 flex-1 flex-col ${showChat === 'full' ? 'reading-note-column-hidden' : ''}`}>
@@ -445,7 +468,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         compact={readerCompact && viewMode === 'preview' && showChat !== 'full'}
         currentTask={currentTask}
         isMultiVersion={isMultiVersion}
-        currentVerId={currentVerId}
+        currentVerId={activeVersionId}
         setCurrentVerId={setCurrentVerId}
         modelName={modelName}
         style={style}
@@ -476,14 +499,14 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         <div className="flex flex-1 overflow-hidden bg-background pb-2">
           {selectedContent && selectedContent !== 'loading' && selectedContent !== 'empty' ? (
             <>
-              <ReaderPane key={`${currentTask?.id}:${currentVerId}`} taskId={currentTask?.id || ''} versionId={currentVerId} content={selectedContent} title={currentTask?.audioMeta?.title || '笔记'} onCompactChange={setReaderCompact} chatOpen={Boolean(showChat)} onToggleChat={() => setShowChat(showChat ? false : 'half')}>
+              <ReaderPane key={`${currentTask?.id}:${activeVersionId}`} taskId={currentTask?.id || ''} versionId={activeVersionId} content={selectedContent} title={currentTask?.audioMeta?.title || '笔记'} onCompactChange={setReaderCompact} chatOpen={Boolean(showChat)} onToggleChat={() => setShowChat(showChat ? false : 'half')}>
                 <div className="px-2">
                   <VideoBanner
                     audioMeta={currentTask?.audioMeta}
                     videoUrl={currentTask?.formData?.video_url}
                   />
                 </div>
-                <ReadingSelection key={`${currentTask?.id}:${currentVerId}`} taskId={currentTask?.id || ''} versionId={currentVerId} title={currentTask?.audioMeta?.title || '笔记'} onQuote={addQuotes}>
+                <ReadingSelection key={`${currentTask?.id}:${activeVersionId}`} taskId={currentTask?.id || ''} versionId={activeVersionId} title={currentTask?.audioMeta?.title || '笔记'} onQuote={addQuotes} onRefine={currentTask && !currentTask.archived_at ? texts => setRefinement({ taskId: currentTask.id, versionId: activeVersionId, texts }) : undefined}>
                 <div className={'markdown-body select-text w-full px-2'}>
                   <ReactMarkdown
                     remarkPlugins={remarkPlugins}
@@ -513,6 +536,12 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         </div>
       )}
       </div>
+      {refinement && currentTask && refinement.taskId === currentTask.id && refinement.versionId === (selectedVersion?.ver_id || currentVerId) && <RefineNoteDialog key={`${refinement.taskId}:${refinement.versionId}`} task={currentTask} versionId={refinement.versionId} texts={refinement.texts} originalProtocol={selectedVersion?.protocol} originalModel={modelName && refinementProvider ? { provider_id: refinementProvider, model_name: modelName } : null} onClose={() => setRefinement(null)} onApplied={updated => {
+        useTaskStore.setState(state => ({ tasks: state.tasks.map(task => task.id === updated.id ? updated : task) }))
+        if (Array.isArray(updated.markdown)) setCurrentVerId(updated.markdown[0]?.ver_id || '')
+        setRefinement(null)
+        toast.success('已采纳修订稿并保存为新版本，原版本保留')
+      }} />}
       {currentTask && <AnimatedPanel key={currentTask.id} open={Boolean(showChat)} animate={showChat !== 'full'} className={`reading-chat-dock ${showChat === 'full' ? 'reading-chat-dock-full' : ''}`}><ChatPanel taskId={currentTask.id} active={Boolean(showChat)} mode={showChat || 'half'} onModeChange={setShowChat} onClose={() => setShowChat(false)} /></AnimatedPanel>}
       {temporaryOpen && currentTask && <div className="reading-temporary-dock"><ChatPanel taskId={currentTask.id} mode="half" onModeChange={() => {}} temporary onClose={closeTemporary} onTransfer={() => { try { useReadingAssistantStore.getState().transfer(temporarySessionKey(currentTask.id), permanentSessionKey(currentTask.id)); setTemporaryOpen(false); setShowChat('half'); toast.success('已转入常驻对话，临时窗口已关闭') } catch(e) { toast.error((e as Error).message) } }} /></div>}
     </div>

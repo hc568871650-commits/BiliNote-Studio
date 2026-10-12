@@ -47,8 +47,10 @@ export function rehypeNoteOutline() {
       if (heading(node)) {
         const id = `note-chapter-${entries.length + 1}`
         const text = chapterLabel(outlineText(node)) || '未命名章节'
+        const stamp = outlineText(node).match(/Content\s*-\s*\[(\d{1,2}:\d{2}(?::\d{2})?)\]/i)?.[1]
+        const seconds = stamp?.split(':').reduce((total, part) => total * 60 + Number(part), 0)
         entries.push({ id, text, level: Number(node.tagName!.slice(1)) })
-        node.properties = { ...node.properties, 'data-note-original-id': node.properties?.id || '', 'data-note-heading': true, 'data-note-label': text, id }
+        node.properties = { ...node.properties, 'data-note-original-id': node.properties?.id || '', 'data-note-heading': true, 'data-note-label': text, ...(seconds === undefined ? {} : { 'data-note-time': seconds }), id }
       }
       node.children?.forEach(visit)
     }

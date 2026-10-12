@@ -51,8 +51,8 @@ export async function addModel(
   return request.post('/models', data, cfg(opts))
 }
 
-export const fetchEnableModels = async () => {
-  const list = await request.get('/model_list')
+export const fetchEnableModels = async (opts?: CallOpts) => {
+  const list = await request.get('/model_list', cfg(opts))
   return modelArray(list).filter(model => !isTranscriptionModel(model.model_name))
 }
 

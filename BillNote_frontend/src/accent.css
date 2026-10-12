@@ -1,118 +1,122 @@
-/* Shared by the workspace and portal dialogs; keep neutral surfaces neutral. */
-:root[data-accent="blue"] { --accent-light-value: #45679e; --accent-dark-value: #9ab6e4; }
-:root[data-accent="slate"] { --accent-light-value: #333333; --accent-dark-value: #ffffff; }
-:root[data-accent="indigo"] { --accent-light-value: #5058b8; --accent-dark-value: #acb2ff; }
-:root[data-accent="violet"] { --accent-light-value: #7950b0; --accent-dark-value: #c6a5ed; }
-:root[data-accent="green"] { --accent-light-value: #34734a; --accent-dark-value: #99cca7; }
-:root[data-accent="teal"] { --accent-light-value: #247477; --accent-dark-value: #8fced0; }
-:root[data-accent="orange"] { --accent-light-value: #9a5b1b; --accent-dark-value: #e9bd82; }
-:root[data-accent="rose"] { --accent-light-value: #a34467; --accent-dark-value: #e6a1ba; }
+/* Accent is a preference; surfaces and control states have separate roles. */
+:root[data-accent="blue"] { --accent-light-value:#45679e; --accent-dark-value:#9ab6e4; }
+:root[data-accent="slate"] { --accent-light-value:#333333; --accent-dark-value:#ffffff; }
+:root[data-accent="indigo"] { --accent-light-value:#5058b8; --accent-dark-value:#acb2ff; }
+:root[data-accent="violet"] { --accent-light-value:#7950b0; --accent-dark-value:#c6a5ed; }
+:root[data-accent="green"] { --accent-light-value:#34734a; --accent-dark-value:#99cca7; }
+:root[data-accent="teal"] { --accent-light-value:#247477; --accent-dark-value:#8fced0; }
+:root[data-accent="orange"] { --accent-light-value:#9a5b1b; --accent-dark-value:#e9bd82; }
+:root[data-accent="rose"] { --accent-light-value:#a34467; --accent-dark-value:#e6a1ba; }
+
 html[data-accent] {
-  --primary: var(--accent-light-value);
-  --primary-light: color-mix(in srgb, var(--primary) 12%, white);
-  --primary-foreground: #ffffff;
-  --ring: var(--primary);
+  color-scheme:light;
+  --primary:var(--accent-light-value);
+  --primary-foreground:#ffffff;
+  --primary-light:color-mix(in srgb,var(--primary) 9%,var(--surface-page));
+  --surface-page:#ffffff;
+  --surface-shell:#f5f5f5;
+  --surface-panel:#f7f7f7;
+  --surface-raised:#ffffff;
+  --surface-input:#f0f0f0;
+  --surface-hover:#eaeaea;
+  --surface-selected:#e5e5e5;
+  --surface-border:#e3e3e3;
+  --surface-border-strong:#c7c7c7;
+  --surface-text:#262626;
+  --surface-description:#626262;
+  --surface-subtle:#707070;
+  --surface-user-message:#ededed;
+  --surface-user-border:#e4e4e4;
+  --text-emphasis:#161616;
+  --control-active:var(--primary);
+  --control-active-foreground:var(--primary-foreground);
+  --action-primary-bg:var(--primary);
+  --action-primary-fg:var(--primary-foreground);
+  --control-off:#d2d2d2;
+  --control-thumb:#ffffff;
+  --control-off-thumb:#ffffff;
+  --focus-ring:var(--primary);
+  --surface-shadow:0 8px 28px #0000000c;
 }
 html.dark[data-accent] {
-  --primary: var(--accent-dark-value);
-  --primary-light: color-mix(in srgb, var(--primary) 15%, #181818);
-  --primary-foreground: #181818;
-}
-/* A single surface palette keeps workspace, settings and portal dialogs aligned. */
-html[data-accent] {
-  --surface-page:#fafafa; --surface-card:#f2f2f2; --surface-muted:#e9e9e9;
-  --surface-border:#dfdfdf; --surface-text:#252525; --surface-description:#666666;
-  --background:var(--surface-page); --card:var(--surface-card); --card-foreground:var(--surface-text);
-  --popover:var(--surface-card); --popover-foreground:var(--surface-text);
-  --foreground:var(--surface-text); --muted:var(--surface-muted); --muted-foreground:var(--surface-description);
-  --border:var(--surface-border); --input:var(--surface-border); --accent:var(--surface-muted); --accent-foreground:var(--surface-text);
-  --secondary:var(--surface-muted); --secondary-foreground:var(--surface-text);
-  --sidebar-foreground:var(--surface-text); --sidebar-ring:var(--primary);
-  --sidebar:var(--surface-card); --sidebar-primary:var(--primary); --sidebar-primary-foreground:var(--primary-foreground);
-  --sidebar-accent:var(--primary-light); --sidebar-accent-foreground:var(--primary); --sidebar-border:var(--surface-border);
-}
-html.dark[data-accent] {
-  --surface-page:#181818; --surface-card:#222222; --surface-muted:#2c2e2f;
-  --surface-border:#2b2b2b; --surface-text:#cbcbcb; --surface-description:#cbcbcb;
+  color-scheme:dark;
+  --primary:var(--accent-dark-value);
+  --primary-foreground:#181818;
+  --surface-page:#181818;
+  --surface-shell:#141414;
+  --surface-panel:#202020;
+  --surface-raised:#282828;
+  --surface-input:#252525;
+  --surface-hover:#303030;
+  --surface-selected:#303030;
+  --surface-border:#303030;
+  --surface-border-strong:#494949;
+  --surface-text:#dedede;
+  --surface-description:#a0a0a0;
+  --surface-subtle:#969696;
+  --surface-user-message:#2c2c2c;
+  --surface-user-border:#363636;
   --text-emphasis:#ffffff;
+  --control-off:#484848;
+  --control-thumb:#181818;
+  --control-off-thumb:#cbcbcb;
+  --surface-shadow:0 12px 32px #00000038;
 }
-html[data-accent] :is(.workspace,.settings-shell) {
-  --background:var(--surface-page); --card:var(--surface-card); --foreground:var(--surface-text);
-  --border:var(--surface-border); --muted:var(--surface-muted); --muted-foreground:var(--surface-description); --accent:var(--surface-muted);
+/* Codex uses a distinct active-control color, even in a monochrome theme. */
+html[data-accent="slate"] { --control-active:#2584df; --control-active-foreground:#fff; --control-thumb:#fff; --focus-ring:#2584df; --action-primary-bg:#252525; --action-primary-fg:#fff; }
+html.dark[data-accent="slate"] { --primary-light:#2a2a2a; --control-active:#338fea; --control-thumb:#fff; --focus-ring:#64a9eb; --action-primary-bg:#dedede; --action-primary-fg:#181818; }
+
+/* Apply the same semantic palette to routes and portals. */
+html[data-accent], html[data-accent] :is(.workspace,.settings-shell) {
+  --background:var(--surface-page); --foreground:var(--surface-text);
+  --card:var(--surface-panel); --card-foreground:var(--surface-text);
+  --popover:var(--surface-raised); --popover-foreground:var(--surface-text);
+  --muted:var(--surface-input); --muted-foreground:var(--surface-description);
+  --border:var(--surface-border); --input:var(--surface-border-strong);
+  --accent:var(--surface-hover); --accent-foreground:var(--surface-text);
+  --secondary:var(--surface-input); --secondary-foreground:var(--surface-text);
+  --ring:var(--focus-ring);
+  --sidebar:var(--surface-shell); --sidebar-foreground:var(--surface-text);
+  --sidebar-primary:var(--primary); --sidebar-primary-foreground:var(--primary-foreground);
+  --sidebar-accent:var(--surface-selected); --sidebar-accent-foreground:var(--text-emphasis);
+  --sidebar-border:var(--surface-border); --sidebar-ring:var(--focus-ring);
+}
+html[data-accent] :is(.workspace,.workspace-rail,.workspace-sidebar,.settings-shell,.settings-rail) { background:var(--surface-shell); }
+html[data-accent] :is(.workspace-composer,.settings-card) { background:var(--surface-panel); }
+html[data-accent] :is(.settings-menu-item.is-active,.settings-provider-item.is-active,.workspace-icon--active,.settings-rail-icon.is-active) {
+  background:var(--surface-selected); color:var(--text-emphasis); box-shadow:none;
 }
 html[data-accent] .settings-button.is-primary { background:var(--primary); border-color:var(--primary); color:var(--primary-foreground); }
-html[data-accent] :is(.workspace-icon--active,.settings-menu-item.is-active,.settings-provider-item.is-active) { background:var(--primary-light); color:var(--primary); }
-html[data-accent] .markdown-body a:not(.origin-link a) { color: var(--primary); }
-html[data-accent] .markdown-body .origin-link a { background: var(--primary-light); color: var(--primary); }
+html[data-accent] :is(input,textarea)::placeholder { color:var(--surface-subtle); opacity:1; }
+html[data-accent] :is(input:not([type=checkbox]):not([type=radio]),textarea,[contenteditable=true]):focus { color:var(--text-emphasis); }
+html[data-accent] :is(
+  .startup-title,.workspace-compose-heading h1,.workspace-empty h1,
+  .settings-page h1,.settings-page-header h1,.settings-categories h1,.onboarding-card h1,
+  .organizer-title,.organizer-welcome h1,.reading-chat-header strong,
+  [data-slot=dialog-title],[data-slot=alert-dialog-title]
+) { color:var(--text-emphasis); }
+html[data-accent] :is(.workspace,.settings-shell) :is(button,a,summary,input,textarea):focus-visible { outline-color:var(--focus-ring); }
 
-/* Semantic emphasis follows the same palette in notes and their mindmap. */
-html[data-accent] :is(.reader-body .markdown-body, .mindmap-reader .markmap-foreign) :is(strong, b) {
-  color: var(--primary);
-}
-html[data-accent] :is(.reader-body .markdown-body, .mindmap-reader .markmap-foreign) :is(strong, b) code {
-  color: inherit;
-}
-html[data-accent] :is(.reader-body .markdown-body, .mindmap-reader .markmap-foreign) mark {
-  color: var(--primary);
-  background: var(--primary-light);
-  border-radius: 3px;
-  padding-inline: .15em;
-}
+/* Switches remain readable when the preferred accent is white. */
+html[data-accent] [data-slot=switch] { background:var(--control-off); box-shadow:none; }
+html[data-accent] [data-slot=switch][data-state=checked] { background:var(--control-active); }
+html[data-accent] [data-slot=switch-thumb] { background:var(--control-off-thumb); box-shadow:0 1px 3px #0003; }
+html[data-accent] [data-slot=switch-thumb][data-state=checked] { background:var(--control-thumb); }
+html[data-accent] [data-slot=checkbox][data-state=checked] { background:var(--control-active); border-color:var(--control-active); color:var(--control-active-foreground); }
+html[data-accent] input:is([type=checkbox],[type=radio]) { accent-color:var(--control-active); }
 
-/* Backtick labels (shortcuts, commands and parameter values), not code fences. */
-html[data-accent] :is(.reader-body .markdown-body, .mindmap-reader .markmap-foreign) code:not(pre code) {
-  color: var(--foreground);
-  background-color: color-mix(in srgb, var(--primary) 20%, var(--background));
-  border-radius: 4px;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 24%, transparent);
+/* Reading surfaces use neutral fills, with accent reserved for links/emphasis. */
+html[data-accent] .markdown-body a:not(.origin-link a) { color:var(--primary); }
+html[data-accent] .markdown-body .origin-link a { background:var(--primary-light); color:var(--primary); }
+html[data-accent] :is(.reader-body .markdown-body,.mindmap-reader .markmap-foreign) :is(strong,b) { color:var(--primary); }
+html[data-accent] :is(.reader-body .markdown-body,.mindmap-reader .markmap-foreign) :is(strong,b) code { color:inherit; }
+html[data-accent] :is(.reader-body .markdown-body,.mindmap-reader .markmap-foreign) mark { color:var(--primary); background:var(--primary-light); border-radius:3px; padding-inline:.15em; }
+html[data-accent] :is(.reader-body .markdown-body,.mindmap-reader .markmap-foreign) code:not(pre code) {
+  color:var(--foreground); background:var(--surface-input); border-radius:4px; box-shadow:inset 0 0 0 1px var(--surface-border); padding-inline:.2em;
 }
-
-/* Dark palette sampled directly from the user's Codex screenshot (2026-10-08).
-   Sidebar is translucent in the reference; use its most frequent visible RGB. */
-html.dark[data-accent="slate"] { --primary-light: #2c2e2f; }
-html.dark[data-accent] { --sidebar: #1a1c1d; }
-html.dark[data-accent] :is(.workspace,.workspace-rail,.workspace-sidebar,.settings-shell) { background-color: #1a1c1d; }
-html.dark[data-accent] :is(.workspace-composer,.reading-chat-composer,.organizer-composer) { background-color: #363636; }
-
-/* Two neutral text tiers in dark mode. Accent/status colors and inverse text
-   on filled buttons keep their own semantic contrast. */
-html.dark[data-accent] :is(
-  .startup-title, .workspace-tab, .workspace-compose-heading h1, .workspace-empty h1,
-  .settings-page h1, .settings-page-header h1, .settings-categories h1, .onboarding-card h1,
-  .organizer-title, .organizer-welcome h1, .reading-chat-header strong,
-  [data-slot="dialog-title"], [data-slot="alert-dialog-title"]
-) { color: var(--text-emphasis); }
-html.dark[data-accent] :is(input:not([type=checkbox]):not([type=radio]),textarea,[contenteditable=true]):focus {
-  color: var(--text-emphasis);
-}
-html.dark[data-accent] :is(input,textarea)::placeholder {
-  color: var(--surface-text); opacity: 1;
-}
-html.dark[data-accent] :is(
-  .workspace-icon, .workspace-toolbar-button, .settings-rail-icon,
-  .settings-menu-item, .settings-back-arrow, .settings-advanced-heading button,
-  .reading-chat-header button, .reading-chat-prompts button,
-  .organizer-text-button, .reader-collapse-toggle
-):not(:disabled):hover { color: var(--text-emphasis); }
-html.dark[data-accent] :is(
-  .workspace-icon--active, .settings-rail-icon.is-active, .settings-menu-item.is-active,
-  .settings-provider-item.is-active, [data-note-select][aria-current=true],
-  [role=tab][data-state=active]
-) { color: var(--text-emphasis); }
-html.dark[data-accent] .settings-menu-item.is-active svg { color: inherit; }
-html.dark[data-accent] :is(.settings-menu-item,.settings-rail-icon):hover svg { color: inherit; }
-
-html.dark[data-accent] [data-slot=button]:not(.bg-primary):not(.bg-destructive):not(.text-destructive):not(:disabled):hover {
-  color: var(--text-emphasis);
-}
-html.dark[data-accent] [data-slot=select-trigger]:not(:disabled) > svg { opacity: 1; }
-html.dark[data-accent] [data-slot=select-item]:is([data-highlighted],[data-state=checked]) svg { color: inherit; }
-
-/* Reading toolbar toggles share one selected treatment, including compact mode. */
-html[data-accent] :is(.workspace-note-header,.reader-tools) button[aria-pressed=true] {
-  background: var(--primary-light);
-  color: var(--primary);
-}
-html.dark[data-accent] :is(.workspace-note-header,.reader-tools) button[aria-pressed=true] {
-  color: var(--text-emphasis);
-}
+html[data-accent] :is(.workspace-note-header,.reader-tools) button[aria-pressed=true] { background:var(--surface-selected); color:var(--text-emphasis); }
+html[data-accent] [data-slot=select-trigger]:not(:disabled) > svg { opacity:1; }
+html[data-accent] [data-slot=select-item]:is([data-highlighted],[data-state=checked]) svg { color:inherit; }
+html[data-accent] ::-webkit-scrollbar-track { background:transparent; }
+html[data-accent] ::-webkit-scrollbar-thumb { background:var(--surface-border-strong); border:2px solid transparent; background-clip:padding-box; border-radius:6px; }
+html[data-accent] ::-webkit-scrollbar-thumb:hover { background-color:var(--surface-description); }

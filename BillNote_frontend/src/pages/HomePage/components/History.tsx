@@ -2,15 +2,15 @@ import NoteHistory from '@/pages/HomePage/components/NoteHistory.tsx'
 import FolderSidebar from '@/pages/HomePage/components/FolderSidebar.tsx'
 import { useTaskStore } from '@/store/taskStore'
 import { useFolderStore } from '@/store/folderStore'
-import { Clock } from 'lucide-react'
+import { PanelLeftClose } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
-interface HistoryProps { onSelectNote?: (taskId: string) => void }
+interface HistoryProps { onSelectNote?: (taskId: string) => void; onCollapse?: () => void }
 
-const History = ({ onSelectNote }: HistoryProps) => {
+const History = ({ onSelectNote, onCollapse }: HistoryProps) => {
   const [archived, setArchived] = useState(false)
   const [folderDialog, setFolderDialog] = useState<{ mode: 'create' | 'rename' | 'delete', id?: string } | null>(null)
   const [folderName, setFolderName] = useState('')
@@ -44,7 +44,7 @@ const History = ({ onSelectNote }: HistoryProps) => {
   }
   const foldersReady = loadState === 'ready'
   return <div className="flex h-full min-h-0 w-full flex-col gap-2 px-2 py-2">
-    <div className="flex h-7 shrink-0 items-center gap-2 px-1"><Clock className="h-3.5 w-3.5 text-muted-foreground" /><h2 className="text-sm font-medium text-foreground">笔记库</h2><span className="ml-auto text-xs tabular-nums text-muted-foreground">{tasks.length}</span></div>
+    <header className="workspace-library-heading"><h2>笔记库</h2><span className="workspace-library-count">{tasks.length}</span>{onCollapse && <button type="button" className="workspace-icon" title="收起笔记栏" aria-label="收起笔记栏" onClick={onCollapse}><PanelLeftClose size={17} /></button>}</header>
     <div className="flex shrink-0 border-b border-border" role="tablist" aria-label="笔记分类">
       {([false, true] as const).map(value => <button key={String(value)} type="button" role="tab" aria-selected={archived === value} onClick={() => setArchived(value)} className={`min-w-0 flex-1 border-b-2 px-1 py-1.5 text-xs ${archived === value ? 'border-primary font-medium text-primary' : 'border-transparent text-muted-foreground'}`}>{value ? '归档区' : '正常笔记'}</button>)}
     </div>

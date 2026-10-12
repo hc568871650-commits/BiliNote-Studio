@@ -3,6 +3,7 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import { defaultAISettings, type AISettings } from '@/utils/aiSettings'
 import { actOrganizerSession, compactOrganizerSession, createOrganizerSession, getOrganizerSession, listOrganizerSessions, messageOrganizerSession, previewOrganizerRetention, retentionFailure, type OrganizerRetentionPreview, type OrganizerPlan, type OrganizerPlanRequest, type OrganizerResult, type OrganizerScope, type OrganizerSession } from '@/services/organizer'
 import type { PurposeModelSelection } from '@/store/purposeModelStore'
+import type { ChatErrorDetails, ChatSource } from '@/services/chat'
 
 export interface OrganizerMessage {
   id: string
@@ -12,6 +13,7 @@ export interface OrganizerMessage {
   plan?: OrganizerPlan
   result?: OrganizerResult
   phase?: 'pending' | 'executed' | 'undone' | 'cancelled' | 'superseded'
+  sources?: ChatSource[]
 }
 interface OrganizerStore {
   messages: OrganizerMessage[]
@@ -29,6 +31,7 @@ interface OrganizerStore {
   busy: 'planning' | 'executing' | 'undoing' | 'loading' | 'cancelling' | 'compacting' | null
   compactNotice: string | null
   error: string | null
+  errorDetails: ChatErrorDetails | null
   retentionPreview: OrganizerRetentionPreview | null
   confirmCreation: () => Promise<void>
   cancelCreation: () => void
@@ -52,12 +55,13 @@ const storageKey = 'bilinote-organizer-active-session-v1' + (typeof location !==
 const remember = (id: string) => { try { localStorage.setItem(storageKey, id) } catch { /* Storage is optional. */ } }
 const remembered = () => { try { return localStorage.getItem(storageKey) } catch { return null } }
 const errorText = (error: unknown) => { const detail = error as { msg?: string; message?: string }; return detail?.msg || detail?.message || '请求未完成，请检查连接后重试。' }
+const errorDetails = (error: unknown): ChatErrorDetails | null => (error as { data?: { error_details?: ChatErrorDetails } })?.data?.error_details || null
 const missingSession = (error: unknown) => (error as { code?: number })?.code === 404
 const supported = ['create_folder', 'rename_folder', 'move_notes', 'set_tags', 'archive', 'restore']
 const snapshotMessages = (session: OrganizerSession): OrganizerMessage[] => {
   if (!session.session_id || !Number.isInteger(session.revision) || !Array.isArray(session.history)) throw new Error('会话返回格式无效，请重新读取。')
   if (session.plan && (!Array.isArray(session.plan.operations) || session.plan.operations.some(operation => !supported.includes(operation.type)) || (session.plan.operations.length && (!session.plan.plan_id || session.plan.metadata_only !== true)))) throw new Error('计划缺少安全确认信息，未执行任何操作。')
-  const messages: OrganizerMessage[] = session.history.filter(item => item.role !== 'system').map(item => ({ id: item.id, role: item.role as 'user' | 'assistant', text: item.content, phase: item.phase === 'pending' ? undefined : item.phase }))
+  const messages: OrganizerMessage[] = session.history.filter(item => item.role !== 'system').map(item => ({ id: item.id, role: item.role as 'user' | 'assistant', text: item.content, sources: item.sources?.map(source => ({ ...source })), phase: item.phase === 'pending' ? undefined : item.phase }))
   let lastAssistant = -1
   messages.forEach((item, index) => { if (item.role === 'assistant') lastAssistant = index })
   if (session.status === 'awaiting_approval') {
@@ -82,7 +86,7 @@ export const useOrganizerStore = create<OrganizerStore>()(persist((set, get) => 
       ++epoch
       pendingCreation = null
       try { localStorage.removeItem(storageKey) } catch { /* optional */ }
-      set({ session: null, messages: [], error: null, retentionPreview: null, scope: 'all', folderId: 'default', selectedIds: [] })
+      set({ session: null, messages: [], error: null, errorDetails: null, retentionPreview: null, scope: 'all', folderId: 'default', selectedIds: [] })
     }
     try { localStorage.setItem(storageKey + '-runtime', next) } catch { /* optional */ }
   }
@@ -134,12 +138,11 @@ export const useOrganizerStore = create<OrganizerStore>()(persist((set, get) => 
     const messages = snapshotMessages(session)
     trustedSnapshot = true
     remember(session.session_id)
-    const queryScope = session.query_scope || { kind: 'all' as const }
-    set(state => ({ session, messages, error: session.error, ...(restoreScope ? { scope: queryScope.kind, folderId: queryScope.folder_id || 'default', selectedIds: queryScope.task_ids || [] } : {}), sessions: [session, ...state.sessions.filter(item => item.session_id !== session.session_id)] }))
+    set(state => ({ session, messages, error: session.error, errorDetails: session.error_details || null, ...(restoreScope ? { scope: 'all' as const, folderId: 'default', selectedIds: [] } : {}), sessions: [session, ...state.sessions.filter(item => item.session_id !== session.session_id)] }))
   }
   const reloadAfterError = async (id: string, token: number, error: unknown) => {
     try { apply(await getOrganizerSession(id), token) } catch (reloadError) { if (token === epoch && missingSession(reloadError)) { forgetMissing(); return } }
-    if (token === epoch) set({ error: errorText(error) })
+    if (token === epoch) set({ error: errorText(error), errorDetails: errorDetails(error) || get().session?.error_details || null })
   }
   const action = async (kind: 'approve' | 'undo', messageId: string) => {
     const state = get(), session = state.session, message = state.messages.find(item => item.id === messageId)
@@ -155,7 +158,7 @@ export const useOrganizerStore = create<OrganizerStore>()(persist((set, get) => 
     finally { if (token === epoch) set({ busy: null }) }
   }
   return {
-    messages: [], session: null, sessions: [], initialized: false, draft: '', scope: 'all', folderId: 'default', selectedIds: [], model: null, modelOverridden: false, controls: defaultAISettings, busy: null, error: null, retentionPreview: null, compactNotice: null,
+    messages: [], session: null, sessions: [], initialized: false, draft: '', scope: 'all', folderId: 'default', selectedIds: [], model: null, modelOverridden: false, controls: defaultAISettings, busy: null, error: null, errorDetails: null, retentionPreview: null, compactNotice: null,
     setControls: controls => set({ controls: { ...controls, context_limit: 272000 } }),
     confirmCreation: () => createNew(true),
     cancelCreation: () => { if (!get().busy) { pendingCreation = null; set({ retentionPreview: null, error: null }) } },
@@ -196,7 +199,7 @@ export const useOrganizerStore = create<OrganizerStore>()(persist((set, get) => 
         const token = ++epoch
         set({ busy: 'compacting', error: null, compactNotice: null, draft: '' })
         try {
-          const result = await compactOrganizerSession(session.session_id, { expected_revision: session.revision, request_id: crypto.randomUUID(), provider_id: request.provider_id, model_name: request.model_name })
+          const result = await compactOrganizerSession(session.session_id, { expected_revision: session.revision, request_id: crypto.randomUUID(), provider_id: request.provider_id, model_name: request.model_name, protocol: request.protocol || 'openai-chat' })
           apply(result, token)
           if (token === epoch) set({ compactNotice: (result.memory?.compacted_messages || 0) > (session.memory?.compacted_messages || 0) ? '上下文压缩完成，完整记录与待确认计划已保留' : '当前上下文无需压缩' })
         } catch (error) { await reloadAfterError(session.session_id, token, error); if (token === epoch) set({ draft: request.instruction }) }
@@ -237,7 +240,7 @@ export const useOrganizerStore = create<OrganizerStore>()(persist((set, get) => 
     },
     clear: async () => {
       if (get().busy || get().retentionPreview || !get().messages.length) return
-      pendingCreation = { scope: { kind: get().scope, ...(get().scope === 'folder' ? { folder_id: get().folderId } : get().scope === 'selected' ? { task_ids: get().selectedIds } : {}) }, requestId: crypto.randomUUID() }
+      pendingCreation = { scope: { kind: 'all' }, requestId: crypto.randomUUID() }
       await createNew()
     },
   }

@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "BiliNote Studio",
   "mainBinaryName": "BiliNoteStudio",
-  "version": "0.1.0-preview.1",
+  "version": "0.1.0-preview.8",
   "identifier": "com.bilinote.studio.full",
   "build": {
     "frontendDist": "../dist",
@@ -42,8 +42,8 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "icons/icon.ico",
-      "icons/icon.png"
+      "icons/studio.ico",
+      "icons/studio.png"
     ]
   }
 }

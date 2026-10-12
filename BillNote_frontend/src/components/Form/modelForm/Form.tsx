@@ -1,3 +1,4 @@
+import ModelCapabilitiesPanel from '@/components/ModelCapabilitiesPanel'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Plus, Trash2, Check, Eye, EyeOff } from 'lucide-react'
@@ -82,6 +83,7 @@ export default function ProviderForm({ isCreate = false }: { isCreate?: boolean 
         setProtocolPreference(id, protocol)
         drafts.delete(key); setSaved(true)
       }
+      window.dispatchEvent(new Event('user-save-provider'))
       toast.success('服务商配置已保存')
     } catch { /* Request layer displays the exact failure. */ }
     finally { setBusy(false) }
@@ -107,13 +109,14 @@ export default function ProviderForm({ isCreate = false }: { isCreate?: boolean 
         <div className="settings-field"><label htmlFor="provider-name">服务商名称</label><input id="provider-name" value={draft.name} disabled={builtIn} onChange={event => change('name', event.target.value)} placeholder="例如：我的模型服务" /></div>
         <div className="settings-field"><label htmlFor="provider-url">API 地址 · {customEditing && profile.kind === 'official' ? '自定义编辑' : profile.label}</label><input id="provider-url" value={draft.baseUrl} readOnly={urlReadOnly} onChange={event => change('baseUrl', event.target.value)} placeholder="https://example.com/v1" /><small>{profile.hostname ? `实际域名：${profile.hostname}。` : '请填写完整的 HTTP API 地址。'} 分类依据实际地址，不代表已经验证可用。</small>{urlReadOnly && <button type="button" className="settings-button" onClick={() => setCustomEditing(true)}>转为自定义编辑</button>}{customEditing && <small>地址修改在保存后生效；不会自动恢复官方地址。</small>}</div>
         <div className="settings-field"><label htmlFor="provider-key">API 密钥</label><div className="settings-key-input"><input id="provider-key" type={showKey ? 'text' : 'password'} autoComplete="off" value={draft.apiKey} onChange={event => change('apiKey', event.target.value)} placeholder="输入 API 密钥" /><button type="button" aria-label={showKey ? '隐藏密钥' : '显示密钥'} onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff size={16} /> : <Eye size={16} />}</button></div><small>已有密钥以掩码显示，保持不变即可沿用。未保存的修改只保留在本次会话内。</small></div>
-        <div className="settings-field"><label>阅读聊天协议</label><ChoiceSelect label="阅读聊天协议" value={protocol} options={providerProtocolOptions} onChange={value => { setProtocol(value as ProviderProtocol); setSaved(false) }} /><small>仅影响阅读问答及其上下文压缩，不影响视频笔记生成。请按服务商实际支持的协议选择；此选择不代表连接测试通过，保存配置后生效。</small></div>
+        <div className="settings-field"><label>助手调用协议</label><ChoiceSelect label="助手调用协议" value={protocol} options={providerProtocolOptions} onChange={value => { setProtocol(value as ProviderProtocol); setSaved(false) }} /><small>用于阅读问答、资料库助手及其上下文压缩；视频笔记生成仍使用生成连接。请按服务商实际支持的协议选择；此选择不代表连接测试通过，保存配置后生效。</small></div>
       </section>
       <div className="settings-actions"><button className="settings-button is-primary" disabled={busy} type="submit">{busy ? '处理中…' : '保存配置'}</button>{saved && <span className="settings-saved"><Check size={14} />已保存</span>}</div>
     </form>
     {!isCreate && <>
       <h2 className="settings-section-title">连接与模型测试</h2>
-      <section className="settings-card"><div className="settings-row"><div><h2>测试生成模型连接（Chat Completions）</h2><p>使用保存后的地址、密钥和所选模型发出一条真实请求，可能产生少量 API 用量。最多等待约 60 秒。此测试不验证所选阅读聊天协议。</p></div><ChoiceSelect label="连接测试模型" value={models.some(model => model.model_name === testModel) ? testModel : ''} onChange={setTestModel} disabled={busy || !models.length} options={[{value:'',label:'请选择已添加模型'}, ...models.map(model => ({value:model.model_name,label:model.model_name}))]} /></div><div className="settings-row"><div><p>{models.length ? '选择后点击测试；只有收到可显示的模型回复才判定成功。' : '请先在下方添加聊天模型；音频转写模型在音频设置中测试。'}</p></div><button className="settings-button" disabled={busy || !models.some(model => model.model_name === testModel)} type="button" onClick={() => { if (drafts.has(key)) { toast.error('请先保存配置再测试'); return }; void run(async () => { await testConnection({ id, model:testModel }); toast.success(`${testModel} 生成模型连接测试成功`) }) }}>测试生成连接</button></div></section>
+      <section className="settings-card"><div className="settings-row"><div><h2>测试生成模型连接（Chat Completions）</h2><p>使用保存后的地址、密钥和所选模型发出一条真实请求，可能产生少量 API 用量。最多等待约 60 秒。此测试不验证所选助手调用协议。</p></div><ChoiceSelect label="连接测试模型" value={models.some(model => model.model_name === testModel) ? testModel : ''} onChange={setTestModel} disabled={busy || !models.length} options={[{value:'',label:'请选择已添加模型'}, ...models.map(model => ({value:model.model_name,label:model.model_name}))]} /></div><div className="settings-row"><div><p>{models.length ? '选择后点击测试；只有收到可显示的模型回复才判定成功。' : '请先在下方添加聊天模型；音频转写模型在音频设置中测试。'}</p></div><button className="settings-button" disabled={busy || !models.some(model => model.model_name === testModel)} type="button" onClick={() => { if (drafts.has(key)) { toast.error('请先保存配置再测试'); return }; void run(async () => { await testConnection({ id, model:testModel }); toast.success(`${testModel} 生成模型连接测试成功`) }) }}>测试生成连接</button></div></section>
+      <ModelCapabilitiesPanel providerId={id!} models={models} protocol={protocol} disabled={busy || drafts.has(key) || protocol !== (useProviderProtocolStore.getState().protocols[id!] || 'openai-chat')} />
       <h2 className="settings-section-title">可用模型</h2>
       <section className="settings-card">
         <div className="settings-row"><div><h2>添加模型</h2><p>支持从服务商加载，也可直接输入完整模型名称。</p></div><button className="settings-button" disabled={busy} onClick={() => void run(async () => {

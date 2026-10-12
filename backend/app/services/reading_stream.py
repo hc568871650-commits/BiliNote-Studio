@@ -1,12 +1,20 @@
 """True upstream deltas, normalized to the existing reading response shape."""
 import json
 
-from app.services.protocol_clients import _dict, _response, _call, _responses_input, _anthropic_input
+from app.services.protocol_clients import _dict, _response, _call, _responses_input, _anthropic_input, responses_options, anthropic_options
 from app.utils.ai_errors import SafeAIError, error_details, ProtocolResponseError
 
 
 def _data(value):
     return value if isinstance(value, dict) else _dict(value)
+
+
+def _request_id(stream):
+    identifier = getattr(stream, '_request_id', None)
+    if isinstance(identifier, str):
+        return identifier
+    headers = getattr(getattr(stream, 'response', None), 'headers', {})
+    return headers.get('x-request-id') or headers.get('request-id')
 
 
 def _track(upstream, cancellation):
@@ -30,7 +38,7 @@ def _chat(client, model, messages, options, cancellation):
         for chunk in upstream:
             data = _data(chunk)
             if data.get('error'):
-                raise ProtocolResponseError(data['error'])
+                raise ProtocolResponseError(data['error'], request_id=_request_id(upstream))
             if data.get('usage'):
                 count = data['usage'].get('prompt_tokens')
             for choice in data.get('choices') or []:
@@ -57,19 +65,8 @@ def _chat(client, model, messages, options, cancellation):
 
 
 def _responses(client, model, messages, options, cancellation):
-    kwargs = {'model': model, 'input': _responses_input(messages), 'store': False,
-              'include': ['reasoning.encrypted_content'], 'stream': True}
-    options = dict(options)
-    effort = options.pop('reasoning_effort', None)
-    if effort is not None:
-        kwargs['reasoning'] = {'effort': effort}
-    for key in ('max_tokens', 'max_completion_tokens'):
-        if key in options:
-            kwargs['max_output_tokens'] = options.pop(key)
-    tools = options.pop('tools', None)
-    if tools:
-        kwargs['tools'] = [{'type': 'function', 'strict': False, **t['function']} for t in tools]
-    kwargs.update(options)
+    kwargs = responses_options(model, messages, options)
+    kwargs['stream'] = True
     try:
         upstream = client.client.responses.create(**kwargs)
     except TypeError:
@@ -82,9 +79,11 @@ def _responses(client, model, messages, options, cancellation):
             kind = data.get('type')
             if kind == 'response.output_text.delta':
                 yield {'type': 'delta', 'text': data.get('delta') or ''}
+            elif kind in ('response.web_search_call.in_progress', 'response.web_search_call.searching'):
+                yield {'type': 'status', 'phase': 'searching'}
             elif kind in ('error', 'response.failed'):
                 failed = data.get('response') or data
-                raise ProtocolResponseError(failed.get('error') or failed)
+                raise ProtocolResponseError(failed.get('error') or failed, request_id=_request_id(upstream))
             elif kind in ('response.completed', 'response.incomplete'):
                 final = data['response']
         if final is None:
@@ -97,25 +96,15 @@ def _responses(client, model, messages, options, cancellation):
             elif item.get('type') == 'function_call':
                 calls.append(_call(item['call_id'], item['name'], item['arguments']))
         reason = 'length' if (final.get('incomplete_details') or {}).get('reason') == 'max_output_tokens' else 'content_filter' if final.get('status') == 'incomplete' else 'stop'
-        return _response(''.join(text), calls, (final.get('usage') or {}).get('input_tokens'), reason, native)
+        return _response(''.join(text), calls, (final.get('usage') or {}).get('input_tokens'), reason, native,
+                         final.get('usage'), _request_id(upstream), final.get('reasoning'))
     finally:
         upstream.close()
 
 
 def _anthropic(client, model, messages, options, cancellation):
-    system, wire = _anthropic_input(messages)
-    options = dict(options)
-    payload = {'model': model, 'messages': wire, 'stream': True,
-               'max_tokens': options.pop('max_tokens', options.pop('max_completion_tokens', 4096))}
-    if system:
-        payload['system'] = system
-    tools = options.pop('tools', None)
-    if tools:
-        payload['tools'] = [{'name': t['function']['name'], 'description': t['function'].get('description', ''),
-                             'input_schema': t['function']['parameters']} for t in tools]
-    if options.pop('tool_choice', None) == 'none':
-        payload['tool_choice'] = {'type': 'none'}
-    payload.update(options)
+    payload = anthropic_options(model, messages, options)
+    payload['stream'] = True
     blocks, arguments, count, reason, finished = {}, {}, None, 'stop', False
     with client.client.stream('POST', client.url, headers={'x-api-key': client.api_key,
             'anthropic-version': '2023-06-01', 'content-type': 'application/json'}, json=payload) as upstream:

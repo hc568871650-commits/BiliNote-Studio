@@ -1,11 +1,12 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
+import { persist } from 'zustand/middleware'
 import { archiveNote, deleteNote, generateNote, getNote, importNotes, listNotes, restoreNote } from '@/services/note.ts'
 import { useChatStore } from '@/store/chatStore'
 import { useReadingAssistantStore, permanentSessionKey, temporarySessionKey } from '@/store/readingAssistantStore'
 import { v4 as uuidv4 } from 'uuid'
 import toast from 'react-hot-toast'
-import { get, set, del } from 'idb-keyval'
+import { createTaskStorage } from '@/utils/taskStorage'
+import { mergeTaskSnapshot } from '@/utils/taskProgress'
 
 
 export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | string
@@ -37,6 +38,8 @@ export interface Markdown {
   content: string
   style: string
   model_name: string
+  provider_id?: string
+  protocol?: 'openai-chat' | 'openai-responses' | 'anthropic'
   created_at: string
   resource_base?: string
 }
@@ -46,11 +49,23 @@ export interface Task {
   markdown: string|Markdown [] //为了兼容之前的笔记
   transcript: Transcript
   status: TaskStatus
+  statusMessage?: string
+  last_active_status?: string
+  started_at?: string | null
+  finished_at?: string | null
+  status_updated_at?: string | null
+  pollingError?: string
+  lastStatusAt?: number
+  phaseStartedAt?: number
+  attemptStartedAt?: number
+  submissionError?: string
+  submissionInFlight?: boolean
   audioMeta: AudioMeta
   createdAt: string
   archived_at?: string | null
   resource_base?: string
   formData: {
+    request_id?: string
     video_url: string
     link: undefined | boolean
     screenshot: undefined | boolean
@@ -76,7 +91,11 @@ interface TaskStore {
   setCurrentTask: (taskId: string | null) => void
   getCurrentTask: () => Task | null
   retryTask: (id: string, payload?: any) => Promise<void>
+  resumeSubmission: (id: string) => Promise<void>
 }
+
+const taskStorage = createTaskStorage<TaskStore>()
+const submittingTasks = new Set<string>()
 
 export const useTaskStore = create<TaskStore>()(
   persist(
@@ -92,6 +111,9 @@ export const useTaskStore = create<TaskStore>()(
               formData: formData,
               id: taskId,
               status: 'PENDING',
+              last_active_status: 'PENDING',
+              phaseStartedAt: Date.now(),
+              attemptStartedAt: Date.now(),
               markdown: '',
               platform: platform,
               transcript: {
@@ -107,7 +129,7 @@ export const useTaskStore = create<TaskStore>()(
                 file_path: '',
                 platform: '',
                 raw_info: null,
-                title: '',
+                title: platform === 'local' ? formData.video_url?.split(/[\\/]/).pop() || '' : formData.title || '',
                 video_id: '',
               },
             },
@@ -121,7 +143,11 @@ export const useTaskStore = create<TaskStore>()(
             tasks: state.tasks.map(task => {
               if (task.id !== id) return task
 
-              if (task.status === 'SUCCESS' && data.status === 'SUCCESS') return task
+              // Repeated SUCCESS must not append duplicate versions, but still refresh progress.
+              if (task.status === 'SUCCESS' && data.status === 'SUCCESS' && typeof data.markdown === 'string') {
+                const { markdown: _markdown, ...metadata } = data
+                return { ...task, ...metadata }
+              }
 
               // 如果是 markdown 字符串，封装为版本
               if (typeof data.markdown === 'string') {
@@ -173,48 +199,86 @@ export const useTaskStore = create<TaskStore>()(
 
         if (!id){
           toast.error('任务不存在')
-          return
+          throw new Error('任务不存在')
         }
         const task = get().tasks.find(task => task.id === id)
-        console.log('retry',task)
-        if (!task) return
+        if (!task) throw new Error('任务不存在')
+        const resuming = Boolean(payload?.resume_submission && task.status === 'SUBMISSION_UNKNOWN' && payload.request_id === task.formData.request_id)
+        if (submittingTasks.has(id) || (!resuming && !['SUCCESS', 'FAILED'].includes(task.status))) throw new Error('当前请求尚未结束，请等待自动核对结果，避免重复提交')
         if (task.archived_at) {
           toast.error('请先恢复归档笔记再重新生成')
-          return
+          throw new Error('请先恢复归档笔记再重新生成')
         }
 
-        const newFormData = payload || task.formData
+        const { resume_submission: _resume, ...submissionData } = payload || task.formData
+        const newFormData = { ...submissionData, request_id: payload?.request_id || uuidv4() }
+        submittingTasks.add(id)
+        get().updateTaskContent(id, {
+          formData: newFormData, status: 'SUBMISSION_UNKNOWN', submissionInFlight: true,
+          statusMessage: '提交结果尚未确认，正在自动核对同一请求；请勿重复提交。',
+          ...(resuming ? {} : { last_active_status: undefined, started_at: undefined, finished_at: undefined, status_updated_at: undefined, lastStatusAt: undefined, pollingError: undefined, attemptStartedAt: Date.now() }),
+        })
         try {
+          // Save the idempotency key before network I/O so a crash cannot lose this attempt.
+          await taskStorage.flush()
           await generateNote({
             ...newFormData,
             task_id: id,
-          })
+          }, { suppressToast: true })
         } catch (e: any) {
-          // 就绪门禁：转写模型未下载好。不要把任务标成 PENDING（会一直转），
-          // 给提示让用户先去下载。
-          if (e?.data?.reason === 'transcriber_model_not_ready') {
-            toast.error(
-              e?.data?.downloading
-                ? '转写模型正在下载中，请稍候再重试'
-                : '转写模型尚未下载，请先去「设置 → 音频转写配置」页下载',
-            )
-            return
-          }
           console.error('重试任务失败：', e)
-          return
+          const uncertain = !e?.code || e.code === -1 || e.code >= 500
+          const current = get().tasks.find(t => t.id === id)
+          if (!uncertain && !resuming && current?.status === 'SUBMISSION_UNKNOWN' && current.formData.request_id === newFormData.request_id) {
+            set(state => ({ tasks: state.tasks.map(t => t.id === id ? { ...task, submissionInFlight: false, submissionError: e?.msg || e?.message || '提交被拒绝' } : t) }))
+            throw e
+          }
+          get().updateTaskContent(id, {
+            submissionError: e?.msg || e?.message || '提交结果未知，请按任务编号核对后再决定是否重新提交',
+            ...(uncertain && current?.status === 'SUBMISSION_UNKNOWN' ? {
+              formData: newFormData,
+              status: 'SUBMISSION_UNKNOWN',
+              statusMessage: '提交结果尚未确认，正在自动核对同一请求；请勿重复提交。',
+              last_active_status: undefined,
+              started_at: undefined,
+              finished_at: undefined,
+              lastStatusAt: undefined,
+              pollingError: undefined,
+            } : {}),
+          })
+          throw e
+        } finally {
+          submittingTasks.delete(id)
+          get().updateTaskContent(id, { submissionInFlight: false })
         }
 
         set(state => ({
           tasks: state.tasks.map(t =>
-              t.id === id
+              t.id === id && t.status === 'SUBMISSION_UNKNOWN' && t.formData.request_id === newFormData.request_id
                   ? {
                     ...t,
                     formData: newFormData, // ✅ 显式更新 formData
                     status: 'PENDING',
+                    last_active_status: 'PENDING',
+                    started_at: undefined,
+                    finished_at: undefined,
+                    status_updated_at: undefined,
+                    statusMessage: '',
+                    pollingError: undefined,
+                    submissionError: undefined,
+                    lastStatusAt: undefined,
+                    phaseStartedAt: Date.now(),
+                    attemptStartedAt: t.attemptStartedAt,
                   }
                   : t
           ),
         }))
+      },
+
+      resumeSubmission: async id => {
+        const task = get().tasks.find(t => t.id === id)
+        if (!task || task.status !== 'SUBMISSION_UNKNOWN' || !task.formData.request_id) throw new Error('没有待核对的提交请求')
+        await get().retryTask(id, { ...task.formData, resume_submission: true })
       },
 
 
@@ -225,7 +289,11 @@ export const useTaskStore = create<TaskStore>()(
           if (localTasks.length) await importNotes(localTasks)
           const remote = await listNotes()
           set(state => ({
-            tasks: remote,
+            tasks: remote.map(t => {
+              const local = state.tasks.find(existing => existing.id === t.id)
+              const before = localTasks.find(existing => existing.id === t.id)
+              return local && local.formData?.request_id !== before?.formData?.request_id ? local : mergeTaskSnapshot(local, t)
+            }),
             currentTaskId: state.currentTaskId && remote.some(t => t.id === state.currentTaskId)
               ? state.currentTaskId : null,
           }))
@@ -235,9 +303,10 @@ export const useTaskStore = create<TaskStore>()(
         }
       },
       loadTask: async id => {
+        const before = get().tasks.find(t => t.id === id)
         try {
           const detail = await getNote(id)
-          set(state => ({ tasks: state.tasks.map(t => t.id === id ? detail : t) }))
+          set(state => ({ tasks: state.tasks.map(t => t.id === id && t.formData?.request_id === before?.formData?.request_id && t.attemptStartedAt === before?.attemptStartedAt ? mergeTaskSnapshot(t, detail) : t) }))
         } catch (error) {
           console.error('加载笔记失败', error)
         }
@@ -247,12 +316,12 @@ export const useTaskStore = create<TaskStore>()(
         if (!task || !['SUCCESS', 'FAILED'].includes(task.status)) return
         const updated = await archiveNote(id)
         set(state => ({
-          tasks: state.tasks.map(t => t.id === id ? updated : t),
+          tasks: state.tasks.map(t => t.id === id ? mergeTaskSnapshot(t, updated) : t),
         }))
       },
       restoreTask: async id => {
         const updated = await restoreNote(id)
-        set(state => ({ tasks: state.tasks.map(t => t.id === id ? updated : t) }))
+        set(state => ({ tasks: state.tasks.map(t => t.id === id ? mergeTaskSnapshot(t, updated) : t) }))
       },
       removeTask: async id => {
         await deleteNote(id)
@@ -269,18 +338,7 @@ export const useTaskStore = create<TaskStore>()(
     }),
     {
       name: 'task-storage',
-      storage: createJSONStorage(() => ({
-        getItem: async (name: string): Promise<string | null> => {
-          const value = await get(name)
-          return value ?? null
-        },
-        setItem: async (name: string, value: string): Promise<void> => {
-          await set(name, value)
-        },
-        removeItem: async (name: string): Promise<void> => {
-          await del(name)
-        },
-      })),
+      storage: taskStorage,
     }
   )
 )

@@ -24,7 +24,7 @@ def bootstrap(dependencies=None):
     os.environ['LANGCHAIN_TRACING_V2'] = 'false'
 
 
-def fake_client(provider_id, model_name):
+def fake_client(provider_id, model_name, protocol='openai-chat'):
     allowed = {'fixture', 'preview-1', 'preview-2', 'preview-3'}
     if provider_id not in allowed:
         raise ValueError('fixture仅支持明确的示例供应商，禁止调用真实服务商')
@@ -33,6 +33,8 @@ def fake_client(provider_id, model_name):
         if '上下文压缩器' in kwargs['messages'][0]['content']:
             return types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(
                 content='【合成模型的压缩摘要】用户希望整理示例笔记。所有操作以服务端范围和待确认计划为准，压缩没有执行任何修改。'))])
+        if '只读' in kwargs['messages'][0]['content'] or '资料库助手' in kwargs['messages'][0]['content']:
+            return types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(content='【模拟资料库回答】已查阅合成笔记。来源片段可在下方查看；没有操作真实资料。', tool_calls=[]))])
         payload = json.loads(kwargs['messages'][-1]['content'])
         instruction = payload['instruction']
         ids = [n['id'] for n in payload['notes'] if n['status'] in ('SUCCESS', 'FAILED')]

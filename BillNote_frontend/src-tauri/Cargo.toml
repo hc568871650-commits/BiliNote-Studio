@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0-preview.1"
+version = "0.1.0-preview.8"
 description = "BiliNote Studio video learning workspace"
 authors = ["BiliNote Studio contributors"]
 license = "MIT"

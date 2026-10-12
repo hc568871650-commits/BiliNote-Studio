@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="415" height="415" viewBox="0 0 415 415" fill="none">
+  <defs>
+    <mask id="studio-original-fill-cuts" maskUnits="userSpaceOnUse" x="0" y="0" width="415" height="415">
+      <rect width="415" height="415" fill="white"/>
+      <rect x="17" y="110" width="86" height="40" rx="20" fill="black"/>
+      <rect x="17" y="186" width="86" height="40" rx="20" fill="black"/>
+      <rect x="17" y="262" width="86" height="40" rx="20" fill="black"/>
+      <path d="M268.422 175.657C276.308 180.298 276.308 191.702 268.422 196.343L186.335 244.641C178.336 249.348 168.25 243.58 168.25 234.298V137.702C168.25 128.42 178.336 122.652 186.335 127.359L268.422 175.657Z" fill="black"/>
+      <path d="M145 290C145 285.582 148.582 282 153 282H284C288.418 282 292 285.582 292 290V299C292 303.418 288.418 307 284 307H153C148.582 307 145 303.418 145 299V290Z" fill="black"/>
+      <!-- Badge height 112.8 = previous 94 * 1.2; clearance remains 14 units (28-unit stroke). -->
+      <path d="M355 287.6C364 323 376 335 411.4 344C376 353 364 365 355 400.4C346 365 334 353 298.6 344C334 335 346 323 355 287.6Z" fill="black" stroke="black" stroke-width="28" stroke-linejoin="round"/>
+    </mask>
+  </defs>
+  <rect x="60" y="64" width="296" height="283" rx="37" fill="#fff" mask="url(#studio-original-fill-cuts)"/>
+  <g fill="#fff">
+    <rect x="38" y="116" width="58" height="27" rx="13.5"/>
+    <rect x="38" y="192" width="58" height="27" rx="13.5"/>
+    <rect x="38" y="268" width="58" height="27" rx="13.5"/>
+    <path d="M355 287.6C364 323 376 335 411.4 344C376 353 364 365 355 400.4C346 365 334 353 298.6 344C334 335 346 323 355 287.6Z"/>
+  </g>
+</svg>

@@ -29,14 +29,17 @@ def get_client(provider_id, model_name, protocol='openai-chat'):
         from types import SimpleNamespace
         from app.services.protocol_clients import AnthropicClient
         from app.services.proxy_config_manager import ProxyConfigManager
-        return SimpleNamespace(model=model_name, client=AnthropicClient(provider['api_key'], provider['base_url'],
-                                                                       proxy=ProxyConfigManager().get_proxy_url()))
+        client = AnthropicClient(provider['api_key'], provider['base_url'], proxy=ProxyConfigManager().get_proxy_url())
+        client.bilinote_provider_id = provider_id
+        return SimpleNamespace(model=model_name, client=client)
     if protocol == 'openai-responses':
         from types import SimpleNamespace
         from app.services.protocol_clients import ResponsesClient
         from app.utils.openai_client import build_openai_client
         client = build_openai_client(provider['api_key'], provider['base_url'], timeout=120.0).with_options(max_retries=0)
-        return SimpleNamespace(model=model_name, client=ResponsesClient(client))
+        adapted = ResponsesClient(client)
+        adapted.bilinote_provider_id = provider_id
+        return SimpleNamespace(model=model_name, client=adapted)
     if protocol != 'openai-chat':
         raise ValueError('不支持所选阅读协议')
     config = ModelConfig(api_key=provider['api_key'], base_url=provider['base_url'],
@@ -44,4 +47,5 @@ def get_client(provider_id, model_name, protocol='openai-chat'):
     gpt = GPTFactory.from_config(config)
     # UI can cancel waiting; keep synchronous provider work bounded and avoid SDK retries.
     gpt.client = gpt.client.with_options(max_retries=0, timeout=120.0)
+    gpt.client.bilinote_provider_id = provider_id
     return gpt

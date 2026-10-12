@@ -16,4 +16,6 @@ class GPTSource:
     _format: Optional[list] = None
     video_img_urls:  Optional[list] = None
     checkpoint_key: Optional[str] = None
+    frame_evidence: Optional[list[dict]] = None
+    video_image_ranges: Optional[list[dict]] = None
 

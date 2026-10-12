@@ -1,115 +1,63 @@
-from app.gpt.prompt import BASE_PROMPT
+from app.gpt.prompt import BASE_INSTRUCTIONS, SOURCE_PROMPT, LINK, SCREENSHOT
 
 note_formats = [
-    {'label': '目录', 'value': 'toc'},
-    {'label': '原片跳转', 'value': 'link'},
-    {'label': '原片截图', 'value': 'screenshot'},
-    {'label': 'AI总结', 'value': 'summary'}
+    {'label': '原片定位', 'value': 'link'},
+    {'label': '自动配图', 'value': 'screenshot'},
 ]
-
 note_styles = [
-    {'label': '精简', 'value': 'minimal'},
-    {'label': '详细', 'value': 'detailed'},
-    {'label': '学术', 'value': 'academic'},
-    {"label": '教程',"value": 'tutorial', },
-    {'label': '小红书', 'value': 'xiaohongshu'},
-    {'label': '生活向', 'value': 'life_journal'},
-    {'label': '任务导向', 'value': 'task_oriented'},
-    {'label': '商业风格', 'value': 'business'},
-    {'label': '会议纪要', 'value': 'meeting_minutes'}
+    {'label': '教程笔记', 'value': 'tutorial'},
+    {'label': '知识笔记', 'value': 'knowledge'},
 ]
 
+LEGACY_STYLE_MAP = {
+    'minimal': 'tutorial', 'detailed': 'tutorial', 'task_oriented': 'tutorial',
+    'academic': 'knowledge', 'xiaohongshu': 'knowledge', 'life_journal': 'knowledge',
+    'business': 'knowledge', 'meeting_minutes': 'knowledge',
+}
 
-# 生成 BASE_PROMPT 函数
+
+def normalize_note_style(style):
+    return style if style in ('tutorial', 'knowledge') else LEGACY_STYLE_MAP.get(style, 'tutorial')
+
+
 def generate_base_prompt(title, segment_text, tags, _format=None, style=None, extras=None):
-    # 生成 Base Prompt 开头部分
-    prompt = BASE_PROMPT.format(
-        video_title=title,
-        segment_text=segment_text,
-        tags=tags
-    )
-
-    # 添加用户选择的格式
-    if _format:
-        prompt += "\n" + "\n".join([get_format_function(f) for f in _format])
-
-    # 根据用户选择的笔记风格添加描述
-    if style:
-        prompt += "\n" + get_style_format(style)
-
-    # 添加额外内容
+    # 固定规则置于动态资料前，避免标题或分片字幕截断公共前缀。
+    prompt = BASE_INSTRUCTIONS
+    # 旧 toc/summary 请求被安全忽略；定位默认开启，配图仍尊重原请求。
+    prompt += '\n' + LINK
+    if 'screenshot' in (_format or []):
+        prompt += '\n' + SCREENSHOT
+    prompt += '\n' + get_style_format(style)
     if extras:
-        prompt += f"\n{extras}"
+        prompt += f'\n用户整理偏好（仍须遵守来源边界）：\n{extras}'
+    prompt += SOURCE_PROMPT.format(video_title=title or '', segment_text=segment_text, tags=tags or '')
     return prompt
 
 
-# 获取格式函数
-def get_format_function(format_type):
-    format_map = {
-        'toc': get_toc_format,
-        'link': get_link_format,
-        'screenshot': get_screenshot_format,
-        'summary': get_summary_format
-    }
-    return format_map.get(format_type, lambda: '')()
-
-
-# 风格描述的处理
 def get_style_format(style):
-    style_map = {
-        'minimal': '1. **精简信息**: 仅记录最重要的内容，简洁明了。',
-        'detailed': '2. **详细记录**: 包含完整的内容和每个部分的详细讨论。需要尽可能多的记录视频内容，最好详细的笔记',
-        'academic': '3. **学术风格**: 适合学术报告，正式且结构化。',
-        'xiaohongshu': '''4. **小红书风格**: 
-### 擅长使用下面的爆款关键词：
-好用到哭，大数据，教科书般，小白必看，宝藏，绝绝子神器，都给我冲,划重点，笑不活了，YYDS，秘方，我不允许，压箱底，建议收藏，停止摆烂，上天在提醒你，挑战全网，手把手，揭秘，普通女生，沉浸式，有手就能做吹爆，好用哭了，搞钱必看，狠狠搞钱，打工人，吐血整理，家人们，隐藏，高级感，治愈，破防了，万万没想到，爆款，永远可以相信被夸爆手残党必备，正确姿势
-
-### 采用二极管标题法创作标题：
-- 正面刺激法:产品或方法+只需1秒 (短期)+便可开挂（逆天效果）
-- 负面刺激法:你不XXX+绝对会后悔 (天大损失) +(紧迫感)
-利用人们厌恶损失和负面偏误的心理
-
-### 写作技巧
-1. 使用惊叹号、省略号等标点符号增强表达力，营造紧迫感和惊喜感。
-2. **使用emoji表情符号，来增加文字的活力**
-3. 采用具有挑战性和悬念的表述，引发读、“无敌者好奇心，例如“暴涨词汇量”了”、“拒绝焦虑”等
-4. 利用正面刺激和负面激，诱发读者的本能需求和动物基本驱动力，如“离离原上谱”、“你不知道的项目其实很赚”等
-5. 融入热点话题和实用工具，提高文章的实用性和时效性，如“2023年必知”、“chatGPT狂飙进行时”等
-6. 描述具体的成果和效果，强调标题中的关键词，使其更具吸引力，例如“英语底子再差，搞清这些语法你也能拿130+”
-7. 使用吸引人的标题：''',
-
-        'life_journal': '5. **生活向**: 记录个人生活感悟，情感化表达。',
-        'task_oriented': '6. **任务导向**: 强调任务、目标，适合工作和待办事项。',
-        'business': '7. **商业风格**: 适合商业报告、会议纪要，正式且精准。',
-        'meeting_minutes': '8. **会议纪要**: 适合商业报告、会议纪要，正式且精准。',
-        "tutorial":"9.**教程笔记**:尽可能详细的记录教程,特别是关键点和一些重要的结论步骤"
-    }
-    return style_map.get(style, '')
+    if normalize_note_style(style) == 'knowledge':
+        return '''知识笔记：围绕概念及其关系整理。保留定义、因果推理、作者举出的例子、适用条件、限制及原结论。
+把“是什么”“为什么”“何时适用”讲清楚；只在原片有依据时写相应内容，不补造案例或理论。'''
+    return '''教程笔记：围绕可复现的操作流程整理。保留操作对象、软件/版本前提、菜单路径、顺序、实际参数与单位、关键纠错及最终结果。
+将作者说明的原因或限制放在对应步骤旁；有实际数值时准确记录，未提供时不要发明默认参数。
+只在原片有依据时写准备、步骤、问题和结果等章节，不强凑固定模板。'''
 
 
-# 格式化输出内容
+def get_format_function(format_type):
+    return {'link': LINK, 'screenshot': SCREENSHOT}.get(format_type, '')
+
+
 def get_toc_format():
-    return '''
-    9. **目录**: 自动生成一个基于 `##` 级标题的目录。不需要插入原片跳转
-    '''
+    return ''
 
 
 def get_link_format():
-    return '''
-    10. **原片跳转**: 为每个主要章节添加时间戳，使用格式 `*Content-[mm:ss]`；超过一小时使用 `*Content-[hh:mm:ss]`，不得省略小时。
-    重要：**始终**在章节标题前加上 `*Content` 前缀，例如：`AI 的发展史 *Content-[01:23]`。一定是标题在前 插入标记在后
-    '''
+    return LINK
 
 
 def get_screenshot_format():
-    return '''
-11. **原片截图**:根据转写中的实际时间戳，在关键操作步骤后插入截图标记，系统会从原视频提取图片。没有收到图片时，不得声称已观察画面。若同时收到视频理解网格，可结合格内时间与转写选择截图。
-- 格式：`*Screenshot-[mm:ss]`；超过一小时使用 `*Screenshot-[hh:mm:ss]`，不得省略小时。不要使用超出视频时长的时间点。
-
-    '''
+    return SCREENSHOT
 
 
 def get_summary_format():
-    return '''
-    12. **AI总结**: 在笔记末尾加入简短的AI生成总结,并且二级标题 就是 AI 总结 例如 ## AI 总结。
-    '''
+    return ''

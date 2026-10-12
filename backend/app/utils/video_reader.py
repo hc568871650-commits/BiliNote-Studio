@@ -1,5 +1,7 @@
 import base64
 import hashlib
+import json
+import math
 import os
 import re
 import subprocess
@@ -10,6 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from app.utils.logger import get_logger
 from app.utils.path_helper import get_app_dir
+from app.utils.dynamic_frames import scan_video, scan_plan, select_keyframes
 
 logger = get_logger(__name__)
 class VideoReader:
@@ -23,7 +26,15 @@ class VideoReader:
                  save_quality=90,
                  font_path="fonts/arial.ttf",
                  frame_dir=None,
-                 grid_dir=None):
+                 grid_dir=None,
+                 frame_mode='dynamic',
+                 subtitle_segments=(),
+                 frame_budget=120,
+                 manifest_path=None,
+                 start_time=0,
+                 end_time=None,
+                 scan_timeout=600,
+                 max_scan_samples=20000):
         self.video_path = video_path
         self.grid_size = grid_size
         self.frame_interval = frame_interval
@@ -35,6 +46,19 @@ class VideoReader:
         self.grid_dir = grid_dir or get_app_dir("grid_output")
         print(f"视频路径：{video_path}",self.frame_dir,self.grid_dir)
         self.font_path = font_path
+        if frame_mode not in ('dynamic', 'fixed'):
+            raise ValueError('frame_mode must be dynamic or fixed')
+        self.frame_mode = frame_mode
+        self.subtitle_segments = subtitle_segments
+        self.frame_budget = max(1, int(frame_budget))
+        self.manifest_path = manifest_path or os.path.join(os.path.dirname(self.frame_dir), 'frame_evidence.json')
+        self.start_time = float(start_time)
+        self.end_time = float(end_time) if end_time is not None else None
+        self.evidence = []
+        self.grouped_ranges = []
+        self.duration = 0
+        self.scan_timeout = scan_timeout
+        self.max_scan_samples = max_scan_samples
 
     @staticmethod
     def _calculate_file_md5(file_path: str) -> str:
@@ -47,28 +71,39 @@ class VideoReader:
     def format_time(self, seconds: float) -> str:
         mm = int(seconds // 60)
         ss = int(seconds % 60)
-        return f"{mm:02d}_{ss:02d}"
+        milliseconds = int(round((seconds % 1) * 1000))
+        if milliseconds == 1000:
+            return self.format_time(round(seconds))
+        return f"{mm:02d}_{ss:02d}_{milliseconds:03d}"
 
     def extract_time_from_filename(self, filename: str) -> float:
-        match = re.search(r"frame_(\d{2})_(\d{2})\.jpg", filename)
+        match = re.search(r"frame_(\d+)_(\d{2})(?:_(\d{3}))?\.jpg", filename)
         if match:
-            mm, ss = map(int, match.groups())
-            return mm * 60 + ss
+            mm, ss = map(int, match.groups()[:2])
+            return mm * 60 + ss + int(match.group(3) or 0) / 1000
         return float('inf')
 
     def _extract_single_frame(self, ts: int) -> str | None:
         """提取单帧，返回输出路径或 None（失败时）。"""
         time_label = self.format_time(ts)
         output_path = os.path.join(self.frame_dir, f"frame_{time_label}.jpg")
-        cmd = [find_ffmpeg_binary("ffmpeg"), "-ss", str(ts), "-i", self.video_path, "-frames:v", "1", "-q:v", "2", "-y", output_path,
+        # FFmpeg quantizes a fractional input seek to its stream time base.
+        # One millisecond of tolerance avoids advancing a rounded source PTS.
+        cmd = [find_ffmpeg_binary("ffmpeg"), "-ss", str(max(0, ts-.001)), "-i", self.video_path, "-frames:v", "1", "-q:v", "2", "-y", output_path,
                "-hide_banner", "-loglevel", "error"]
         try:
-            completed = subprocess.run(cmd, capture_output=True, check=False)
+            completed = subprocess.run(cmd, capture_output=True, check=False, timeout=60)
             if completed.returncode:
                 logger.warning("抽帧失败 (timestamp=%s, code=%s): %s", ts, completed.returncode,
                                completed.stderr.decode("utf-8", errors="replace")[-1000:])
                 return None
+            if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+                logger.warning('抽帧未生成有效文件 (timestamp=%s)', ts)
+                return None
             return output_path
+        except subprocess.TimeoutExpired:
+            logger.warning('单帧提取超过60秒 (timestamp=%s)', ts)
+            return None
         except OSError:
             logger.exception("无法启动抽帧进程 (timestamp=%s)", ts)
             raise
@@ -77,12 +112,43 @@ class VideoReader:
 
         try:
             os.makedirs(self.frame_dir, exist_ok=True)
-            duration = float(ffmpeg.probe(self.video_path, cmd=find_ffmpeg_binary("ffprobe"))["format"]["duration"])
-            timestamps = [i for i in range(0, int(duration), self.frame_interval)][:max_frames]
+            if any(name.startswith('frame_') and name.endswith('.jpg') for name in os.listdir(self.frame_dir)):
+                raise ValueError('Run frame directory must be empty')
+            duration = self.duration = float(ffmpeg.probe(self.video_path, cmd=find_ffmpeg_binary("ffprobe"))["format"]["duration"])
+            if not math.isfinite(duration) or duration <= 0:
+                raise ValueError('Invalid video duration')
+            start = self.start_time
+            end = min(self.end_time if self.end_time is not None else duration, duration)
+            if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
+                raise ValueError('Invalid evidence time range')
+            budget = min(max_frames, self.frame_budget)
+            if budget < 1:
+                raise ValueError('Frame budget must be positive')
+            if self.frame_mode == 'dynamic':
+                plan = scan_plan(duration, start, end, max_samples=self.max_scan_samples)
+                samples = scan_video(self.video_path, duration, start_time=start, end_time=end,
+                                     scan_timeout=self.scan_timeout, max_samples=self.max_scan_samples)
+                # Select locally but expose the original absolute video timestamps.
+                local_samples = [dict(s, time=s['time']-start) for s in samples]
+                segments = [dict(text=getattr(s, 'text', '') if not isinstance(s, dict) else s.get('text', ''),
+                                 start=(getattr(s, 'start', 0) if not isinstance(s, dict) else s.get('start', 0))-start,
+                                 end=(getattr(s, 'end', 0) if not isinstance(s, dict) else s.get('end', 0))-start)
+                            for s in self.subtitle_segments]
+                self.evidence = [dict(s, time=s['time']+start)
+                                 for s in select_keyframes(local_samples, end-start, budget, segments)]
+            else:
+                interval = max(.001, float(self.frame_interval))
+                count = max(1, math.ceil((end-start)/interval))
+                indices = range(count) if count <= budget else sorted({round(i*(count-1)/max(1,budget-1)) for i in range(budget)})
+                self.evidence = [dict(time=round(max(start, min(start+i*interval, end-.001)), 3),
+                                     reasons=['fixed_interval'], reason='fixed_interval') for i in indices]
+            timestamps = [s['time'] for s in self.evidence]
+            if not timestamps:
+                raise ValueError('Video produced no candidate frames')
 
             # 并行提取帧
             max_workers = min(os.cpu_count() or 4, 2, len(timestamps))
-            frame_results: dict[int, str | None] = {}
+            frame_results: dict[float, str | None] = {}
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
                 futures = {pool.submit(self._extract_single_frame, ts): ts for ts in timestamps}
                 for future in as_completed(futures):
@@ -105,6 +171,20 @@ class VideoReader:
                     last_hash = frame_hash
 
                 image_paths.append(output_path)
+            paths = {os.path.basename(p): p for p in image_paths}
+            self.evidence = [dict(s, path=paths[f"frame_{self.format_time(s['time'])}.jpg"])
+                             for s in self.evidence if f"frame_{self.format_time(s['time'])}.jpg" in paths]
+            os.makedirs(os.path.dirname(os.path.abspath(self.manifest_path)), exist_ok=True)
+            with open(self.manifest_path, 'w', encoding='utf-8') as handle:
+                json.dump(dict(schema_version=1, frame_mode=self.frame_mode, duration=duration,
+                               start_time=start, end_time=end, budget=budget,
+                               sample_interval=plan['sample_interval'] if self.frame_mode == 'dynamic' else self.frame_interval,
+                               max_scan_samples=self.max_scan_samples, scan_timeout=self.scan_timeout,
+                               selected=self.evidence, failed_timestamps=[ts for ts in timestamps if not frame_results.get(ts)],
+                               limitations=['Events shorter than the sampling interval may be missed', 'Selection is visual evidence, not semantic verification']),
+                          handle, ensure_ascii=False, indent=2)
+            if not image_paths:
+                raise ValueError('No evidence frame was extracted successfully')
             return image_paths
         except Exception as e:
             logger.exception("分割帧发生错误")
@@ -119,23 +199,50 @@ class VideoReader:
 
     def concat_images(self, image_paths: list[str], name: str) -> str:
         os.makedirs(self.grid_dir, exist_ok=True)
-        font = ImageFont.truetype(self.font_path, 48) if os.path.exists(self.font_path) else ImageFont.load_default()
+        if not image_paths:
+            raise ValueError('Cannot concatenate an empty image group')
         images = []
-
         for path in image_paths:
-            img = Image.open(path).convert("RGB").resize((self.unit_width, self.unit_height), Image.Resampling.LANCZOS)
-            timestamp = re.search(r"frame_(\d{2})_(\d{2})\.jpg", os.path.basename(path))
-            time_text = f"{timestamp.group(1)}:{timestamp.group(2)}" if timestamp else ""
-            draw = ImageDraw.Draw(img)
-            draw.text((10, 10), time_text, fill="yellow", font=font, stroke_width=1, stroke_fill="black")
-            images.append(img)
+            with Image.open(path) as source:
+                img = source.convert('RGB')
+            # unit dimensions are ceilings, never a request to upscale a source.
+            img.thumbnail((self.unit_width, self.unit_height), Image.Resampling.LANCZOS)
+            images.append((path, img))
+        cell_width = max(img.width for _, img in images)
+        cell_height = max(img.height for _, img in images)
+        font_size = max(8, min(20, round(cell_height*.055)))
+        if os.path.exists(self.font_path):
+            font = ImageFont.truetype(self.font_path, font_size)
+        else:
+            try:
+                font = ImageFont.load_default(size=font_size)
+            except TypeError:
+                font = ImageFont.load_default()
+        # Caption is outside the image content, inside the bounded cell. Reserve
+        # a narrow band rather than obscuring the software's parameter panels.
+        caption_height = min(cell_height-1, max(10, font.getbbox('00:00.000')[3]+4))
+        content_height = max(1, cell_height-caption_height)
+        cells = []
+        for path, img in images:
+            img.thumbnail((cell_width, content_height), Image.Resampling.LANCZOS)
+            cell = Image.new('RGB', (cell_width, cell_height), (20, 20, 20))
+            cell.paste(img, ((cell_width-img.width)//2, (content_height-img.height)//2))
+            ts = self.extract_time_from_filename(os.path.basename(path))
+            time_text = f"{int(ts//60):02d}:{int(ts%60):02d}.{int(round(ts%1*1000)):03d}" if math.isfinite(ts) else ''
+            draw = ImageDraw.Draw(cell)
+            draw.text((3, content_height+1), time_text, fill=(255, 225, 130), font=font)
+            cells.append(cell)
 
         cols, rows = self.grid_size
-        grid_img = Image.new("RGB", (self.unit_width * cols, self.unit_height * rows), (255, 255, 255))
+        if cols < 1 or rows < 1 or len(cells) > cols*rows:
+            raise ValueError('Invalid grid capacity')
+        cols = min(cols, len(cells))
+        rows = min(rows, math.ceil(len(cells)/cols))
+        grid_img = Image.new("RGB", (cell_width * cols, cell_height * rows), (20, 20, 20))
 
-        for i, img in enumerate(images):
-            x = (i % cols) * self.unit_width
-            y = (i // cols) * self.unit_height
+        for i, img in enumerate(cells):
+            x = (i % cols) * cell_width
+            y = (i // cols) * cell_height
             grid_img.paste(img, (x, y))
 
         save_path = os.path.join(self.grid_dir, f"{name}.jpg")
@@ -164,12 +271,16 @@ class VideoReader:
             print("2#3",self.frame_dir,self.grid_dir)
             logger.info("开始拼接网格图...")
             image_paths = []
+            self.grouped_ranges = []
             groups = self.group_images()
+            evidence_times = {os.path.abspath(item['path']): item['time'] for item in self.evidence}
             for idx, group in enumerate(groups, start=1):
                 if len(group) < self.grid_size[0] * self.grid_size[1]:
                     logger.info("第 %s 组仅有 %s 张，保留现有画面并以空白填充", idx, len(group))
                 out_path = self.concat_images(group, f"grid_{idx}")
                 image_paths.append(out_path)
+                times = [evidence_times[os.path.abspath(path)] for path in group]
+                self.grouped_ranges.append(dict(start=min(times), end=max(times)))
 
             logger.info("📤 开始编码图像...")
             urls = self.encode_images_to_base64(image_paths)

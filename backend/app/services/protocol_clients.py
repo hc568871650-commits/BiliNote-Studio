@@ -1,5 +1,7 @@
 """Reading-only protocol adapters; the video GPTFactory path is unchanged."""
 import json
+import re
+import hashlib
 from types import SimpleNamespace
 from urllib.parse import urlsplit, urlunsplit
 
@@ -25,10 +27,66 @@ def _dict(value):
     return value if isinstance(value, dict) else value.model_dump(exclude_none=True)
 
 
-def _response(text, calls, count, reason='stop', native=None):
+def _response(text, calls, count, reason='stop', native=None, raw_usage=None, request_id=None, reasoning=None):
     return SimpleNamespace(choices=[SimpleNamespace(message=Message(text, calls, native=native),
                                                   finish_reason=reason)],
-                           usage=SimpleNamespace(prompt_tokens=count))
+                           usage=SimpleNamespace(prompt_tokens=count), raw_usage=raw_usage or {},
+                           request_id=request_id, effective_reasoning=reasoning,
+                           web_sources=_web_sources(native or []),
+                           web_search_used=any(item.get('type') == 'web_search_call' and item.get('status') == 'completed' for item in (native or [])))
+
+
+def _web_sources(output):
+    """Only structured tool/citation output is evidence of a web source."""
+    sources = {}
+    for item in output:
+        entries = list((item.get('action') or {}).get('sources') or []) if item.get('type') == 'web_search_call' else []
+        if item.get('type') == 'message':
+            for block in item.get('content') or []:
+                entries.extend(a for a in block.get('annotations') or [] if a.get('type') == 'url_citation')
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            url = entry.get('url')
+            if not isinstance(url, str) or len(url) > 4096:
+                continue
+            try:
+                parsed = urlsplit(url)
+                parsed.port
+            except ValueError:
+                continue
+            if parsed.scheme not in ('http', 'https') or not parsed.netloc or parsed.username or parsed.password:
+                continue
+            if url not in sources:
+                sources[url] = {'source_type': 'web', 'source_id': 'web-' + hashlib.sha256(url.encode()).hexdigest()[:16],
+                                'url': url, 'title': str(entry.get('title') or parsed.hostname)[:300],
+                                'text': str(entry.get('title') or '')[:500]}
+    return list(sources.values())[:30]
+
+
+def responses_options(model, messages, options):
+    options = dict(options)
+    kwargs = {'model': model, 'input': _responses_input(messages), 'store': False,
+              'include': ['reasoning.encrypted_content']}
+    effort = options.pop('reasoning_effort', None)
+    if effort is not None:
+        kwargs['reasoning'] = {'effort': effort}
+    for key in ('max_completion_tokens', 'max_tokens'):
+        if key in options:
+            kwargs['max_output_tokens'] = options.pop(key)
+    tools = options.pop('tools', None)
+    if tools:
+        kwargs['tools'] = []
+        for tool in tools:
+            if tool.get('type') == 'function':
+                kwargs['tools'].append({'type': 'function', 'strict': False, **tool['function']})
+            elif tool.get('type') == 'web_search':
+                kwargs['tools'].append(dict(tool))
+                kwargs['include'].append('web_search_call.action.sources')
+            else:
+                raise ValueError('Responses 工具类型尚未适配')
+    kwargs.update(options)
+    return kwargs
 
 
 def _call(identifier, name, arguments):
@@ -76,20 +134,7 @@ class ResponsesClient:
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
 
     def create(self, *, model, messages, **options):
-        kwargs = {'model': model, 'input': _responses_input(messages), 'store': False,
-                  'include': ['reasoning.encrypted_content']}
-        effort = options.pop('reasoning_effort', None)
-        if effort is not None:
-            kwargs['reasoning'] = {'effort': effort}
-        for key in ('max_completion_tokens', 'max_tokens'):
-            if key in options:
-                kwargs['max_output_tokens'] = options.pop(key)
-        tools = options.pop('tools', None)
-        if tools:
-            # Preserve the existing optional-argument schemas; do not let Responses
-            # silently normalize these tools to a different strict schema.
-            kwargs['tools'] = [{'type': 'function', 'strict': False, **tool['function']} for tool in tools]
-        kwargs.update(options)
+        kwargs = responses_options(model, messages, options)
         response = self.client.responses.create(**kwargs)
         data = _dict(response)
         if data.get('error'):
@@ -107,7 +152,8 @@ class ResponsesClient:
             raise ValueError('Responses 未返回完成的回答')
         if data.get('status') == 'incomplete' and reason != 'length':
             reason = 'content_filter'
-        return _response(''.join(text), calls, (data.get('usage') or {}).get('input_tokens'), reason, output)
+        return _response(''.join(text), calls, (data.get('usage') or {}).get('input_tokens'), reason, output,
+                         data.get('usage'), getattr(response, '_request_id', None), data.get('reasoning'))
 
     def close(self):
         self.client.close()
@@ -162,6 +208,37 @@ def _anthropic_input(messages):
     return '\n\n'.join(system), result
 
 
+def anthropic_options(model, messages, options):
+    options = dict(options)
+    effort = options.pop('reasoning_effort', None)
+    system, wire = _anthropic_input(messages)
+    payload = {'model': model, 'messages': wire, 'max_tokens': options.pop('max_tokens', options.pop('max_completion_tokens', 4096))}
+    if system:
+        payload['system'] = system
+    if effort is not None:
+        if effort == 'none':
+            payload['thinking'] = {'type': 'disabled'}
+        elif effort in ('low', 'medium', 'high', 'xhigh', 'max'):
+            legacy = bool(re.search(r'(?:claude-)?(?:opus|sonnet|haiku)-[34](?:-[0-5])?(?:-|$)', model.lower())) and not re.search(r'-4-[6-9]', model.lower())
+            if legacy:
+                budget = {'low': 1024, 'medium': 2048, 'high': 4096, 'xhigh': 8192, 'max': 16384}[effort]
+                payload['thinking'] = {'type': 'enabled', 'budget_tokens': budget}
+                payload['max_tokens'] = max(payload['max_tokens'], budget + 1024)
+            else:
+                payload['thinking'] = {'type': 'adaptive'}
+                payload['output_config'] = {'effort': effort}
+        else:
+            raise ValueError('Anthropic 思考档位未适配')
+    tools = options.pop('tools', None)
+    if tools:
+        payload['tools'] = [{'name': tool['function']['name'], 'description': tool['function'].get('description', ''),
+                             'input_schema': tool['function']['parameters']} for tool in tools]
+    if options.pop('tool_choice', None) == 'none':
+        payload['tool_choice'] = {'type': 'none'}
+    payload.update(options)
+    return payload
+
+
 class AnthropicClient:
     protocol = 'anthropic'
 
@@ -172,20 +249,7 @@ class AnthropicClient:
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
 
     def create(self, *, model, messages, **options):
-        if options.pop('reasoning_effort', None) is not None:
-            raise ValueError('Anthropic 协议暂不支持手动思考档位，请选择自动')
-        system, wire = _anthropic_input(messages)
-        payload = {'model': model, 'messages': wire, 'max_tokens': options.pop('max_tokens', options.pop('max_completion_tokens', 4096))}
-        if system:
-            payload['system'] = system
-        tools = options.pop('tools', None)
-        if tools:
-            payload['tools'] = [{'name': tool['function']['name'], 'description': tool['function'].get('description', ''),
-                                 'input_schema': tool['function']['parameters']} for tool in tools]
-        if options.pop('tool_choice', None) == 'none':
-            # Anthropic's explicit none disables all tool use on the final round.
-            payload['tool_choice'] = {'type': 'none'}
-        payload.update(options)
+        payload = anthropic_options(model, messages, options)
         response = self.client.post(self.url, headers={'x-api-key': self.api_key, 'anthropic-version': '2023-06-01',
                                                       'content-type': 'application/json'}, json=payload)
         response.raise_for_status()
@@ -208,7 +272,7 @@ class AnthropicClient:
             cached = [usage.get('cache_creation_input_tokens', 0), usage.get('cache_read_input_tokens', 0)]
             if all(type(value) is int and value >= 0 for value in cached):
                 count += sum(cached)
-        return _response(''.join(text), calls, count, reason, native)
+        return _response(''.join(text), calls, count, reason, native, usage, response.headers.get('request-id'))
 
     def close(self):
         self.client.close()

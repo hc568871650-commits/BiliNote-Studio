@@ -5,8 +5,9 @@ import type { ChatMessage } from '@/services/chat'
 import { estimateLocalContext } from '@/utils/aiSettings'
 import type { OrganizerOperation, OrganizerPlan, OrganizerScope, OrganizerRetentionPreview } from '@/services/organizer'
 import type { GroqConnection } from '@/services/transcriber'
+import { advanceGenerationFixture, fixtureDelay, generationScenario, generationTransportFailure, hasGenerationFixture, startGenerationFixture } from './generationPreview'
 
-export const PREVIEW_STORAGE_KEY = 'bilinote-ui-preview-synthetic-v3'
+export const PREVIEW_STORAGE_KEY = generationScenario ? 'bilinote-generation-preview-synthetic-v1' : 'bilinote-ui-preview-synthetic-v3'
 export const PREVIEW_DEFAULTS_KEY = 'bilinote-preview-purpose-initialized-v1'
 export const PREVIEW_SETTINGS_KEY = 'bilinote-preview-settings-v1'
 export const PREVIEW_ORGANIZER_KEY = 'bilinote-organizer-preview-sessions-v1'
@@ -130,7 +131,7 @@ const initialState = (): PreviewState => ({
 let state = initialState()
 try {
   const saved = JSON.parse(localStorage.getItem(PREVIEW_STORAGE_KEY) || 'null') as PreviewState | null
-  if (saved && Array.isArray(saved.tasks) && saved.tasks.every(task => task.id.startsWith('ui-')) && Array.isArray(saved.folders) && saved.assignments && saved.entries && Array.isArray(saved.providers) && Array.isArray(saved.models)) state = saved
+  if (saved && Array.isArray(saved.tasks) && saved.tasks.every(task => task.id.startsWith('ui-') || (generationScenario && hasGenerationFixture(task))) && Array.isArray(saved.folders) && saved.assignments && saved.entries && Array.isArray(saved.providers) && Array.isArray(saved.models)) state = saved
   else if (!saved) {
     // Keep the old synthetic library intact; migrate only user-configured model metadata.
     // New task IDs also isolate the new examples from old reading/chat sessions.
@@ -158,7 +159,12 @@ for (const [id, model_name] of [[540, 'gpt-5.4'], [380, 'gemini-3.8-flash']] as 
 }
 const librarySnapshot = (): PreviewLibrary => clone({ tasks: state.tasks, folders: state.folders, assignments: state.assignments, entries: state.entries })
 const fingerprint = () => JSON.stringify(librarySnapshot())
-export const getPreviewTasks = () => clone(state.tasks)
+const refreshGenerationTasks = () => {
+  let changed = false
+  for (const task of state.tasks) if (advanceGenerationFixture(task)) changed = true
+  if (changed) persist()
+}
+export const getPreviewTasks = () => { refreshGenerationTasks(); return clone(state.tasks) }
 export const previewDefaultModels = { generation: { provider_id: 'preview-1', model_name: sampleModel }, reading: { provider_id: 'preview-2', model_name: sampleModel }, organizer: { provider_id: 'preview-3', model_name: sampleModel } }
 export async function resetPreviewData(clearPersistedSessions: () => Promise<void>) {
   // Clear only named business-store IndexedDB records through their store API.
@@ -455,6 +461,7 @@ export const previewAdapter: AxiosAdapter = async config => {
   let errorCode = 1
   let errorData: unknown = null
   try {
+    refreshGenerationTasks()
     if (url === '/organizer/retention' || url === '/organizer/retention/preview') data = retentionEndpoint(url, method, body)
     else if (url === '/organizer/sessions' || url.startsWith('/organizer/sessions/')) data = sessionEndpoint(url, method, body)
     else if (url === '/notes') data = state.tasks
@@ -557,15 +564,29 @@ export const previewAdapter: AxiosAdapter = async config => {
     } else if (url === '/generate_note') {
       checkModel(body)
       const id = body.task_id || `ui-generated-${crypto.randomUUID()}`
+      const previous = state.tasks.find(task => task.id === id)
+      if (generationScenario && previous?.formData.request_id && previous.formData.request_id === body.request_id) {
+        data = { task_id: id, request_id: body.request_id, status: previous.status, simulated: true }
+        return { data: { code: 0, msg: '模拟重复请求已去重', data }, status: 200, statusText: 'OK', headers: {}, config }
+      }
       const title = `模拟生成笔记 ${state.tasks.filter(task => task.id.startsWith('ui-generated')).length + 1}`
       const task = syntheticTask(id, title, body.model_name)
-      task.formData = { ...task.formData, video_url: body.video_url || '/sample.mp4', platform: body.platform || 'local', provider_id: body.provider_id!, quality: body.quality || 'medium', style: body.style || 'tutorial' }
+      task.formData = { ...task.formData, request_id: body.request_id, video_url: body.video_url || '/sample.mp4', platform: body.platform || 'local', provider_id: body.provider_id!, quality: body.quality || 'medium', style: body.style || 'tutorial' }
+      if (generationScenario) startGenerationFixture(task, generationScenario, previous)
       state.tasks = [...state.tasks.filter(item => item.id !== id), task]
-      data = { task_id: id, status: 'PENDING', simulated: true }
+      if (generationScenario) { persist(); await fixtureDelay(2000, config.signal) }
+      data = { task_id: id, request_id: body.request_id, status: 'PENDING', simulated: true }
     } else if (url.startsWith('/task_status/')) {
       const task = state.tasks.find(item => item.id === decodeURIComponent(url.split('/')[2]))
       if (!task) throw new Error('找不到模拟任务。')
-      data = { status: task.status, result: { markdown: task.markdown, transcript: task.transcript, audio_meta: task.audioMeta } }
+      if (hasGenerationFixture(task) && task.status !== 'SUCCESS') {
+        await fixtureDelay(2000, config.signal)
+        advanceGenerationFixture(task)
+        const failed = generationTransportFailure(task)
+        persist()
+        if (failed) throw { generationTransportError: true, code: 'ERR_NETWORK', message: '【模拟】暂时网络中断，任务仍在执行', config }
+      }
+      data = { task_id: task.id, request_id: task.formData.request_id, status: task.status, message: task.statusMessage || '', last_active_status: task.last_active_status, started_at: task.started_at, finished_at: task.finished_at, status_updated_at: task.status_updated_at, audio_meta: { title: task.audioMeta.title }, result: { markdown: task.markdown, transcript: task.transcript, audio_meta: task.audioMeta } }
     } else if (url === '/proxy_config') {
       if (method === 'post') previewProxy = { enabled: Boolean(body.enabled), url: body.url || '', effective: body.enabled ? body.url || '' : '' }
       data = { ...previewProxy, simulated: true }
@@ -616,6 +637,6 @@ export const previewAdapter: AxiosAdapter = async config => {
     else if (url === '/sys_health') data = { backend: 'ok', ffmpeg: 'ok', db: 'ok', whisper_model: { size: settings.whisper_model_size, type: settings.transcriber_type, downloaded: settings.downloaded.includes(settings.whisper_model_size), checked: false }, simulated: true }
     else throw new Error('该功能未提供模拟接口；本预览不会连接真实后端。')
     if (method !== 'get' || url.startsWith('/models/delete/')) persist()
-  } catch (caught) { const detail = caught as { code?: number; msg?: string; data?: unknown }; error = caught instanceof Error ? caught.message : detail.msg || '模拟接口处理失败。'; errorCode = detail.code || 1; errorData = detail.data || null }
+  } catch (caught) { if ((caught as { generationTransportError?: boolean })?.generationTransportError) throw caught; const detail = caught as { code?: number; msg?: string; data?: unknown }; error = caught instanceof Error ? caught.message : detail.msg || '模拟接口处理失败。'; errorCode = detail.code || 1; errorData = detail.data || null }
   return { data: { code: error ? errorCode : 0, msg: error || '模拟响应', data: error ? errorData : clone(data) }, status: 200, statusText: 'OK', headers: {}, config }
 }

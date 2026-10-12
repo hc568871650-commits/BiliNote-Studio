@@ -29,35 +29,48 @@ interface ModelStore {
   modelList: IModelListItem[]
   loading: boolean
   selectedModel: string
+  enabledLoading: boolean
+  enabledError: string
 
   loadModels: (providerId: string) => Promise<void>
   loadModelsById: (providerId: string) => Promise<IModelListItem[]>
-  loadEnabledModels: () => Promise<void>
+  loadEnabledModels: (options?: { force?: boolean }) => Promise<void>
   addNewModel: (providerId: string, modelId: string) => Promise<void>
   deleteModel: (modelId: number) => Promise<void>
   setSelectedModel: (modelId: string) => void
   clearModels: () => void
 }
 
+let enabledRequest: Promise<void> | null = null
+let enabledLoadedAt = 0
+
 export const useModelStore = create<ModelStore>()(
-  devtools((set) => ({
+  devtools((set, get) => ({
     models: [],
     modelList: [],
     loading: false,
     selectedModel: '',
+    enabledLoading: false,
+    enabledError: '',
 
     //  获取所有可用模型 (全局可用模型列表)
-    loadEnabledModels: async () => {
-      try {
-        set({ loading: true })
-        const list = await fetchEnableModels()
-        set({ modelList: list })
-      } catch (error) {
-        set({ modelList: [] })
-        console.error('加载可用模型失败', error)
-      } finally {
-        set({ loading: false })
-      }
+    loadEnabledModels: async (options = {}) => {
+      if (enabledRequest) return enabledRequest
+      if (!options.force && enabledLoadedAt && Date.now() - enabledLoadedAt < 30000 && get().modelList.length) return
+      enabledRequest = (async () => {
+        set({ enabledLoading: true, enabledError: '' })
+        try {
+          const list = await fetchEnableModels({ silent: true })
+          enabledLoadedAt = Date.now()
+          set({ modelList: list })
+        } catch {
+          set({ enabledError: '模型列表暂时未能更新，可重试加载' })
+        } finally {
+          set({ enabledLoading: false })
+          enabledRequest = null
+        }
+      })()
+      return enabledRequest
     },
 
     //  通过 provider 获取该供应商的模型列表
@@ -100,6 +113,7 @@ export const useModelStore = create<ModelStore>()(
     addNewModel: async (providerId: string, modelId: string) => {
       try {
         const res = await addModel({ provider_id: providerId, model_name: modelId })
+        enabledLoadedAt = 0
 
         if (res.code === 0) {
           console.log('新增模型成功:', modelId)
@@ -128,6 +142,7 @@ export const useModelStore = create<ModelStore>()(
     deleteModel: async (modelId: number) => {
       try {
         await deleteModelById(modelId)
+        enabledLoadedAt = 0
         //  删除后更新本地状态（可选）
         set((state) => ({
           models: state.models.filter((model) => model.id !== modelId.toString())
@@ -141,6 +156,6 @@ export const useModelStore = create<ModelStore>()(
     setSelectedModel: (modelId: string) => set({ selectedModel: modelId }),
 
     //  清空
-    clearModels: () => set({ models: [], selectedModel: '', modelList: [] }),
+    clearModels: () => { enabledLoadedAt = 0; set({ models: [], selectedModel: '', modelList: [] }) },
   }))
 )

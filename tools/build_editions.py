@@ -16,7 +16,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "BillNote_frontend"
-VERSION = "0.1.0-preview.1"
+VERSION = "0.1.0-preview.8"
 PORTS = {"quick": 38483, "full": 38484}
 
 
@@ -148,7 +148,7 @@ def main():
     parser = argparse.ArgumentParser(__doc__)
     parser.add_argument("step", choices=["backend", "desktop", "package"])
     parser.add_argument("--edition", choices=PORTS, required=True)
-    parser.add_argument("--output", type=Path, default=ROOT / ".BiliNote-dev/studio-0.1.0-preview.1")
+    parser.add_argument("--output", type=Path, default=ROOT / f".BiliNote-dev/studio-{VERSION}")
     parser.add_argument("--dependencies", type=Path, required=True)
     parser.add_argument("--toolchains", type=Path, required=True)
     parser.add_argument("--cargo-target", type=Path, default=ROOT / ".BiliNote-dev/studio-cargo-target")

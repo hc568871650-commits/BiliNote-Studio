@@ -7,7 +7,9 @@ import { useProviderStore } from '@/store/providerStore'
 import type { PurposeModelSelection } from '@/store/purposeModelStore'
 import './purpose-model.css'
 import { isTranscriptionModel } from '@/utils/modelCapabilities'
-import { reasoningChoices, settingsForModel, type AISettings, type ReasoningEffort } from '@/utils/aiSettings'
+import { settingsForModel, type AISettings, type ReasoningEffort } from '@/utils/aiSettings'
+import { useModelCapabilities } from '@/hooks/useModelCapabilities'
+import { useProviderProtocolStore } from '@/store/providerProtocolStore'
 
 interface EnabledModel extends PurposeModelSelection { id: string }
 interface Props {
@@ -33,9 +35,12 @@ const loadModels = () => {
   }).finally(() => { pendingModels = undefined })
   return pendingModels
 }
-const effortLabels: Record<ReasoningEffort, string> = { auto: '自动', none: '关闭', low: '低', medium: '中', high: '高', xhigh: '极高' }
+const effortLabels: Record<ReasoningEffort, string> = { auto: '自动', none: '关闭', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最高' }
 
 export default function PurposeModelPicker({ value, onChange, label = '模型', compact = false, inline = false, disabled = false, controls, onControlsChange, reasoningModel }: Props) {
+  const protocol = useProviderProtocolStore(state => state.protocols[value?.provider_id || ''] || 'openai-chat')
+  const { capabilities } = useModelCapabilities(controls ? value?.provider_id : undefined, controls ? value?.model_name : undefined, protocol)
+  const efforts = (capabilities?.available_efforts || ['auto']).filter((item): item is ReasoningEffort => item in effortLabels)
   const providers = useProviderStore(state => state.provider)
   const fetchProviders = useProviderStore(state => state.fetchProviderList)
   const [models, setModels] = useState<EnabledModel[]>([])
@@ -77,7 +82,7 @@ export default function PurposeModelPicker({ value, onChange, label = '模型', 
   }, [open])
   useEffect(() => { if (disabled) setOpen(false) }, [disabled])
   const status = error ? '加载失败，点击重试' : missing ? '模型已不可用，请重新选择' : !loading && !options.length ? '暂无可用模型' : ''
-  const effort = controls ? settingsForModel(controls, reasoningModel ?? value?.model_name) : undefined
+  const effort = controls ? settingsForModel(controls, reasoningModel ?? value?.model_name, efforts) : undefined
   if (inline) return <div className="purpose-model-picker is-inline">
     <button ref={trigger} type="button" className="purpose-model-trigger" aria-label={label} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? menuId : undefined} disabled={disabled} title={status || [value?.model_name, effort && `思考：${effortLabels[effort.reasoning_effort]}`].filter(Boolean).join(' · ')} onClick={() => {
       if (open) { close(); return }
@@ -101,7 +106,7 @@ export default function PurposeModelPicker({ value, onChange, label = '模型', 
         </button>)}
       </div>
       {status && <div className="purpose-model-menu-status">{status}{error && <button onClick={() => void load()}>重试</button>}</div>}
-      {effort && onControlsChange && <div className="purpose-model-effort"><span>思考等级</span><div role="radiogroup" aria-label="思考等级">{reasoningChoices(reasoningModel ?? value?.model_name).map(item => <button type="button" role="radio" aria-checked={effort.reasoning_effort === item} key={item} onClick={() => onControlsChange({ ...effort, reasoning_effort: item })}>{effortLabels[item]}</button>)}</div></div>}
+      {effort && onControlsChange && <div className="purpose-model-effort"><span>思考等级</span><div role="radiogroup" aria-label="思考等级">{efforts.map(item => <button type="button" role="radio" aria-checked={effort.reasoning_effort === item} key={item} onClick={() => onControlsChange({ ...effort, reasoning_effort: item })}>{effortLabels[item]}</button>)}</div>{efforts.length === 1 && <small>请在服务商设置中测试该模型的思考能力。</small>}</div>}
     </div>, document.body)}
   </div>
   return <div className={`purpose-model-picker ${compact ? 'is-compact' : ''} ${inline ? 'is-inline' : ''}`}>

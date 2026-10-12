@@ -91,6 +91,8 @@ def ask_question(data: AskRequest):
             context_limit=data.context_limit,
             summary=data.summary,
             protocol=data.protocol,
+            web_search=data.web_search,
+            web_search_mode=data.web_search_mode,
         )
         return R.success(data=result)
     except Exception as e:

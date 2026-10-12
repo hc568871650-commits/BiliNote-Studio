@@ -1,606 +1,222 @@
-/* NoteForm.tsx ---------------------------------------------------- */
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form.tsx'
-import { useEffect,useState } from 'react'
-import { useForm, useWatch } from 'react-hook-form'
+import { useEffect, useRef, useState } from 'react'
+import { useForm, useWatch, type FieldErrors } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-
-import { Info, Loader2, Plus } from 'lucide-react'
-import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
-import { generateNote } from '@/services/note.ts'
-import { uploadFile } from '@/services/upload.ts'
-import { useTaskStore } from '@/store/taskStore'
-import { useModelStore } from '@/store/modelStore'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip.tsx'
-import { Checkbox } from '@/components/ui/checkbox.tsx'
-import { ScrollArea } from '@/components/ui/scroll-area.tsx'
-import { Button } from '@/components/ui/button.tsx'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select.tsx'
-import { Input } from '@/components/ui/input.tsx'
-import { Textarea } from '@/components/ui/textarea.tsx'
-import { noteStyles, noteFormats, videoPlatforms } from '@/constant/note.ts'
-import { fetchModels } from '@/services/model.ts'
+import { ArrowRight, BookOpen, Check, FileVideo, Layers, Link2, Loader2, RefreshCw, UploadCloud } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { generateNote, get_task_status, type GenerateNotePayload } from '@/services/note'
+import { uploadFile } from '@/services/upload'
+import { useTaskStore, type Task } from '@/store/taskStore'
+import { useModelStore } from '@/store/modelStore'
 import { usePurposeModelStore } from '@/store/purposeModelStore'
+import { normalizeNoteStyle, normalizeNoteFormats } from '@/utils/noteGeneration'
+import GenerationOptionsFields from '@/components/GenerationOptionsFields'
+import { normalizeGenerationOptions, readGenerationDefaults, saveGenerationDefaults } from '@/utils/generationOptions'
+import type { GenerationOptions } from '@/services/generationRuns'
+import './generation.css'
 
-/* -------------------- 校验 Schema -------------------- */
-/** 用户粘贴的链接常缺协议头（如 bilibili.com/...），无任何 scheme 时自动补 https:// */
-const withScheme = (url: string) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `https://${url}`)
+const withScheme = (url: string) => /^[a-z][a-z\d+.-]*:\/\//i.test(url) ? url.trim() : `https://${url.trim()}`
+const schema = z.object({
+  video_url: z.string().default(''), platform: z.string(), model_name: z.string().min(1, '请选择生成模型'),
+  style: z.enum(['tutorial', 'knowledge']), quality: z.enum(['fast', 'medium', 'slow']),
+  format: z.array(z.string()).default(['link', 'screenshot']), extras: z.string().default(''),
+  video_understanding: z.boolean().default(false), frame_mode: z.enum(['dynamic', 'fixed']).default('dynamic'),
+  video_interval: z.coerce.number().min(1).max(30).default(6),
+  grid_size: z.tuple([z.coerce.number().min(1).max(10), z.coerce.number().min(1).max(10)]).default([2, 2]),
+}).superRefine((data, ctx) => {
+  if (!data.video_url.trim()) { ctx.addIssue({ code: 'custom', path: ['video_url'], message: data.platform === 'local' ? '请选择视频文件或填写本地路径' : '请先粘贴视频链接' }); return }
+  if (data.platform !== 'local') {
+    try { const url = new URL(withScheme(data.video_url)); if (!['https:', 'http:'].includes(url.protocol) || !url.hostname.includes('.')) throw new Error() }
+    catch { ctx.addIssue({ code: 'custom', path: ['video_url'], message: '请输入有效的视频链接' }) }
+  }
+})
+export type NoteFormValues = z.output<typeof schema>
+type FormInput = z.input<typeof schema>
+const errorText = (error: unknown) => { const e = error as { msg?: string; message?: string }; return e?.msg || e?.message || '暂时无法连接服务，请稍后重试' }
+const platforms = [{ value: 'bilibili', label: '哔哩哔哩' }, { value: 'youtube', label: 'YouTube' }, { value: 'kuaishou', label: '快手' }]
+const inferPlatform = (value: string) => { try { const host = new URL(withScheme(value)).hostname; return /(^|\.)(bilibili\.com|b23\.tv)$/.test(host) ? 'bilibili' : /(^|\.)(youtube\.com|youtu\.be)$/.test(host) ? 'youtube' : /(^|\.)(kuaishou\.com|gifshow\.com)$/.test(host) ? 'kuaishou' : null } catch { return null } }
 
-const formSchema = z
-  .object({
-    video_url: z.string().optional(),
-    platform: z.string().nonempty('请选择平台'),
-    quality: z.enum(['fast', 'medium', 'slow']),
-    screenshot: z.boolean().optional(),
-    link: z.boolean().optional(),
-    model_name: z.string().nonempty('请选择模型'),
-    format: z.array(z.string()).default([]),
-    style: z.string().nonempty('请选择笔记生成风格'),
-    extras: z.string().optional(),
-    video_understanding: z.boolean().optional(),
-    video_interval: z.coerce.number().min(1).max(30).default(6).optional(),
-    grid_size: z
-      .tuple([z.coerce.number().min(1).max(10), z.coerce.number().min(1).max(10)])
-      .default([2, 2])
-      .optional(),
-  })
-  .superRefine(({ video_url, platform }, ctx) => {
-    if (platform === 'local') {
-      if (!video_url) {
-        ctx.addIssue({ code: 'custom', message: '本地视频路径不能为空', path: ['video_url'] })
-      }
-    }
-    else {
-      if (!video_url) {
-        ctx.addIssue({ code: 'custom', message: '视频链接不能为空', path: ['video_url'] })
-      }
-      else {
-        try {
-          const url = new URL(withScheme(video_url))
-          if (!['http:', 'https:'].includes(url.protocol))
-            throw new Error()
-        }
-        catch {
-          ctx.addIssue({ code: 'custom', message: '请输入正确的视频链接', path: ['video_url'] })
-        }
-      }
-    }
-  })
-
-export type NoteFormValues = z.infer<typeof formSchema>
-
-/* -------------------- 可复用子组件 -------------------- */
-const SectionHeader = ({ title, tip }: { title: string; tip?: string }) => (
-  <div className="my-3 flex items-center justify-between">
-    <h2 className="block">{title}</h2>
-    {tip && (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Info className="hover:text-primary h-4 w-4 cursor-pointer text-neutral-400 dark:text-muted-foreground" />
-          </TooltipTrigger>
-          <TooltipContent className="text-xs">{tip}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    )}
-  </div>
-)
-
-const CheckboxGroup = ({
-  value = [],
-  onChange,
-  disabledMap,
-}: {
-  value?: string[]
-  onChange: (v: string[]) => void
-  disabledMap: Record<string, boolean>
-}) => (
-  <div className="flex flex-wrap space-x-1.5">
-    {noteFormats.map(({ label, value: v }) => (
-      <label key={v} className="flex items-center space-x-2">
-        <Checkbox
-          checked={value.includes(v)}
-          disabled={disabledMap[v]}
-          onCheckedChange={checked =>
-            onChange(checked ? [...value, v] : value.filter(x => x !== v))
-          }
-        />
-        <span>{label}</span>
-      </label>
-    ))}
-  </div>
-)
-
-/* -------------------- 主组件 -------------------- */
-const NoteForm = ({ onSubmitted, creating = false }: { onSubmitted?: () => void; creating?: boolean }) => {
-  const navigate = useNavigate();
-  const [isUploading, setIsUploading] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [uploadSuccess, setUploadSuccess] = useState(false)
-  /* ---- 全局状态 ---- */
-  const { addPendingTask, currentTaskId: selectedTaskId, getCurrentTask, retryTask } =
-    useTaskStore()
-  const currentTaskId = creating ? null : selectedTaskId
+export default function NoteForm({ onSubmitted, creating = false }: { onSubmitted?: () => void; creating?: boolean }) {
+  const navigate = useNavigate()
+  const currentTask = useTaskStore(state => creating ? null : state.tasks.find(task => task.id === state.currentTaskId) || null)
   const generationModel = usePurposeModelStore(state => state.defaults.generation)
+  const modelList = useModelStore(state => state.modelList)
+  const modelsLoading = useModelStore(state => state.enabledLoading)
+  const modelsError = useModelStore(state => state.enabledError)
+  const loadModels = useModelStore(state => state.loadEnabledModels)
   const [providerId, setProviderId] = useState(generationModel?.provider_id || '')
-  const { loadEnabledModels, modelList } = useModelStore()
-
-  /* ---- 表单 ---- */
-  const form = useForm<NoteFormValues>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      platform: 'bilibili',
-      quality: 'medium',
-      model_name: generationModel?.model_name || '',
-      style: 'minimal',
-      video_interval: 6,
-      grid_size: [2, 2],
-      format: [],
-    },
-  })
-  const currentTask = creating ? null : getCurrentTask()
-
-  /* ---- 派生状态（只 watch 一次，提高性能） ---- */
-  const platform = useWatch({ control: form.control, name: 'platform' }) as string
-  const videoUnderstandingEnabled = useWatch({ control: form.control, name: 'video_understanding' })
-  const editing = currentTask && currentTask.id
-
-  const goModelAdd = () => {
-    navigate("/settings/model");
-  };
-  /* ---- 副作用 ---- */
+  const [generationOptions, setGenerationOptions] = useState<GenerationOptions>(() => readGenerationDefaults(generationModel?.provider_id || '', generationModel?.model_name || ''))
+  const [submitting, setSubmitting] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [fileName, setFileName] = useState('')
+  const [notice, setNotice] = useState('')
+  const [pending, setPending] = useState<GenerateNotePayload | null>(null)
+  const [submittedAt, setSubmittedAt] = useState(0)
+  const [now, setNow] = useState(Date.now())
+  const submitGuard = useRef(false)
+  const uploadGuard = useRef(false)
+  const alive = useRef(true)
+  const uploadController = useRef<AbortController | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const form = useForm<FormInput, unknown, NoteFormValues>({ resolver: zodResolver(schema), defaultValues: {
+    video_url: '', platform: 'bilibili', model_name: generationModel?.model_name || '', style: 'tutorial', quality: 'medium',
+    format: ['link', 'screenshot'], extras: '', video_understanding: false, frame_mode: 'dynamic', video_interval: 6, grid_size: [2, 2],
+  } })
+  const platform = useWatch({ control: form.control, name: 'platform' })
+  const style = useWatch({ control: form.control, name: 'style' })
+  const format = useWatch({ control: form.control, name: 'format' })
+  const vision = useWatch({ control: form.control, name: 'video_understanding' })
+  const frameMode = useWatch({ control: form.control, name: 'frame_mode' })
+  const modelName = useWatch({ control: form.control, name: 'model_name' })
+  const editing = Boolean(currentTask)
+  const generating = Boolean(currentTask && !['SUCCESS', 'FAILED'].includes(currentTask.status))
+  const locked = submitting || checking || uploading || generating || Boolean(pending) || Boolean(currentTask?.archived_at)
   useEffect(() => {
-    loadEnabledModels()
-
-    return
-  }, [])
+    const data = currentTask?.formData as (Task['formData'] & { generation_options?: GenerationOptions }) | undefined
+    setGenerationOptions(data?.provider_id === providerId && data.model_name === modelName && data.generation_options
+      ? normalizeGenerationOptions(data.generation_options) : readGenerationDefaults(providerId, modelName || ''))
+  }, [providerId, modelName, currentTask?.id])
+  useEffect(() => { alive.current = true; void loadModels(); return () => { alive.current = false; uploadController.current?.abort() } }, [loadModels])
   useEffect(() => {
-    if (!currentTask) {
-      return
+    if (!submitting) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [submitting])
+  const loadedTask = useRef('')
+  useEffect(() => {
+    if (!currentTask || loadedTask.current === currentTask.id) return
+    loadedTask.current = currentTask.id
+    const data = currentTask.formData as typeof currentTask.formData & Partial<NoteFormValues>
+    setProviderId(data.provider_id); setNotice(''); setPending(null)
+    form.reset({ video_url: data.video_url || '', platform: data.platform || 'bilibili', model_name: data.model_name || '',
+      style: normalizeNoteStyle(data.style), quality: ['fast', 'slow'].includes(data.quality) ? data.quality as 'fast' | 'slow' : 'medium',
+      format: normalizeNoteFormats(data.format ?? (data.screenshot ? ['screenshot'] : [])), extras: data.extras || '',
+      video_understanding: data.video_understanding || false, frame_mode: data.frame_mode === 'fixed' ? 'fixed' : 'dynamic',
+      video_interval: data.video_interval || 6, grid_size: data.grid_size || [2, 2] })
+  }, [currentTask, form])
+  useEffect(() => {
+    if (creating && generationModel && !form.getFieldState('model_name').isDirty) {
+      form.setValue('model_name', generationModel.model_name); setProviderId(generationModel.provider_id)
     }
-    const { formData } = currentTask
-    setProviderId(formData.provider_id)
+  }, [creating, generationModel, form])
 
-    console.log('currentTask.formData.platform:', formData.platform)
-
-    form.reset({
-      platform: formData.platform || 'bilibili',
-      video_url: formData.video_url || '',
-      model_name: formData.model_name || '',
-      style: formData.style || 'minimal',
-      quality: formData.quality || 'medium',
-      extras: formData.extras || '',
-      screenshot: formData.screenshot ?? false,
-      link: formData.link ?? false,
-      video_understanding: formData.video_understanding ?? false,
-      video_interval: formData.video_interval ?? 6,
-      grid_size: formData.grid_size ?? [2, 2],
-      format: formData.format ?? [],
-    })
-  }, [
-    // 当下面任意一个变了，就重新 reset
-    currentTaskId,
-    // 还要加上 formData 的各字段，或者直接 currentTask
-    currentTask?.formData,
-  ])
-
-  useEffect(() => {
-    if (creating && generationModel) {
-      form.setValue('model_name', generationModel.model_name)
-      setProviderId(generationModel.provider_id)
-    }
-  }, [generationModel, creating, form])
-
-  /* ---- 帮助函数 ---- */
-  const isGenerating = () => !creating && !['SUCCESS', 'FAILED', undefined].includes(getCurrentTask()?.status)
-  const generating = isGenerating()
-  const handleFileUpload = async (file: File, cb: (url: string) => void) => {
-    const formData = new FormData()
-    formData.append('file', file)
-    setIsUploading(true)
-    setUploadSuccess(false)
-
+  const upload = async (file: File) => {
+    if (uploadGuard.current || locked || editing) return
+    uploadGuard.current = true
+    const controller = new AbortController(); uploadController.current = controller
+    setUploading(true); setUploadProgress(null); setFileName(file.name); setNotice('')
     try {
-  
-      const  data  = await uploadFile(formData)
-        cb(data.url)
-        setUploadSuccess(true)
-    } catch (err) {
-      console.error('上传失败:', err)
-      // message.error('上传失败，请重试')
-    } finally {
-      setIsUploading(false)
-    }
+      const data = new FormData(); data.append('file', file)
+      const result = await uploadFile(data, { signal: controller.signal, suppressToast: true, onUploadProgress: event => {
+        if (alive.current && event.total) setUploadProgress(Math.min(100, Math.round(event.loaded / event.total * 100)))
+      } })
+      if (alive.current) { form.setValue('video_url', result.url, { shouldValidate: true }); setUploadProgress(100) }
+    } catch (error) { if (alive.current && !controller.signal.aborted) setNotice(`上传未完成：${errorText(error)}`) }
+    finally { uploadGuard.current = false; if (alive.current) setUploading(false) }
   }
-
+  const accepted = (payload: GenerateNotePayload) => {
+    const store = useTaskStore.getState()
+    const selectedBefore = store.currentTaskId
+    if (!store.tasks.some(task => task.id === payload.task_id)) store.addPendingTask(payload.task_id!, payload.platform, payload)
+    else {
+      store.updateTaskContent(payload.task_id!, { status: 'PENDING', last_active_status: 'PENDING', started_at: undefined, finished_at: undefined, status_updated_at: undefined, formData: payload as Task['formData'], attemptStartedAt: Date.now(), phaseStartedAt: Date.now(), submissionError: undefined, pollingError: undefined, statusMessage: '已接收，等待处理' })
+      store.setCurrentTask(payload.task_id!)
+    }
+    const added = useTaskStore.getState().tasks.find(task => task.id === payload.task_id)
+    if (payload.platform === 'local' && fileName && added) store.updateTaskContent(payload.task_id!, { audioMeta: { ...added.audioMeta, title: fileName } })
+    if (!alive.current) { store.setCurrentTask(selectedBefore); return }
+    if (creating) { form.reset({ ...form.getValues(), video_url: '' }); setFileName(''); setUploadProgress(null) }
+    setPending(null); setNotice(''); toast.success('任务已接收，可查看生成进度', { id: `submitted-${payload.task_id}` }); onSubmitted?.()
+  }
+  const checkPending = async () => {
+    if (!pending || checking) return
+    setChecking(true)
+    try {
+      const status = await get_task_status(pending.task_id!, { timeout: 8000, suppressToast: true })
+      if (status.request_id !== pending.request_id) { setNotice('尚未查到这次提交的受理记录，请稍后再次检查'); return }
+      accepted(pending)
+    } catch (error) { setNotice(`尚未确认任务是否已接收：${errorText(error)}。请稍后再次检查，避免重复生成。`) }
+    finally { if (alive.current) setChecking(false) }
+  }
   const onSubmit = async (values: NoteFormValues) => {
-    if (submitting || isUploading) return
-    const model = modelList.find(m => m.model_name === values.model_name && m.provider_id === providerId)
-    if (!model) { toast.error('请先选择可用模型'); return }
-    const payload: NoteFormValues = {
-      ...values,
-      video_url:
-        values.platform === 'local' ? values.video_url : withScheme(values.video_url || ''),
-      provider_id: model.provider_id,
-      task_id: currentTaskId || '',
-    }
-    if (currentTaskId) {
-      setSubmitting(true)
-      try { await retryTask(currentTaskId, payload); onSubmitted?.() } finally { setSubmitting(false) }
-      return
-    }
-
-    // message.success('已提交任务')
-    setSubmitting(true)
+    if (submitGuard.current || locked) return
+    if (!modelList.some(model => model.model_name === values.model_name && model.provider_id === providerId)) { setNotice('当前模型不可用，请重新选择或刷新模型列表'); return }
+    submitGuard.current = true
+    setSubmitting(true); setNotice(''); setSubmittedAt(Date.now()); setNow(Date.now())
+    const payload: GenerateNotePayload = { ...values, video_url: values.platform === 'local' ? values.video_url.trim() : withScheme(values.video_url),
+      format: normalizeNoteFormats(values.format), link: true, screenshot: values.format.includes('screenshot'), provider_id: providerId,
+      task_id: currentTask?.id || crypto.randomUUID(), request_id: crypto.randomUUID(), generation_options: normalizeGenerationOptions(generationOptions) }
     try {
-      const data = await generateNote(payload)
-      addPendingTask(data.task_id, values.platform, payload)
-      form.setValue('video_url', '')
-      setUploadSuccess(false)
-      onSubmitted?.()
-    } catch (e: any) {
-      // 就绪门禁：本地转写模型还没下载好。后端返回 reason='transcriber_model_not_ready'，
-      // 引导用户去「设置 → 音频转写配置」下载，而不是留一个静默失败的任务。
-      if (e?.data?.reason === 'transcriber_model_not_ready') {
-        const downloading = e?.data?.downloading
-        toast.error(
-          downloading
-            ? '转写模型正在下载中，请稍候再提交'
-            : '转写模型尚未下载，请先去「音频转写配置」页下载',
-        )
-        if (!downloading) navigate('/settings/transcriber')
-        return
+      const response = await generateNote(payload, { timeout: 30000, suppressToast: true })
+      if (!response?.task_id || response.task_id !== payload.task_id) throw new Error('尚未收到一致的任务编号')
+      accepted(payload)
+    } catch (error) {
+      if (!alive.current) return
+      const e = error as { code?: number; data?: { reason?: string } }
+      if (e?.code === -1 || !e?.code || e.code >= 500) {
+        setPending(payload); setNotice('本次提交尚未确认。后台可能已接收，请先检查任务状态。')
+      } else {
+        setNotice(errorText(error))
+        if (e?.data?.reason === 'transcriber_model_not_ready') setNotice(`${errorText(error)}。请在设置 → 音频转写中检查。`)
       }
-      // 其余错误：axios 拦截器已经弹过 toast，这里只兜底不让 promise 变成未处理 rejection
-      console.error('提交任务失败：', e)
-    } finally { setSubmitting(false) }
+    } finally { submitGuard.current = false; if (alive.current) setSubmitting(false) }
   }
-  const onInvalid = (errors: FieldErrors<NoteFormValues>) => {
-    console.warn('表单校验失败：', errors)
-    // message.error('请完善所有必填项后再提交')
+  const invalid = (errors: FieldErrors<FormInput>) => {
+    setNotice(Object.values(errors).find(value => value?.message)?.message?.toString() || '请检查输入内容')
   }
-  const handleCreateNew = () => {
-    // 🔁 这里清空当前任务状态
-    // 比如调用 resetCurrentTask() 或者 navigate 到一个新页面
-    navigate('/?view=create')
-  }
-  const FormButton = () => {
-    const label = generating ? '正在生成…' : editing ? '重新生成' : '生成笔记'
+  const switchSource = (local: boolean) => { if (!editing && !locked) { form.setValue('platform', local ? 'local' : 'bilibili'); form.setValue('video_url', ''); setFileName(''); setNotice('') } }
+  const pickModel = (value: string) => { const [provider, model] = JSON.parse(value); setProviderId(provider); form.setValue('model_name', model, { shouldDirty: true, shouldValidate: true }) }
 
-    return (
-      <div className="flex gap-2">
-        <Button
-          type="submit"
-          className="min-w-32"
-          disabled={generating || submitting || isUploading || Boolean(currentTask?.archived_at)}
-        >
-          {generating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {label}
-        </Button>
-
-        {editing && (
-          <Button type="button" variant="outline" className="shrink-0" onClick={handleCreateNew}>
-            <Plus className="mr-2 h-4 w-4" />
-            新建笔记
-          </Button>
-        )}
-      </div>
-    )
-  }
-
-  /* -------------------- 渲染 -------------------- */
-  return (
-    <div className="h-full w-full">
-      <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit, onInvalid)} className="space-y-4">
-
-
-          {/* 视频链接 & 平台 */}
-          <SectionHeader title="视频链接" tip="支持 B 站、YouTube 等平台" />
-          <div className="flex gap-2">
-            {/* 平台选择 */}
-
-            <FormField
-              control={form.control}
-              name="platform"
-              render={({ field }) => (
-                <FormItem>
-                  <Select
-                    disabled={!!editing}
-                    value={field.value}
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger className="w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {videoPlatforms?.map(p => (
-                        <SelectItem key={p.value} value={p.value}>
-                          <div className="flex items-center justify-center gap-2">
-                            <div className="h-4 w-4">{p.logo()}</div>
-                            <span>{p.label}</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            {/* 链接输入 / 上传框 */}
-            <FormField
-              control={form.control}
-              name="video_url"
-              render={({ field }) => (
-                <FormItem className="flex-1">
-                  {platform === 'local' ? (
-                    <>
-                      <Input disabled={!!editing} placeholder="请输入本地视频路径" {...field} />
-                    </>
-                  ) : (
-                    <Input disabled={!!editing} placeholder="请输入视频网站链接" {...field} />
-                  )}
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
-
-          <FormField
-            control={form.control}
-            name="video_url"
-            render={({ field }) => (
-              <FormItem className="flex-1">
-                {platform === 'local' && (
-                  <>
-                    <div
-                      className="hover:border-primary mt-2 flex h-24 cursor-pointer items-center justify-center rounded-md border-2 border-dashed border-gray-300 transition-colors"
-                      onDragOver={e => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                      }}
-                      onDrop={e => {
-                        e.preventDefault()
-                        const file = e.dataTransfer.files?.[0]
-                        if (file) handleFileUpload(file, field.onChange)
-                      }}
-                      onClick={() => {
-                        const input = document.createElement('input')
-                        input.type = 'file'
-                        input.accept = 'video/*'
-                        input.onchange = e => {
-                          const file = (e.target as HTMLInputElement).files?.[0]
-                          if (file) handleFileUpload(file, field.onChange)
-                        }
-                        input.click()
-                      }}
-                    >
-                      {isUploading ? (
-                        <p className="text-center text-sm text-blue-500">上传中，请稍候…</p>
-                      ) : uploadSuccess ? (
-                        <p className="text-center text-sm text-green-500">上传成功！</p>
-                      ) : (
-                        <p className="text-center text-sm text-gray-500 dark:text-muted-foreground">
-                          拖拽文件到这里上传 <br />
-                          <span className="text-xs text-gray-400 dark:text-muted-foreground">或点击选择文件</span>
-                        </p>
-                      )}
-                    </div>
-                  </>
-                )}
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <div className="grid grid-cols-2 gap-2">
-            {/* 模型选择 */}
-            {
-
-             modelList.length>0?(     <FormField
-               className="w-full"
-               control={form.control}
-               name="model_name"
-               render={({ field }) => (
-                 <FormItem>
-                   <SectionHeader title="模型选择" tip="不同模型效果不同，建议自行测试" />
-                   <Select
-                     onOpenChange={()=>{
-                       loadEnabledModels()
-                     }}
-                     value={providerId && field.value ? JSON.stringify([providerId, field.value]) : ''}
-                     onValueChange={value => { const [provider, model] = JSON.parse(value); setProviderId(provider); field.onChange(model) }}
-                   >
-                     <FormControl>
-                       <SelectTrigger className="w-full min-w-0 truncate">
-                         <SelectValue>{field.value || '选择模型'}</SelectValue>
-                       </SelectTrigger>
-                     </FormControl>
-                     <SelectContent>
-                       {modelList.map(m => (
-                         <SelectItem key={m.id} value={JSON.stringify([m.provider_id, m.model_name])}>
-                           {m.model_name} · {m.provider_id}
-                         </SelectItem>
-                       ))}
-                     </SelectContent>
-                   </Select>
-                   <FormMessage />
-                 </FormItem>
-               )}
-             />): (
-               <FormItem>
-                 <SectionHeader title="模型选择" tip="不同模型效果不同，建议自行测试" />
-                  <Button type={'button'} variant={
-                    'outline'
-                  } onClick={()=>{goModelAdd()}}>请先添加模型</Button>
-                 <FormMessage />
-               </FormItem>
-             )
-            }
-
-            {/* 笔记风格 */}
-            <FormField
-              className="w-full"
-              control={form.control}
-              name="style"
-              render={({ field }) => (
-                <FormItem>
-                  <SectionHeader title="笔记风格" tip="选择生成笔记的呈现风格" />
-                  <Select
-                    value={field.value}
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger className="w-full min-w-0 truncate">
-                        <SelectValue />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {noteStyles.map(({ label, value }) => (
-                        <SelectItem key={value} value={value}>
-                          {label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
-          <details className="workspace-advanced">
-          <summary>高级选项 · 视频理解、笔记格式与备注</summary>
-          {/* 视频理解 */}
-          <SectionHeader title="视频理解" tip="将视频截图发给多模态模型辅助分析" />
-          <div className="flex flex-col gap-2">
-            <FormField
-              control={form.control}
-              name="video_understanding"
-              render={({ field }) => (
-                <FormItem>
-                  <div className="flex items-center gap-2">
-                    <FormLabel>启用</FormLabel>
-                    <Checkbox
-                      checked={videoUnderstandingEnabled}
-                      onCheckedChange={v => form.setValue('video_understanding', v)}
-                    />
-                  </div>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <div className="grid grid-cols-2 gap-4">
-              {/* 采样间隔 */}
-              <FormField
-                control={form.control}
-                name="video_interval"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>采样间隔（秒）</FormLabel>
-                    <Input disabled={!videoUnderstandingEnabled} type="number" {...field} />
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              {/* 拼图大小 */}
-              <FormField
-                control={form.control}
-                name="grid_size"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>拼图尺寸（列 × 行）</FormLabel>
-                    <div className="flex items-center space-x-2">
-                      <Input
-                        disabled={!videoUnderstandingEnabled}
-                        type="number"
-                        value={field.value?.[0] || 3}
-                        onChange={e => field.onChange([+e.target.value, field.value?.[1] || 3])}
-                        className="w-16"
-                      />
-                      <span>x</span>
-                      <Input
-                        disabled={!videoUnderstandingEnabled}
-                        type="number"
-                        value={field.value?.[1] || 3}
-                        onChange={e => field.onChange([field.value?.[0] || 3, +e.target.value])}
-                        className="w-16"
-                      />
-                    </div>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            <Alert className="border-primary/20 bg-primary-light text-primary text-sm">
-              <AlertDescription className="text-primary">
-                <strong>提示：</strong>视频理解功能必须使用多模态模型。
-              </AlertDescription>
-            </Alert>
-          </div>
-
-          {/* 笔记格式 */}
-          <FormField
-            control={form.control}
-            name="format"
-            render={({ field }) => (
-              <FormItem>
-                <SectionHeader title="笔记格式" tip="选择要包含的笔记元素" />
-                <CheckboxGroup
-                  value={field.value}
-                  onChange={field.onChange}
-                  disabledMap={{
-                    link: platform === 'local',
-                    screenshot: !videoUnderstandingEnabled,
-                  }}
-                />
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          {/* 备注 */}
-          <FormField
-            control={form.control}
-            name="extras"
-            render={({ field }) => (
-              <FormItem>
-                <SectionHeader title="备注" tip="可在 Prompt 结尾附加自定义说明" />
-                <Textarea placeholder="笔记需要罗列出 xxx 关键点…" {...field} />
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          </details>
-          <div className="workspace-submit"><FormButton /></div>
-        </form>
-      </Form>
+  return <Form {...form}><form className="generation-form" onSubmit={form.handleSubmit(onSubmit, invalid)}>
+    <div className="generation-main">
+      <section className="generation-section generation-source">
+        <div className="generation-section-title"><span className="generation-step">01</span><h2>添加视频</h2><span className="generation-source-tabs" role="group" aria-label="视频来源"><button type="button" disabled={editing || locked} aria-pressed={platform !== 'local'} onClick={() => switchSource(false)}><Link2 size={14} />视频链接</button><button type="button" disabled={editing || locked} aria-pressed={platform === 'local'} onClick={() => switchSource(true)}><FileVideo size={14} />本地文件</button></span></div>
+        <div className="generation-source-input">
+          {platform !== 'local' && <FormField control={form.control} name="platform" render={({ field }) => <FormItem><Select value={field.value} onValueChange={field.onChange} disabled={editing || locked}><SelectTrigger aria-label="视频平台"><SelectValue /></SelectTrigger><SelectContent>{platforms.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select></FormItem>} />}
+          <FormField control={form.control} name="video_url" render={({ field }) => <FormItem className="generation-url"><FormControl><Input {...field} disabled={editing || locked} aria-label={platform === 'local' ? '本地视频路径' : '视频链接'} placeholder={platform === 'local' ? '填写本地路径，或选择下方文件' : '粘贴视频链接，自动识别支持的平台'} onChange={event => { field.onChange(event); if (platform !== 'local') { const detected = inferPlatform(event.target.value); if (detected) form.setValue('platform', detected) } }} /></FormControl><FormMessage /></FormItem>} />
+        </div>
+        {platform === 'local' && <><input ref={fileInput} type="file" accept="video/*,audio/*" hidden disabled={locked || editing} onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = '' }} /><button className="generation-upload" type="button" disabled={locked || editing} onClick={() => fileInput.current?.click()} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); if (event.dataTransfer.files[0]) void upload(event.dataTransfer.files[0]) }}><UploadCloud size={22} /><strong>{uploading ? `正在上传${uploadProgress === null ? '…' : ` · ${uploadProgress}%`}` : fileName || '拖入视频，或点击选择文件'}</strong><span>{fileName && !uploading && uploadProgress === 100 ? '文件已就绪' : '视频和音频文件均可上传'}</span>{uploading && <progress max="100" value={uploadProgress ?? undefined} aria-label="文件上传进度" />}</button></>}
+      </section>
+      <section className="generation-section">
+        <div className="generation-section-title"><span className="generation-step">02</span><h2>选择笔记类型</h2></div>
+        <FormField control={form.control} name="style" render={({ field }) => <FormItem><div className="generation-types" role="group" aria-label="笔记类型">{[{ value:'tutorial', title:'教程笔记', description:'保留操作顺序、关键参数与结果', icon:Layers }, { value:'knowledge', title:'知识笔记', description:'梳理概念、推理与重要例子', icon:BookOpen }].map(item => <button type="button" key={item.value} disabled={locked} aria-pressed={field.value === item.value} onClick={() => field.onChange(item.value)}><item.icon size={19} /><strong>{item.title}</strong><span>{item.description}</span>{field.value === item.value && <Check size={14} className="generation-type-check" />}</button>)}</div><FormMessage /></FormItem>} />
+        <div className="generation-options">
+          <FormField control={form.control} name="format" render={({ field }) => <FormItem><label><input type="checkbox" disabled={locked} checked={field.value?.includes('screenshot') || false} onChange={event => field.onChange(event.target.checked ? ['link','screenshot'] : ['link'])} /><span><strong>自动配图</strong><small>动态选择有用的原片画面</small></span></label></FormItem>} />
+          <FormField control={form.control} name="video_understanding" render={({ field }) => <FormItem><label><input type="checkbox" disabled={locked} checked={field.value || false} onChange={event => field.onChange(event.target.checked)} /><span><strong>结合画面理解</strong><small>将关键帧交给支持看图的模型</small></span></label></FormItem>} />
+        </div>
+      </section>
+      <details className="generation-advanced"><summary>更多设置与补充要求</summary><div className="generation-advanced-fields">
+        <FormField control={form.control} name="extras" render={({ field }) => <FormItem><FormLabel>希望重点保留什么？</FormLabel><FormControl><Textarea {...field} disabled={locked} placeholder="例如：重点记录参数、菜单路径与作者的纠错过程" rows={3} /></FormControl></FormItem>} />
+        <div className="generation-technical"><FormField control={form.control} name="frame_mode" render={({ field }) => <FormItem><FormLabel>取帧方式</FormLabel><Select value={field.value} onValueChange={field.onChange} disabled={locked || (!vision && !format?.includes('screenshot'))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="dynamic">动态选择关键帧</SelectItem><SelectItem value="fixed">固定间隔（对照）</SelectItem></SelectContent></Select></FormItem>} />
+        {frameMode === 'fixed' && <FormField control={form.control} name="video_interval" render={({ field }) => <FormItem><FormLabel>间隔（秒）</FormLabel><Input {...field} type="number" min={1} max={30} disabled={locked} /><FormMessage /></FormItem>} />}
+        <FormField control={form.control} name="quality" render={({ field }) => <FormItem><FormLabel>下载质量</FormLabel><Select value={field.value} onValueChange={field.onChange} disabled={locked}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="fast">较小文件</SelectItem><SelectItem value="medium">标准</SelectItem><SelectItem value="slow">较高质量</SelectItem></SelectContent></Select></FormItem>} /></div>
+      </div></details>
     </div>
-  )
+    <aside className="generation-review" aria-label="本次生成设置">
+      <div className="generation-section-title"><span className="generation-step">03</span><h2>确认并生成</h2></div>
+      <FormField control={form.control} name="model_name" render={({ field }) => <FormItem><FormLabel>生成模型</FormLabel><Select value={providerId && field.value ? JSON.stringify([providerId, field.value]) : ''} onValueChange={pickModel} onOpenChange={open => { if (open) void loadModels() }} disabled={locked || (!modelList.length && modelsLoading)}><FormControl><SelectTrigger aria-label="生成模型"><SelectValue placeholder={modelsLoading ? '正在加载模型…' : '选择模型'}>{field.value || (modelsLoading ? '正在加载模型…' : '选择模型')}</SelectValue></SelectTrigger></FormControl><SelectContent>{modelList.map(model => <SelectItem key={`${model.provider_id}:${model.model_name}`} value={JSON.stringify([model.provider_id, model.model_name])}>{model.model_name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem>} />
+      <div className="generation-model-actions"><button type="button" disabled={modelsLoading || locked} onClick={() => void loadModels({ force: true })}><RefreshCw size={12} className={modelsLoading ? 'generation-spin' : ''} />刷新模型</button><button type="button" onClick={() => navigate('/settings/model')}>模型设置</button></div>
+      {modelsError && <p className="generation-inline-note">{modelsError}</p>}
+      {!modelList.length && !modelsLoading && <p className="generation-inline-note">请先在模型设置中添加可用模型。</p>}
+      <details className="generation-advanced"><summary>生成参数与费用</summary><div className="generation-advanced-fields">
+        <GenerationOptionsFields value={generationOptions} onChange={setGenerationOptions} disabled={locked} />
+        <p className="generation-details-muted">调整仅用于本次生成。只有点击保存，才会成为这个服务商与模型的默认值。</p>
+        <div className="generation-details-actions"><button type="button" className="generation-secondary" disabled={locked || !providerId || !modelName} onClick={() => { try { saveGenerationDefaults(providerId, modelName || '', generationOptions); toast.success('已保存该模型的生成默认值') } catch { toast.error('未能保存默认值，请检查本地存储') } }}>保存为该模型默认</button><button type="button" className="generation-secondary" disabled={locked} onClick={() => setGenerationOptions(readGenerationDefaults(providerId, modelName || ''))}>恢复已保存默认</button></div>
+      </div></details>
+      <dl className="generation-summary"><div><dt>笔记</dt><dd>{style === 'knowledge' ? '知识笔记' : '教程笔记'}</dd></div><div><dt>配图</dt><dd>{format?.includes('screenshot') ? '自动选择' : '关闭'}</dd></div><div><dt>画面分析</dt><dd>{vision ? '开启' : '关闭'}</dd></div><div><dt>原片定位</dt><dd>自动保留</dd></div></dl>
+      <p className="generation-inline-note">提交后可查看每个处理阶段，离开页面也会继续生成。</p>
+      <div className="generation-submit-state" aria-live="polite">{submitting ? <><Loader2 size={15} className="generation-spin" /><span>正在确认任务已接收{now - submittedAt >= 1000 ? ` · ${Math.floor((now-submittedAt)/1000)} 秒` : '…'}</span></> : uploading ? '文件上传完成后即可生成' : generating ? '这篇笔记正在生成，可返回查看进度' : null}</div>
+      {notice && <p role="alert" className="generation-error">{notice}</p>}
+      {pending ? <button type="button" className="generation-primary" disabled={checking} onClick={() => void checkPending()}>{checking ? <Loader2 size={16} className="generation-spin" /> : <RefreshCw size={16} />}检查任务状态</button> : <button type="submit" className="generation-primary" disabled={locked || (!modelList.length && modelsLoading)}>{submitting || generating ? <Loader2 size={16} className="generation-spin" /> : <ArrowRight size={16} />}{submitting ? '正在提交…' : generating ? '正在生成' : editing ? '生成新版本' : '开始生成'}</button>}
+      {editing && <button type="button" className="generation-secondary" onClick={() => navigate('/?view=create')}>创建另一篇笔记</button>}
+      <span className="generation-footnote">{editing ? '生成完成后保留当前版本' : modelName ? '使用所选模型处理视频内容' : '选择模型后开始'}</span>
+    </aside>
+  </form></Form>
 }
-
-export default NoteForm

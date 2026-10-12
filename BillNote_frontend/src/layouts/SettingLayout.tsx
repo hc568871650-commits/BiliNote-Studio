@@ -30,7 +30,7 @@ export default function SettingLayout({ Menu }: { Menu: ReactNode }) {
     <nav className="settings-rail" aria-label="主导航">
       <Link to="/?view=create" className="settings-rail-icon" title="新建笔记" aria-label="新建笔记"><SquarePen size={19} /></Link>
       <Link to="/?view=read" className="settings-rail-icon" title="返回笔记库" aria-label="返回笔记库"><BookOpen size={19} /></Link>
-      {!isQuickEdition && <Link to="/organizer" className="settings-rail-icon" title="整理助手" aria-label="整理助手"><BotMessageSquare size={19} /></Link>}
+      {!isQuickEdition && <Link to="/organizer" className="settings-rail-icon" title="资料库助手" aria-label="资料库助手"><BotMessageSquare size={19} /></Link>}
       <div className="flex-1" />
       <span className="settings-rail-icon is-active" aria-label="设置" aria-current="page"><Settings2 size={19} /></span>
     </nav>

@@ -22,9 +22,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: BillNote_frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:reading
-      - run: pnpm test:stream
-      - run: pnpm test:organizer
+      - run: pnpm test:release
       - run: pnpm exec vite build --mode tauri
         env:
           VITE_API_BASE_URL: http://127.0.0.1:38484/api

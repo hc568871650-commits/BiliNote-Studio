@@ -16,12 +16,12 @@ export function rehypeReadingBlocks() {
     })
   }
 }
-interface Props { children: ReactNode; taskId: string; versionId: string; title: string; onQuote: (quotes: ReadingAttachment[], temporary: boolean) => void }
-export default function ReadingSelection({ children, taskId, versionId, title, onQuote }: Props) {
+interface Props { children: ReactNode; taskId: string; versionId: string; title: string; onQuote: (quotes: ReadingAttachment[], temporary: boolean) => boolean; onRefine?: (texts: string[]) => void }
+export default function ReadingSelection({ children, taskId, versionId, title, onQuote, onRefine }: Props) {
   const container = useRef<HTMLDivElement>(null)
   const [selected, setSelected] = useState<string[]>([])
-  const [selection, setSelection] = useState<{ text: string; x: number; y: number; blockId?: string } | null>(null)
-  const quote = (text: string, blockId?: string): ReadingAttachment => ({ id: crypto.randomUUID(), type: 'quote', name: title, text, taskId, versionId, blockId })
+  const [selection, setSelection] = useState<{ text: string; x: number; y: number; blockId?: string; sourceText?: string } | null>(null)
+  const quote = (text: string, blockId?: string, sourceText?: string): ReadingAttachment => ({ id: crypto.randomUUID(), type: 'quote', name: title, text, taskId, versionId, blockId, ...(sourceText ? { sourceText } : {}) })
   useEffect(() => {
     container.current?.querySelectorAll<HTMLElement>('[data-note-block]').forEach(el => {
       const checked = selected.includes(el.dataset.noteBlock || '')
@@ -36,9 +36,16 @@ export default function ReadingSelection({ children, taskId, versionId, title, o
   }, [])
   const addBlocks = (temporary: boolean) => {
     const blocks = Array.from(container.current?.querySelectorAll<HTMLElement>('[data-note-block]') || []).filter(el => selected.includes(el.dataset.noteBlock || ''))
-    const quotes = blocks.map(el => quote(el.dataset.noteText || Array.from(el.children).filter(child => !child.matches('[data-block-pick]')).map(child => child.textContent).join('\n'), el.dataset.noteBlock)).filter(item => item.text?.trim())
-    if (quotes.length) onQuote(quotes, temporary)
-    setSelected([])
+    const parts = blocks.map(el => ({ text: el.dataset.noteText || Array.from(el.children).filter(child => !child.matches('[data-block-pick]')).map(child => child.textContent).join('\n'), blockId: el.dataset.noteBlock })).filter(part => part.text.trim())
+    if (!parts.length) return
+    let offset = 0
+    const blockRanges = parts.map(part => {
+      const range = { blockId: part.blockId, start: offset, end: offset + part.text.length }
+      offset = range.end + 2
+      return range
+    })
+    const combined = { ...quote(parts.map(part => part.text).join('\n\n'), parts[0].blockId), blockCount: parts.length, blocks: blockRanges }
+    if (onQuote([combined], temporary)) setSelected([])
   }
   return <div ref={container} data-note-task={taskId} data-note-version={versionId} className={`reading-selection ${selected.length ? 'reading-selection--active' : ''}`}
     onKeyDown={event => { if (event.key === 'Escape') { setSelection(null); setSelected([]) } }}
@@ -48,9 +55,21 @@ export default function ReadingSelection({ children, taskId, versionId, title, o
       if (!sel || sel.isCollapsed || !container.current?.contains(sel.anchorNode) || !container.current.contains(sel.focusNode)) { setSelection(null); return }
       const text = sel.toString().trim()
       if (!text) return
-      const rect = sel.getRangeAt(0).getBoundingClientRect()
-      const blockId = (sel.anchorNode?.parentElement?.closest('[data-note-block]') as HTMLElement)?.dataset.noteBlock
-      setSelection({ text, blockId, x: Math.max(8, Math.min(rect.left, window.innerWidth - 320)), y: Math.max(8, rect.top - 44) })
+      const range = sel.getRangeAt(0)
+      const rect = range.getBoundingClientRect()
+      const start = range.startContainer
+      const block = (start instanceof HTMLElement ? start : start.parentElement)?.closest<HTMLElement>('[data-note-block]')
+      // A mouse selection can span blocks. Keep a bounded anchor excerpt from
+      // its first block while retaining the complete selected text for the chat.
+      let sourceText: string | undefined
+      if (block && !block.contains(range.endContainer)) {
+        const first = range.cloneRange()
+        first.setEnd(block, block.childNodes.length)
+        const fragment = first.cloneContents()
+        fragment.querySelectorAll('[data-block-pick]').forEach(control => control.remove())
+        sourceText = fragment.textContent?.trim().slice(0, 512) || undefined
+      }
+      setSelection({ text, blockId: block?.dataset.noteBlock, sourceText, x: Math.max(8, Math.min(rect.left, window.innerWidth - 320)), y: Math.max(8, rect.top - 44) })
     }}
     onClick={event => {
       const button = (event.target as HTMLElement).closest<HTMLElement>('[data-block-pick]')
@@ -59,11 +78,16 @@ export default function ReadingSelection({ children, taskId, versionId, title, o
       const id = button?.dataset.blockPick || block?.dataset.noteBlock
       if (id) { event.preventDefault(); setSelection(null); setSelected(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id]) }
     }}>
-    {selected.length > 0 && <div className="reading-multiselect" role="toolbar" aria-label="段落选择"><span>已选 {selected.length} 段</span><button onClick={() => addBlocks(false)}>添加到对话</button><button onClick={() => addBlocks(true)}>临时提问</button><button onClick={() => setSelected([])}>取消</button></div>}
+    {selected.length > 0 && <div className="reading-multiselect" role="toolbar" aria-label="段落选择"><span>已选 {selected.length} 段 · 合为 1 份引用</span><button onClick={() => addBlocks(false)}>添加到对话</button><button onClick={() => addBlocks(true)}>临时提问</button>{onRefine && <button onClick={() => {
+      const blocks = Array.from(container.current?.querySelectorAll<HTMLElement>('[data-note-block]') || [])
+      const indices = blocks.map((block, index) => selected.includes(block.dataset.noteBlock || '') ? index : -1).filter(index => index >= 0)
+      const texts = indices.map(index => blocks[index].dataset.noteText || '').filter(text => text.trim())
+      if (texts.length) onRefine(texts)
+    }}>重新蒸馏</button>}<button onClick={() => setSelected([])}>取消</button></div>}
     {children}
     {selection && <div className="reading-selection-popover" style={{ left: selection.x, top: selection.y }} role="toolbar" aria-label="选中文字操作" onMouseDown={event => event.preventDefault()}>
-      <button onClick={() => { onQuote([quote(selection.text, selection.blockId)], false); setSelection(null); window.getSelection()?.removeAllRanges() }}>添加到对话</button>
-      <button onClick={() => { onQuote([quote(selection.text, selection.blockId)], true); setSelection(null); window.getSelection()?.removeAllRanges() }}>在侧边聊天中提问</button>
+      <button onClick={() => { if (onQuote([quote(selection.text, selection.blockId, selection.sourceText)], false)) { setSelection(null); window.getSelection()?.removeAllRanges() } }}>添加到对话</button>
+      <button onClick={() => { if (onQuote([quote(selection.text, selection.blockId, selection.sourceText)], true)) { setSelection(null); window.getSelection()?.removeAllRanges() } }}>在侧边聊天中提问</button>
     </div>}
   </div>
 }

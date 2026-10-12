@@ -1,4 +1,7 @@
 import request from '@/utils/request'
+import type { ChatErrorDetails, ChatSource } from '@/services/chat'
+import type { ProviderProtocol } from '@/store/providerProtocolStore'
+import type { ReasoningEffort } from '@/utils/aiSettings'
 
 export type OrganizerScope = { kind: 'all' | 'folder' | 'selected'; folder_id?: string; task_ids?: string[] }
 export type OrganizerOperation = {
@@ -33,7 +36,10 @@ export interface OrganizerPlanRequest {
   scope: OrganizerScope
   provider_id: string
   model_name: string
-  reasoning_effort?: 'auto' | 'none' | 'low' | 'medium' | 'high' | 'xhigh'
+  reasoning_effort?: ReasoningEffort
+  protocol?: ProviderProtocol
+  web_search?: boolean
+  web_search_mode?: 'native' | 'external'
   context_limit?: 272000
 }
 export interface OrganizerContext { input_tokens: number; estimated: boolean; limit: number; warning?: boolean; compacted?: boolean; compacted_messages?: number }
@@ -44,6 +50,8 @@ export const executeOrganization = (planId: string) => request.post('/organizer/
 export const undoOrganization = (planId: string) => request.post('/organizer/undo', { plan_id: planId }, options) as unknown as Promise<OrganizerResult>
 
 export interface OrganizerSession {
+  protocol?: ProviderProtocol
+  error_details?: ChatErrorDetails | null
   memory?: { summary: string; through_id: string | null; compacted_messages: number }
   context?: OrganizerContext | null
   session_id: string
@@ -51,7 +59,7 @@ export interface OrganizerSession {
   status: 'idle' | 'planning' | 'executing' | 'undoing' | 'clarification' | 'refused' | 'awaiting_approval' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
   scope: OrganizerScope & { authorized: boolean; exclude_favorites: boolean; target_count: number; folder_name?: string }
   query_scope?: OrganizerScope
-  history: { id: string; role: 'user' | 'assistant' | 'system'; content: string; created_at: number; phase?: 'pending' | 'superseded' | 'cancelled' | 'executed' | 'undone' }[]
+  history: { id: string; role: 'user' | 'assistant' | 'system'; content: string; created_at: number; sources?: ChatSource[]; phase?: 'pending' | 'superseded' | 'cancelled' | 'executed' | 'undone' }[]
   plan: OrganizerPlan | null
   result: OrganizerResult | null
   error: string | null
@@ -77,5 +85,5 @@ export const listOrganizerSessions = () => request.get('/organizer/sessions', op
 export const createOrganizerSession = (scope: OrganizerScope, confirmation_token?: string, request_id: string = crypto.randomUUID()) => request.post('/organizer/sessions', { scope, confirmation_token, request_id }, options) as unknown as Promise<OrganizerSession>
 export const getOrganizerSession = (id: string) => request.get(`/organizer/sessions/${encodeURIComponent(id)}`, options) as unknown as Promise<OrganizerSession>
 export const messageOrganizerSession = (id: string, body: OrganizerPlanRequest & { expected_revision: number; request_id: string }) => request.post(`/organizer/sessions/${encodeURIComponent(id)}/message`, body, options) as unknown as Promise<OrganizerSession>
-export const compactOrganizerSession = (id: string, body: { expected_revision: number; request_id: string; provider_id: string; model_name: string }) => request.post(`/organizer/sessions/${encodeURIComponent(id)}/compact`, body, options) as unknown as Promise<OrganizerSession>
+export const compactOrganizerSession = (id: string, body: { expected_revision: number; request_id: string; provider_id: string; model_name: string; protocol?: ProviderProtocol }) => request.post(`/organizer/sessions/${encodeURIComponent(id)}/compact`, body, options) as unknown as Promise<OrganizerSession>
 export const actOrganizerSession = (id: string, action: 'approve' | 'cancel' | 'undo' | 'recover' | 'cancel-compaction', body: { expected_revision: number; request_id: string; plan_id?: string }) => request.post(`/organizer/sessions/${encodeURIComponent(id)}/${action}`, body, options) as unknown as Promise<OrganizerSession>

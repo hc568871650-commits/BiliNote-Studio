@@ -8,9 +8,11 @@ import type { ReactNode, FC } from 'react'
 import { Toaster } from 'react-hot-toast'
 import { ThemeProvider } from 'next-themes'
 import ThemeToggle from '@/components/ThemeToggle'
+import DesktopChrome from '@/components/DesktopChrome'
 
 interface RootLayoutProps {
   children: ReactNode
+  previewWindow?: boolean
 }
 
 export const metadata = {
@@ -18,7 +20,7 @@ export const metadata = {
   description: '通过视频链接结合大模型自动生成对应的笔记',
 }
 
-const RootLayout: FC<RootLayoutProps> = ({ children }) => {
+const RootLayout: FC<RootLayoutProps> = ({ children, previewWindow = false }) => {
   const preferences = useInterfaceStore()
   useEffect(() => {
     const root = document.documentElement
@@ -43,7 +45,7 @@ const RootLayout: FC<RootLayoutProps> = ({ children }) => {
             },
           }}
         />
-        {children}
+        <DesktopChrome preview={previewWindow}>{children}</DesktopChrome>
         <ThemeToggle />
       </div>
     </ThemeProvider>

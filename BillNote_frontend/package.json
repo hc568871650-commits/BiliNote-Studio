@@ -1,7 +1,7 @@
 {
   "name": "bilinote-studio",
   "private": true,
-  "version": "0.1.0-preview.1",
+  "version": "0.1.0-preview.8",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,6 +13,7 @@
     "test:reading": "node scripts/check-reading-status.mjs",
     "test:stream": "node scripts/check-chat-stream.mjs",
     "test:organizer": "node scripts/check-organizer-session.mjs",
+    "test:release": "node scripts/check-release.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

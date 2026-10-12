@@ -68,7 +68,9 @@ class AskRequest(StrictInput):
     provider_id: str = Field(min_length=1, max_length=100)
     model_name: str = Field(min_length=1, max_length=200)
     protocol: Literal['openai-chat', 'openai-responses', 'anthropic'] = 'openai-chat'
-    reasoning_effort: Literal['auto', 'none', 'low', 'medium', 'high', 'xhigh'] = 'auto'
+    reasoning_effort: Literal['auto', 'none', 'low', 'medium', 'high', 'xhigh', 'max'] = 'auto'
+    web_search: bool = False
+    web_search_mode: Literal['native', 'external'] = 'native'
     context_limit: Literal[272000] = 272000
 
     @model_validator(mode='after')

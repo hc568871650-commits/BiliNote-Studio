@@ -1,0 +1,5 @@
+.assistant-sources { display:grid;gap:8px;max-height:260px;overflow:auto;margin-top:8px;font-size:12px; }
+.assistant-sources > div { padding:8px 10px;border:1px solid var(--surface-border);border-radius:8px;background:var(--surface-panel); }
+.assistant-sources :is(a,button,strong) { color:var(--surface-text);text-align:left;font-weight:500;overflow-wrap:anywhere; }
+.assistant-sources :is(a,button):hover { text-decoration:underline; }
+.assistant-sources :is(p,small) { display:block;margin:4px 0 0;color:var(--surface-description);white-space:pre-wrap;overflow-wrap:anywhere; }

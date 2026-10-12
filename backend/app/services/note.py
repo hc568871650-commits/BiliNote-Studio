@@ -37,6 +37,7 @@ from app.utils.screenshot_marker import extract_screenshot_timestamps
 from app.utils.status_code import StatusCode
 from app.utils.video_helper import generate_screenshot
 from app.utils.video_reader import VideoReader
+from app.utils.dynamic_frames import nearest_candidate
 from app.services import note_storage
 
 # ------------------ 环境变量与全局配置 ------------------
@@ -90,10 +91,14 @@ class NoteGenerator:
         self.model_size: str = config_manager.get_whisper_model_size()
         self.device: Optional[str] = None
         self.transcriber_type: str = config_manager.get_transcriber_type()
-        self.transcriber: Transcriber = self._init_transcriber()
+        # Cached/platform subtitles do not require loading a transcription model.
+        self.transcriber: Optional[Transcriber] = None
         self.video_path: Optional[Path] = None
         self.video_img_urls=[]
+        self.video_image_ranges = []
         self.run_dir: Optional[Path] = None
+        self.frame_evidence = []
+        self.video_duration = 0
         logger.info("NoteGenerator 初始化完成")
 
 
@@ -116,6 +121,9 @@ class NoteGenerator:
         video_understanding: bool = False,
         video_interval: int = 0,
         grid_size: Optional[List[int]] = None,
+        frame_mode: str = 'dynamic',
+        generation_options=None,
+        request_id: Optional[str] = None,
     ) -> NoteResult | None:
         """
         主流程：按步骤依次下载、转写、GPT 总结、截图/链接处理、存库、返回 NoteResult。
@@ -133,12 +141,28 @@ class NoteGenerator:
         :param extras: 额外参数，传递给 GPT
         :param output_path: 下载输出目录（可选）
         :param video_understanding: 是否需要视频拼图理解（生成缩略图）
-        :param video_interval: 视频帧截取间隔（秒），仅在 video_understanding 为 True 时生效
+        :param video_interval: fixed 模式的截帧间隔（秒）
+        :param frame_mode: dynamic 按变化/稳定画面/字幕操作选帧；fixed 用固定间隔比较
         :param grid_size: 生成缩略图时的网格大小，如 [3, 3]
         :return: NoteResult 对象，包含 markdown 文本、转写结果和音频元信息
         """
         if grid_size is None:
             grid_size = []
+        if frame_mode not in ('dynamic', 'fixed'):
+            raise ValueError('frame_mode must be dynamic or fixed')
+        screenshot = screenshot or 'screenshot' in (_format or [])
+        self.video_img_urls = []
+        self.video_image_ranges = []
+        self.frame_evidence = []
+        self.video_duration = 0
+        self.video_path = None
+        recorder = getattr(self, 'generation_recorder', None)
+        owns_recorder = False
+        if recorder is None and generation_options is not None:
+            from app.services.generation_usage import GenerationUsageRecorder
+            recorder = GenerationUsageRecorder(task_id, generation_options, request_id=request_id,
+                                                model=model_name, provider_id=provider_id)
+            owns_recorder = True
 
         try:
             logger.info(f"开始生成笔记 (task_id={task_id})")
@@ -148,6 +172,8 @@ class NoteGenerator:
 
             downloader = self._get_downloader(platform)
             gpt = self._get_gpt(model_name, provider_id)
+            if generation_options is not None and callable(getattr(gpt, 'configure_generation', None)):
+                gpt.configure_generation(generation_options, recorder)
 
             # 缓存文件路径
             audio_cache_file = note_storage.cache_path(task_id, "audio")
@@ -204,6 +230,8 @@ class NoteGenerator:
                 skip_download=not need_full_download,
             )
 
+            note_storage.update_audio_metadata(task_id, asdict(audio_meta))
+
             # 3. 如果前面没拿到字幕，走转写流程
             if transcript is None:
                 transcript = self._get_transcript(
@@ -214,6 +242,12 @@ class NoteGenerator:
                     status_phase=TaskStatus.TRANSCRIBING,
                     task_id=task_id,
                 )
+
+            # Select only after transcription, so operation cues are available.
+            if (screenshot or video_understanding) and self.video_path:
+                self._update_status(task_id, TaskStatus.FORMATTING, message="选取视频证据帧")
+                self._prepare_video_evidence(transcript, task_id, frame_mode, video_interval,
+                                             grid_size, video_understanding)
 
             # 3. GPT 总结
             markdown = self._summarize_text(
@@ -231,6 +265,7 @@ class NoteGenerator:
 
             # 4. 截图 & 链接替换
             if _format:
+                self._update_status(task_id, TaskStatus.FORMATTING, message="整理截图与时间链接")
                 markdown = self._post_process_markdown(
                     markdown=markdown,
                     video_path=self.video_path,
@@ -246,9 +281,27 @@ class NoteGenerator:
             self._save_metadata(video_id=audio_meta.video_id, platform=platform, task_id=task_id)
 
             # The router publishes SUCCESS only after the complete note is durable.
-            return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta)
+            frames = []
+            for item in self.frame_evidence:
+                clean = {key: value for key, value in item.items() if key not in ('path', 'fingerprint')}
+                if item.get('path') and self.run_dir:
+                    clean['path'] = Path(item['path']).resolve().relative_to(self.run_dir.resolve()).as_posix()
+                clean['source_spans'] = [dict(start=seg.start, end=seg.end, text=seg.text)
+                                         for seg in transcript.segments
+                                         if seg.start-1 <= item['time'] <= seg.end+1]
+                frames.append(clean)
+            screenshot_evidence = self.run_dir / 'screenshot_evidence.json' if self.run_dir else None
+            evidence = dict(schema_version=1, frame_mode=frame_mode, duration=self.video_duration,
+                            video_image_ranges=self.video_image_ranges,
+                            frames=frames, screenshots=json.loads(screenshot_evidence.read_text(encoding='utf-8'))
+                            if screenshot_evidence and screenshot_evidence.is_file() else [])
+            if recorder and owns_recorder:
+                recorder.finish('succeeded')
+            return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta, evidence=evidence)
 
         except Exception as exc:
+            if recorder:
+                recorder.finish('failed', exc)
             logger.error(f"生成笔记流程异常 (task_id={task_id})：{exc}", exc_info=True)
             self._update_status(task_id, TaskStatus.FAILED, message=str(exc))
             return None
@@ -300,7 +353,7 @@ class NoteGenerator:
             provider=provider["type"],
             name=provider["name"],
         )
-        return GPTFactory().from_config(config)
+        return GPTFactory().from_config(config, backend_id=provider_id or "")
 
     def _get_downloader(self, platform: str) -> Downloader:
         """
@@ -325,7 +378,8 @@ class NoteGenerator:
         logger.info(f"使用下载器：{downloader_cls.__class__}")
         return instance
 
-    def _update_status(self, task_id: Optional[str], status: Union[str, TaskStatus], message: Optional[str] = None):
+    @staticmethod
+    def _update_status(task_id: Optional[str], status: Union[str, TaskStatus], message: Optional[str] = None):
         """
         创建或更新 {task_id}.status.json，记录当前任务状态
 
@@ -340,20 +394,8 @@ class NoteGenerator:
         status_file = note_storage.status_path(task_id)
         status_file.parent.mkdir(parents=True, exist_ok=True)
         print(f"写入状态文件: {status_file} 当前状态: {status}")
-        data = {"status": status.value if isinstance(status, TaskStatus) else status}
-        if message:
-            data["message"] = message
-
         try:
-            # First create a temporary file
-            temp_file = status_file.with_suffix('.tmp')
-
-            # Write to temporary file
-            with temp_file.open('w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-
-            # Atomic rename operation
-            temp_file.replace(status_file)
+            note_storage.write_status(task_id, status.value if isinstance(status, TaskStatus) else status, message)
 
             print(f"状态文件写入成功: {status_file}")
         except Exception as e:
@@ -387,7 +429,7 @@ class NoteGenerator:
     ) -> AudioDownloadResult | None:
         """
         1. 检查音频缓存；若不存在，则根据需要下载音频或视频（若需截图/可视化）。
-        2. 如果需要视频，则先下载视频并生成缩略图集，再下载音频。
+        2. 如果需要视频，下载一次并保留路径；转写完成后再选取证据帧。
         3. 返回 AudioDownloadResult
 
         :param downloader: Downloader 实例
@@ -413,9 +455,11 @@ class NoteGenerator:
                 data = json.loads(audio_cache_file.read_text(encoding="utf-8"))
                 cached_audio = AudioDownloadResult(**data)
                 if screenshot or video_understanding:
-                    self.video_path = Path(cached_audio.video_path or downloader.download_video(video_url))
-                if not video_understanding:
-                    return cached_audio
+                    cached_video = Path(cached_audio.video_path) if cached_audio.video_path else None
+                    self.video_path = cached_video if cached_video and cached_video.is_file() else Path(downloader.download_video(video_url))
+                    cached_audio.video_path = str(self.video_path)
+                    audio_cache_file.write_text(json.dumps(asdict(cached_audio), ensure_ascii=False, indent=2), encoding='utf-8')
+                return cached_audio
             except Exception as e:
                 logger.warning(f"读取音频缓存失败，将重新下载：{e}")
 
@@ -444,28 +488,14 @@ class NoteGenerator:
         if video_understanding and not grid_size:
             grid_size = [2, 2]
 
-        frame_interval = video_interval if video_interval and video_interval > 0 else 6
         if need_video:
             try:
                 logger.info("开始下载视频")
-                video_path_str = downloader.download_video(video_url)
-                self.video_path = Path(video_path_str)
+                if not self.video_path or not self.video_path.is_file():
+                    video_path_str = downloader.download_video(video_url)
+                    self.video_path = Path(video_path_str)
                 logger.info(f"视频下载完成：{self.video_path}")
 
-                if video_understanding and grid_size:
-                    run_dir = self.run_dir or Path("Temp") / "note_jobs" / task_id / uuid.uuid4().hex
-                    self.video_img_urls = VideoReader(
-                        video_path=str(self.video_path),
-                        grid_size=tuple(grid_size),
-                        frame_interval=frame_interval,
-                        unit_width=960,
-                        unit_height=540,
-                        save_quality=80,
-                        frame_dir=str(run_dir / "frames"),
-                        grid_dir=str(run_dir / "grids"),
-                    ).run()
-                else:
-                    logger.info("未指定 grid_size，跳过缩略图生成")
             except Exception as exc:
                 logger.error(f"视频下载失败：{exc}")
                 self._handle_exception(task_id, exc)
@@ -480,6 +510,8 @@ class NoteGenerator:
                 output_dir=output_path,
                 need_video=need_video,
             )
+            if self.video_path:
+                audio.video_path = str(self.video_path)
             audio_cache_file.write_text(json.dumps(asdict(audio), ensure_ascii=False, indent=2), encoding="utf-8")
             logger.info(f"音频下载并缓存成功 ({audio_cache_file})")
             return audio
@@ -487,6 +519,26 @@ class NoteGenerator:
             logger.error(f"音频下载失败：{exc}")
             self._handle_exception(task_id, exc)
             raise
+
+    def _prepare_video_evidence(self, transcript, task_id, frame_mode='dynamic',
+                                video_interval=0, grid_size=None, video_understanding=False):
+        """One local extraction; images reach a model only for explicit video understanding."""
+        run_dir = self.run_dir or Path('Temp') / 'note_jobs' / str(task_id) / uuid.uuid4().hex
+        self.run_dir = run_dir
+        reader = VideoReader(video_path=str(self.video_path), grid_size=tuple(grid_size or [2, 2]),
+                             frame_interval=video_interval if video_interval > 0 else 6,
+                             frame_mode=frame_mode, subtitle_segments=transcript.segments,
+                             frame_budget=120, save_quality=80,
+                             frame_dir=str(run_dir / 'frames'), grid_dir=str(run_dir / 'grids'),
+                             manifest_path=str(run_dir / 'frame_evidence.json'))
+        if video_understanding:
+            self.video_img_urls = reader.run()
+            self.video_image_ranges = reader.grouped_ranges
+        else:
+            reader.extract_frames()
+            self.video_image_ranges = []
+        self.frame_evidence = reader.evidence
+        self.video_duration = reader.duration
 
 
     def _get_transcript(
@@ -572,6 +624,8 @@ class NoteGenerator:
         # 调用转写器
         try:
             logger.info("开始转写音频")
+            if self.transcriber is None:
+                self.transcriber = self._init_transcriber()
             transcript = self.transcriber.transcript(file_path=audio_file)
             if not transcript or not transcript.segments or not transcript.full_text.strip():
                 raise ValueError('转写引擎未返回有效文本和时间戳，未调用笔记生成模型；请检查音轨或转写服务')
@@ -619,11 +673,14 @@ class NoteGenerator:
             tags=audio_meta.raw_info.get("tags", []),
             screenshot=screenshot,
             video_img_urls=video_img_urls,
+            video_image_ranges=self.video_image_ranges,
             link=link,
             _format=formats,
             style=style,
             extras=extras,
             checkpoint_key=task_id,
+            frame_evidence=[{key: value for key, value in item.items() if key not in ('path', 'fingerprint')}
+                            for item in self.frame_evidence],
         )
 
         try:
@@ -674,17 +731,32 @@ class NoteGenerator:
         :return: 替换后的 Markdown 字符串
         """
         matches: List[Tuple[str, int]] = extract_screenshot_timestamps(markdown)
+        if not self.video_duration:
+            import ffmpeg
+            from ffmpeg_helper import find_ffmpeg_binary
+            self.video_duration = float(ffmpeg.probe(str(video_path), cmd=find_ffmpeg_binary('ffprobe'))['format']['duration'])
+        outcomes = []
         for idx, (marker, ts) in enumerate(matches):
             try:
                 if not self.run_dir:
                     raise RuntimeError("Missing isolated screenshot directory")
-                img_path = generate_screenshot(str(video_path), str(self.run_dir / "images"), ts, idx)
+                actual_ts = nearest_candidate(ts, self.frame_evidence, self.video_duration)
+                img_path = generate_screenshot(str(video_path), str(self.run_dir / "images"), max(0, actual_ts-.001), idx)
+                if not Path(img_path).is_file() or Path(img_path).stat().st_size == 0:
+                    raise RuntimeError('Screenshot output is missing or empty')
                 filename = Path(img_path).name
                 img_url = f"images/{filename}"
-                markdown = markdown.replace(marker, f"![]({img_url})", 1)
+                markdown = markdown.replace(marker, f"![视频截图 {int(actual_ts//60):02d}:{actual_ts%60:06.3f}]({img_url})", 1)
+                outcomes.append(dict(requested_time=ts, actual_time=actual_ts, path=img_url, success=True))
             except Exception as exc:
                 logger.error(f"生成截图失败 (timestamp={ts})：{exc}")
+                outcomes.append(dict(requested_time=ts, success=False, error=str(exc)))
+                if self.run_dir:
+                    self.run_dir.mkdir(parents=True, exist_ok=True)
+                    (self.run_dir / 'screenshot_evidence.json').write_text(json.dumps(outcomes, ensure_ascii=False, indent=2), encoding='utf-8')
                 raise
+        if self.run_dir:
+            (self.run_dir / 'screenshot_evidence.json').write_text(json.dumps(outcomes, ensure_ascii=False, indent=2), encoding='utf-8')
         return markdown
 
     @staticmethod

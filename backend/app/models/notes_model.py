@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from app.models.audio_model import AudioDownloadResult
@@ -10,3 +10,4 @@ class NoteResult:
     markdown: str                  # GPT 总结的 Markdown 内容
     transcript: TranscriptResult                # Whisper 转写结果
     audio_meta: AudioDownloadResult  # 音频下载的元信息（title、duration、封面等）
+    evidence: dict = field(default_factory=dict)  # Selection provenance; paths relative to the task.

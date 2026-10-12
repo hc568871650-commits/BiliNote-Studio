@@ -1,0 +1,3 @@
+.assistant-web-control button { display:inline-flex;align-items:center;gap:4px;padding:4px 6px;border-radius:6px;color:var(--surface-description);font-size:11px; }
+.assistant-web-control button[aria-pressed=true] { background:var(--surface-selected);color:var(--text-emphasis); }
+.assistant-web-control button:disabled { opacity:.45;cursor:not-allowed; }

@@ -107,8 +107,10 @@ async function run() {
     assert.equal(store.getState().messages.at(-1)?.text, '服务器保存的回答', 'Restoration replaces client history with authoritative snapshot')
     current.query_scope = { kind: 'selected', task_ids: ['query-note'] }
     await store.getState().restore(current.session_id)
-    assert.equal(store.getState().scope, 'selected', 'Restoration uses saved query scope, not actual target scope')
-    assert.deepEqual(store.getState().selectedIds, ['query-note'])
+    assert.equal(store.getState().scope, 'all', 'New queries use the full library without a hidden legacy query scope')
+    assert.deepEqual(store.getState().session?.scope, current.scope, 'Restoration preserves the actual write target')
+    assert.deepEqual(store.getState().session?.plan, current.plan, 'Restoration preserves the existing plan')
+    assert.deepEqual(store.getState().selectedIds, [])
     current.status = 'interrupted'
     await store.getState().refresh()
     await store.getState().recover()

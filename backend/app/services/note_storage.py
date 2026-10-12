@@ -100,6 +100,27 @@ def _manifest(task_id):
 def _public(task):
     task = dict(task)
     task_id = task["id"]
+    # Older manifests did not retain errors. Read the task-owned status snapshot
+    # as well so detail/list reloads do not erase a failure already shown by polling.
+    snapshot = status_path(task_id)
+    if snapshot.is_file():
+        try:
+            state = json.loads(snapshot.read_text(encoding="utf-8"))
+            task["status"] = state.get("status") or task.get("status")
+            task["statusMessage"] = state.get("message") or ""
+            task["last_active_status"] = state.get("last_active_status") or task.get("last_active_status")
+            task["status_updated_at"] = state.get("status_updated_at") or datetime.fromtimestamp(snapshot.stat().st_mtime, timezone.utc).isoformat()
+            task["started_at"] = state.get("started_at") or task.get("started_at")
+            task["finished_at"] = (state.get("finished_at") or task["status_updated_at"]) if task["status"] in ("SUCCESS", "FAILED") else None
+        except (OSError, ValueError):
+            pass
+    if not (task.get("audioMeta") or {}).get("title"):
+        try:
+            cached = json.loads(cache_path(task_id, "audio").read_text(encoding="utf-8"))
+            if cached.get("title"):
+                task["audioMeta"] = dict(task.get("audioMeta") or {}, title=cached["title"])
+        except (OSError, ValueError):
+            pass
     task["resource_base"] = f"/api/notes/{task_id}/assets/"
     if isinstance(task.get("markdown"), list):
         task["markdown"] = [dict(ver, resource_base=f"/api/notes/{task_id}/assets/versions/")
@@ -180,6 +201,26 @@ def _version_id(value):
     return candidate if TASK_ID.fullmatch(candidate) else uuid.uuid4().hex
 
 
+def _publish_evidence(evidence, folder, version_id, staging):
+    """Preserve frame evidence before generation staging is removed."""
+    result = json.loads(json.dumps(evidence))
+    for group in ('frames', 'screenshots'):
+        for item in result.get(group) or []:
+            relative = item.pop('path', None)
+            if not relative or not staging:
+                continue
+            source = _inside(Path(staging) / relative, Path(staging))
+            if not source.is_file() or source.suffix.lower() not in ('.jpg', '.png', '.webp'):
+                raise FileNotFoundError('Missing generated evidence frame')
+            name = f'{version_id}_evidence_{uuid.uuid5(uuid.NAMESPACE_URL, relative).hex[:16]}{source.suffix.lower()}'
+            destination = folder / 'images' / name
+            destination.parent.mkdir(exist_ok=True)
+            if not destination.exists():
+                shutil.copy2(source, destination)
+            item['path'] = '../images/' + name
+    return result
+
+
 def save_task(task, staging=None, import_legacy=False):
     """Merge versions by ID. Import never overwrites a newer server-owned version."""
     task_id = valid_id(task["id"])
@@ -191,7 +232,7 @@ def save_task(task, staging=None, import_legacy=False):
             return _public(existing["task"])
         title = (task.get("audioMeta") or {}).get("title") or task_id
         folder = _note_dir(task_id, create=not bool(existing), title=title)
-        if existing and title != task_id and folder.name == f"{task_id}__{task_id}":
+        if existing and title != task_id and folder.name in (f"{task_id}__{task_id}", f"正在解析视频标题__{task_id}"):
             target = ROOT / f"{_safe_title(title)}__{task_id}"
             if not target.exists():
                 folder.rename(target)
@@ -213,6 +254,8 @@ def save_task(task, staging=None, import_legacy=False):
             if ver_id in known:
                 continue
             content = _copy_images(ver.get("content") or "", folder, ver_id, staging, version=True)
+            if isinstance(ver.get('evidence'), dict):
+                ver['evidence'] = _publish_evidence(ver['evidence'], folder, ver_id, staging)
             ver.update(ver_id=ver_id, content=content)
             ver.pop("resource_base", None)
             versions.insert(0, ver)
@@ -235,7 +278,10 @@ def save_task(task, staging=None, import_legacy=False):
             "transcript": data.get("transcript") or {},
             "audio_meta": data.get("audioMeta") or {},
         })
-        _atomic_json(meta / "transcript.json", data.get("transcript") or {})
+        # This file is also the generation cache. A metadata-only retry must not
+        # overwrite valid transcribed segments with the original empty draft.
+        if "transcript" in task or not (meta / "transcript.json").exists():
+            _atomic_json(meta / "transcript.json", data.get("transcript") or {})
         _atomic_json(meta / "manifest.json", {"schema_version": 1, "task": data,
                                              "updated_at": datetime.now(timezone.utc).isoformat()})
         return _public(data)
@@ -244,7 +290,14 @@ def save_task(task, staging=None, import_legacy=False):
 def save_result(task_id, note, staging=None):
     from dataclasses import asdict
     result = asdict(note)
-    return save_task({"id": task_id, "markdown": result["markdown"],
+    markdown = result['markdown']
+    if result.get('evidence'):
+        task = get_task(task_id) or {}
+        form = task.get('formData') or {}
+        markdown = [{'ver_id': uuid.uuid4().hex, 'content': markdown, 'evidence': result['evidence'],
+                     'style': form.get('style') or 'tutorial', 'model_name': form.get('model_name') or '',
+                     'provider_id': form.get('provider_id'), 'created_at': datetime.now(timezone.utc).isoformat()}]
+    return save_task({"id": task_id, "markdown": markdown,
                       "transcript": result["transcript"], "audioMeta": result["audio_meta"],
                       "status": "SUCCESS"}, staging=staging)
 
@@ -256,6 +309,44 @@ def set_status(task_id, status):
             return
         manifest["task"]["status"] = status
         _atomic_json(_note_dir(task_id) / "_meta" / "manifest.json", manifest)
+
+
+def write_status(task_id, status, message=None):
+    """Persist both polling and library snapshots; a new attempt resets progress."""
+    active = {"PENDING", "PARSING", "DOWNLOADING", "TRANSCRIBING", "SUMMARIZING", "FORMATTING", "SAVING"}
+    with LOCK:
+        path = status_path(task_id)
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        except (OSError, ValueError):
+            previous = {}
+        last = status if status in active else previous.get("last_active_status")
+        if not last and previous.get("status") in active:
+            last = previous["status"]
+        now = datetime.now(timezone.utc).isoformat()
+        state = {"status": status, "message": message or "", "status_updated_at": now,
+                 "started_at": now if status == "PENDING" else previous.get("started_at"),
+                 "finished_at": (previous.get("finished_at") or now) if status in ("SUCCESS", "FAILED") else None}
+        if last:
+            state["last_active_status"] = last
+        _atomic_json(path, state)
+        manifest = _manifest(task_id)
+        if manifest:
+            manifest["task"].update(status=status, statusMessage=message or "", last_active_status=last)
+            manifest["task"].update({key: state[key] for key in ("started_at", "finished_at", "status_updated_at")})
+            _atomic_json(_note_dir(task_id) / "_meta" / "manifest.json", manifest)
+        return state
+
+
+def update_audio_metadata(task_id, audio_meta):
+    """Publish the source title before transcription/model generation completes."""
+    if not task_id:
+        return
+    with LOCK:
+        manifest = _manifest(task_id)
+        if manifest:
+            manifest["task"]["audioMeta"] = dict(manifest["task"].get("audioMeta") or {}, **audio_meta)
+            _atomic_json(_note_dir(task_id) / "_meta" / "manifest.json", manifest)
 
 
 def set_archived(task_id, archived, archived_at=None):
@@ -324,8 +415,10 @@ def create_draft(task_id, form_data):
             raise ValueError("Archived notes must be restored before regeneration")
         set_status(task_id, "PENDING")
         return
+    source = str(form_data.get("video_url") or "").replace("\\", "/")
+    title = Path(unquote(source)).stem if form_data.get("platform") == "local" else "正在解析视频标题"
     save_task({"id": task_id, "status": "PENDING", "markdown": "",
-               "audioMeta": {"title": "", "video_id": "", "platform": form_data.get("platform", "")},
+               "audioMeta": {"title": title or "本地视频", "video_id": "", "platform": form_data.get("platform", "")},
                "transcript": {"full_text": "", "segments": []},
                "formData": form_data})
 
@@ -402,8 +495,6 @@ def recover_interrupted_runs():
             if task.get("status") in ("SUCCESS", "FAILED"):
                 continue
             task_id = task["id"]
-            set_status(task_id, "FAILED")
-            _atomic_json(status_path(task_id), {"status": "FAILED",
-                                                "message": "上次生成中断，请检查后重试"})
+            write_status(task_id, "FAILED", "上次生成中断，请检查后重试")
             recovered.append(task_id)
     return recovered

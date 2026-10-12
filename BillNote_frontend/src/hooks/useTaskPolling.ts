@@ -1,60 +1,79 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useTaskStore } from '@/store/taskStore'
-import { get_task_status } from '@/services/note.ts'
+import { getNote, get_task_status } from '@/services/note'
+import { createTaskPollingScheduler, isActiveTask, pollingErrorMessage } from '@/utils/taskPolling'
 import toast from 'react-hot-toast'
+import { isKnownActivePhase } from '@/utils/taskProgress'
 
 export const useTaskPolling = (interval = 3000) => {
-  const tasks = useTaskStore(state => state.tasks)
-  const updateTaskContent = useTaskStore(state => state.updateTaskContent)
-  const loadTask = useTaskStore(state => state.loadTask)
-
-  const tasksRef = useRef(tasks)
-
-  // 每次 tasks 更新，把最新的 tasks 同步进去
   useEffect(() => {
-    tasksRef.current = tasks
-  }, [tasks])
-
-  useEffect(() => {
-    const timer = setInterval(async () => {
-      const pendingTasks = tasksRef.current.filter(
-        task => task.status != 'SUCCESS' && task.status != 'FAILED'
-      )
-
-      // 无活跃任务时跳过轮询
-      if (pendingTasks.length === 0) return
-
-      for (const task of pendingTasks) {
+    const scheduler = createTaskPollingScheduler({
+      interval,
+      concurrency: 3,
+      getPending: () => {
+        const state = useTaskStore.getState()
+        return state.tasks.filter(isActiveTask).sort((a, b) => Number(b.id === state.currentTaskId) - Number(a.id === state.currentTaskId))
+      },
+      poll: async (task, signal) => {
+        const current = () => useTaskStore.getState().tasks.find(t => t.id === task.id)
+        const valid = () => !signal.aborted && current()?.attemptStartedAt === task.attemptStartedAt && Boolean(current() && isActiveTask(current()!))
         try {
-          const res = await get_task_status(task.id)
-          const { status } = res
-
-          if (status && status !== task.status) {
-            if (status === 'SUCCESS') {
-              const { markdown, transcript, audio_meta, resource_base } = res.result
-              toast.success('笔记生成成功')
-              updateTaskContent(task.id, {
-                status,
-                markdown,
-                transcript,
-                audioMeta: audio_meta,
-                resource_base,
-              })
-              await loadTask(task.id)
-            } else if (status === 'FAILED') {
-              updateTaskContent(task.id, { status })
-              console.warn(`⚠️ 任务 ${task.id} 失败`)
-            } else {
-              updateTaskContent(task.id, { status })
-            }
+          const res = await get_task_status(task.id, { signal, suppressToast: true })
+          if (!valid()) return
+          if (current()?.status === 'SUBMISSION_UNKNOWN' && res.request_id !== current()?.formData.request_id) return
+          if (res.request_id && current()?.formData.request_id && res.request_id !== current()?.formData.request_id) return
+          if (!res.status) throw new Error('服务未返回有效任务状态')
+          const now = Date.now()
+          const progress = {
+            status: res.status, statusMessage: res.message || '', pollingError: undefined,
+            submissionError: undefined,
+            last_active_status: res.last_active_status || (isKnownActivePhase(res.status) ? res.status : current()?.last_active_status || (isKnownActivePhase(current()?.status) ? current()?.status : undefined)),
+            started_at: res.started_at || current()?.started_at,
+            finished_at: res.finished_at || current()?.finished_at,
+            status_updated_at: res.status_updated_at || current()?.status_updated_at,
+            ...(res.audio_meta?.title && current()?.audioMeta ? { audioMeta: { ...current()!.audioMeta, title: res.audio_meta.title } } : {}),
+            lastStatusAt: now,
+            phaseStartedAt: current()?.status === res.status ? current()?.phaseStartedAt : now,
           }
-        } catch (e) {
-          console.error('❌ 任务轮询失败：', e)
-          updateTaskContent(task.id, { status: 'FAILED' })
+          if (res.status === 'SUCCESS') {
+            // Read authoritative saved versions, not an intermediate markdown string.
+            const detail = await getNote(task.id, { signal, suppressToast: true })
+            if (!valid()) return
+            if (detail.formData?.request_id && current()?.formData.request_id && detail.formData.request_id !== current()?.formData.request_id) return
+            useTaskStore.getState().updateTaskContent(task.id, { ...detail, ...progress })
+            toast.success('笔记生成成功', { id: `generation-${task.id}-${task.attemptStartedAt || task.createdAt}` })
+          } else {
+            useTaskStore.getState().updateTaskContent(task.id, progress)
+          }
+        } catch (error) {
+          if (!valid()) return
+          const message = pollingErrorMessage(error)
+          // Transport failures cannot tell us whether the backend job failed.
+          if (current()?.pollingError !== message) useTaskStore.getState().updateTaskContent(task.id, { pollingError: message })
         }
-      }
-    }, interval)
-
-    return () => clearInterval(timer)
+      },
+    })
+    const fingerprint = () => useTaskStore.getState().tasks.filter(isActiveTask).map(t => `${t.id}:${t.attemptStartedAt || ''}`).join('|')
+    let pending = fingerprint()
+    let selected = useTaskStore.getState().currentTaskId
+    const unsubscribe = useTaskStore.subscribe(() => {
+      const next = fingerprint()
+      const currentId = useTaskStore.getState().currentTaskId
+      const selectedChanged = currentId !== selected && useTaskStore.getState().tasks.some(t => t.id === currentId && isActiveTask(t))
+      selected = currentId
+      if (next !== pending || selectedChanged) { pending = next; scheduler.wake() }
+    })
+    const refresh = () => scheduler.wake()
+    const visible = () => { if (document.visibilityState === 'visible') refresh() }
+    window.addEventListener('focus', refresh)
+    window.addEventListener('bilinote-refresh-task', refresh)
+    document.addEventListener('visibilitychange', visible)
+    scheduler.wake()
+    return () => {
+      unsubscribe(); scheduler.stop()
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('bilinote-refresh-task', refresh)
+      document.removeEventListener('visibilitychange', visible)
+    }
   }, [interval])
 }

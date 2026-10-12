@@ -133,9 +133,9 @@ class GroqChunkTests(unittest.TestCase):
             self.assertEqual(requests.count("chunk_0000.mp3"), 1)
             self.assertTrue(transcript.full_text)
 
-    @unittest.skipUnless(Path(os.environ.get("BILINOTE_TEST_AUDIO", "__missing_test_audio__")).is_file(), "local sample unavailable")
+    @unittest.skipUnless(os.environ.get("BILINOTE_GROQ_TEST_AUDIO") and Path(os.environ["BILINOTE_GROQ_TEST_AUDIO"]).is_file(), "optional audio sample unavailable")
     def test_existing_33mb_sample_is_split_without_reencoding(self):
-        audio = Path(os.environ.get("BILINOTE_TEST_AUDIO", "__missing_test_audio__"))
+        audio = Path(os.environ["BILINOTE_GROQ_TEST_AUDIO"])
         duration, codec = self.groq._probe(audio)
         with tempfile.TemporaryDirectory() as directory:
             chunks = self.groq._split_audio(audio, directory, duration, codec)

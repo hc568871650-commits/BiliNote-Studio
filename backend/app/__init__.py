@@ -14,6 +14,12 @@ def create_app(lifespan) -> FastAPI:
     app.include_router(model.router,prefix="/api")
     app.include_router(config.router,  prefix="/api")
     app.include_router(chat.router, prefix="/api")
+    from .routers import model_capabilities
+    app.include_router(model_capabilities.router, prefix="/api")
+    from .routers import note_refinement
+    app.include_router(note_refinement.router, prefix="/api")
+    from .routers import generation_comparisons
+    app.include_router(generation_comparisons.router, prefix="/api")
     if not is_quick():
         from .routers import organizer
         app.include_router(organizer.router, prefix="/api")

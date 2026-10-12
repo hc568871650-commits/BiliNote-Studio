@@ -5,9 +5,10 @@ import NoteForm from '@/pages/HomePage/components/NoteForm.tsx'
 import MarkdownViewer from '@/pages/HomePage/components/MarkdownViewer.tsx'
 import { useTaskStore } from '@/store/taskStore'
 import History from '@/pages/HomePage/components/History.tsx'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { hasReadableContent } from '@/utils/readingStatus'
 import { resolveReadableNote } from '@/utils/recentNote'
+import { generationTitle } from '@/utils/taskProgress'
 const RECENT_NOTE_KEY = 'bilinote-recent-note-v1'
 function readRecentNote() {
   try { return localStorage.getItem(RECENT_NOTE_KEY) } catch { return null }
@@ -16,6 +17,13 @@ function readRecentNote() {
 type ViewStatus = 'idle' | 'loading' | 'success' | 'failed'
 export const HomePage: FC = () => {
   const location = useLocation()
+  const navigate = useNavigate()
+  const submitted = () => {
+    setView('notes')
+    const search = new URLSearchParams(location.search)
+    search.set('view', 'read')
+    navigate({ pathname: '/', search: `?${search}` }, { replace: true })
+  }
   const tasks = useTaskStore(state => state.tasks)
   const currentTaskId = useTaskStore(state => state.currentTaskId)
   const setCurrentTask = useTaskStore(state => state.setCurrentTask)
@@ -28,7 +36,7 @@ export const HomePage: FC = () => {
       if (new URLSearchParams(initialSearch.current).has('view')) return
       if (useInterfaceStore.getState().startPage === 'create') { setView('create'); return }
       const state = useTaskStore.getState()
-      const note = resolveReadableNote(state.tasks, state.currentTaskId, recentNoteId.current)
+      const note = state.tasks.find(task => task.id === state.currentTaskId && !task.archived_at) || resolveReadableNote(state.tasks, null, recentNoteId.current)
       if (note) { setCurrentTask(note.id); setView('notes') }
     }
     if (useTaskStore.persist.hasHydrated()) restoreStartup()
@@ -41,9 +49,10 @@ export const HomePage: FC = () => {
   }
   const findRecentNote = useCallback(() => resolveReadableNote(tasks, null, recentNoteId.current), [tasks])
   const openNotes = () => {
-    const note = resolveReadableNote(tasks, currentTaskId, recentNoteId.current)
+    const note = tasks.find(task => task.id === currentTaskId && !task.archived_at) || resolveReadableNote(tasks, null, recentNoteId.current)
     setCurrentTask(note?.id || null)
     setView('notes')
+    window.dispatchEvent(new Event('bilinote-refresh-task'))
   }
 
   useEffect(() => {
@@ -58,8 +67,10 @@ export const HomePage: FC = () => {
     if (requested === 'create') setView('create')
     if (requested === 'read') {
       const state = useTaskStore.getState()
-      setCurrentTask(resolveReadableNote(state.tasks, state.currentTaskId, recentNoteId.current)?.id || null)
+      const target = state.tasks.find(task => task.id === state.currentTaskId && !task.archived_at) || resolveReadableNote(state.tasks, null, recentNoteId.current)
+      setCurrentTask(target?.id || null)
       setView('notes')
+      window.dispatchEvent(new Event('bilinote-refresh-task'))
     }
   }, [location.key, location.pathname, location.search, setCurrentTask])
 
@@ -81,37 +92,25 @@ export const HomePage: FC = () => {
     if (currentTaskId) void loadTask(currentTaskId)
   }, [currentTaskId, loadTask])
 
-  const [status, setStatus] = useState<ViewStatus>('idle')
-
-
-  useEffect(() => {
-    if (!currentTask) {
-      setStatus('idle')
-    } else if (currentTask.status === 'SUCCESS') {
-      setStatus('success')
-    } else if (currentTask.status === 'FAILED') {
-      setStatus(hasReadableContent(currentTask) ? 'success' : 'failed')
-    } else {
-      // PENDING、PARSING、DOWNLOADING、TRANSCRIBING、SUMMARIZING 等所有进行中状态
-      setStatus('loading')
-    }
-  }, [currentTask, currentTask?.status])
+  // Derive on this render: switching tasks must never briefly show the previous task's view.
+  const status: ViewStatus = !currentTask ? 'idle' : currentTask.status === 'SUCCESS' ? 'success'
+    : currentTask.status === 'FAILED' ? hasReadableContent(currentTask) ? 'success' : 'failed' : 'loading'
 
   return (
     <HomeLayout
       composing={view !== 'notes'}
       hasTask={view !== 'create' && Boolean(currentTask)}
-      title={currentTask?.audioMeta?.title || '笔记'}
+      title={currentTask ? generationTitle(currentTask) : '笔记'}
       onCreate={createNote}
       onRead={openNotes}
       onConfigure={() => setView('configure')}
-      NoteForm={<><div hidden={view === 'configure'}><NoteForm creating onSubmitted={() => setView('notes')} /></div>{view === 'configure' && <NoteForm onSubmitted={() => setView('notes')} />}</>}
+      NoteForm={<><div hidden={view === 'configure'}><NoteForm creating onSubmitted={submitted} /></div>{view === 'configure' && <NoteForm onSubmitted={submitted} />}</>}
       Preview={currentTask ? <MarkdownViewer status={status} /> : <div className="workspace-empty">
         <h1>暂时没有笔记</h1>
         <p>点击左上角的新建笔记图标，整理你的第一篇视频笔记。</p>
         <button type="button" className="workspace-toolbar-button" onClick={createNote}>创建第一篇笔记</button>
       </div>}
-      History={<History onSelectNote={() => setView('notes')} />}
+      History={onCollapse => <History onCollapse={onCollapse} onSelectNote={() => { setView('notes'); window.dispatchEvent(new Event('bilinote-refresh-task')) }} />}
     />
   )
 }

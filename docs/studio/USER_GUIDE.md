@@ -1,6 +1,6 @@
-# BiliNote Studio 0.1.0-preview.1
+# BiliNote Studio 0.1.0-preview.8 使用指南
 
-基于 JefferyHcool/BiliNote v2.4.5 独立维护，非上游官方发行。首发为单一 Windows x64 安装版。
+基于 JefferyHcool/BiliNote v2.4.5 独立维护，非上游官方发行。当前提供单一 Windows x64 预发行安装版。
 
 ## 安装
 
@@ -11,7 +11,7 @@
 
 ## FFmpeg
 
-首发不随安装包分发 FFmpeg。视频音频处理前，从 [FFmpeg 官方下载入口](https://ffmpeg.org/download.html#build-windows) 选择 Windows 构建，自行阅读该构建的许可。
+安装包不分发 FFmpeg。视频音频处理前，从 [FFmpeg 官方下载入口](https://ffmpeg.org/download.html#build-windows) 选择 Windows 构建，自行阅读该构建的许可。
 
 将 `ffmpeg.exe` 和 `ffprobe.exe` 放入 `%LOCALAPPDATA%\BiliNoteStudio\bin`，或将所在目录加入用户 PATH，然后重启 Studio。系统检测页可检查是否可用。缺少 FFmpeg 时不要提交视频任务；阅读笔记和配置模型不依赖它。
 
@@ -26,8 +26,14 @@
 
 配置生成模型和转写器后，新建视频笔记；生成结束后在笔记库中阅读、分类和引用提问。阅读与整理可分别选择模型。整理操作需在计划卡片中确认执行。
 
-首发只提供在线转写（Groq、剪映、快手），不内置本地 Whisper。首发不支持抖音链接下载；已下载的视频仍可作为本地视频导入。Markdown 导出保留，内置 PDF 导出不随首发提供。外部模型和在线转写可能产生服务商费用，相关内容会发送给你配置的服务商。
+当前安装版只提供在线转写（Groq、剪映、快手），不内置本地 Whisper，不支持抖音链接下载；已下载的视频仍可作为本地视频导入。Markdown 导出保留，不内置 PDF 导出。外部模型和在线转写可能产生服务商费用，相关内容会发送给你配置的服务商。
+
+生成时选择教程笔记或知识笔记，按需启用配图和画面理解。已有笔记的“⋯”菜单可以查看生成详情、导出或管理笔记；生成设置在独立小窗中调整。
+
+局部重新蒸馏先展示修订与来源，确认后采纳为新版本并保留旧版本。两方案对照使用冻结来源并独立保存结果。上述操作和模型能力检测会产生新请求；本地取消不保证已受理的请求停止计费。
+
+资料库助手按关键词检索正文，读取章节、版本与转录，并附可打开的来源。回答所需内容会发送给当前模型；它不代表穷尽全库，也不替代原文核对。整理写入仍需审阅计划并确认。
 
 ## 预览边界
 
-未穷尽验证所有平台、供应商、GPU 和本地模型组合。Windows 验证详情见 [VALIDATION.md](../../VALIDATION.md)。出现问题时请在本仓库提交 Issue，并在日志中遮盖密钥、Cookie、个人笔记和路径。
+未穷尽验证所有平台、供应商、GPU 和本地模型组合。当前版本验证见 [preview.8 验证记录](../releases/0.1.0-preview.8-validation.md)，首发历史见 [VALIDATION.md](../../VALIDATION.md)。出现问题时请在本仓库提交 Issue，并在日志中遮盖密钥、Cookie、个人笔记和路径。

@@ -1,0 +1,81 @@
+{
+  "version": "0.1.0-preview.8",
+  "date": "2026-10-12",
+  "platform": "Windows x64",
+  "installer": {
+    "filename": "BiliNote-Studio-0.1.0-preview.8-windows-x64-setup.exe",
+    "bytes": 75538618,
+    "sha256": "675350a3cd6f47e451bad9d4ca8be3061be0e7c2a478036906be0799997d7f1c",
+    "code_signed": false
+  },
+  "identity": {
+    "identifier": "com.bilinote.studio",
+    "port": 38484,
+    "data_directory": "%LOCALAPPDATA%/BiliNoteStudio"
+  },
+  "distribution": {
+    "external_ffmpeg": true,
+    "local_whisper": false,
+    "pdf_export": false,
+    "douyin_links": false,
+    "portable_editions_shipped": false
+  },
+  "frontend": {
+    "synthetic_check_scripts": 18,
+    "passed": true,
+    "vite_modules": 4085,
+    "tauri_nsis_built": true
+  },
+  "backend": {
+    "modules": 27,
+    "tests_run": 314,
+    "passed": 313,
+    "skipped": 1,
+    "skip_reason": "Optional public software video was not supplied",
+    "all_executed_tests_passed": true,
+    "fresh_interpreters": true
+  },
+  "source": {
+    "publishable_files": 774,
+    "runtime_input_files": 379,
+    "build_input_sha256_match": true,
+    "gitleaks_version": "8.30.1",
+    "secret_findings": 0,
+    "machine_path_findings": 0
+  },
+  "licenses": {
+    "python_inventory_matches_frozen_build": true,
+    "python_distributions": 120,
+    "license_paths_flattened_for_nsis": true,
+    "old_python_inventory_does_not_overwrite_current": true
+  },
+  "fresh_installation": {
+    "success": true,
+    "version": "0.1.0-preview.8",
+    "missing_ffmpeg_startup": true,
+    "online_transcriber_only": true,
+    "organizer_healthy": true,
+    "data_program_separation": true,
+    "graceful_exit_stops_backend": true,
+    "uninstall_retains_data": true
+  },
+  "upgrade": {
+    "success": true,
+    "baseline_tag": "v0.1.0-preview.1",
+    "actual_public_installer": true,
+    "baseline_sha256": "e4f4017b82d500616bc00bc46943d92a3c8b32ea7e5975eb9d9106e2aa73642f",
+    "protected_files_preserved": 8,
+    "database_tables_preserved": 3,
+    "browser_profile_preserved_by_installer": true,
+    "browser_profile_files": 212,
+    "old_note_version_transcript_readable": true,
+    "daily_install_processes_and_executable_hashes_unchanged": true
+  },
+  "limits": [
+    "No clean Windows virtual machine; WebView2 was already installed",
+    "No real-model or new-video end-to-end request during this release",
+    "Repository-wide TypeScript/lint has existing issues",
+    "Browser storage bytes change normally after startup; populated chat-history migration was not semantically tested",
+    "Native window sample checks are not exhaustive frame-by-frame validation"
+  ]
+}

@@ -27,7 +27,10 @@ class PlanRequest(StrictInput):
     scope: OrganizerScope = Field(default_factory=OrganizerScope)
     provider_id: str = Field(min_length=1, max_length=100)
     model_name: str = Field(min_length=1, max_length=200)
-    reasoning_effort: Literal['auto', 'none', 'low', 'medium', 'high', 'xhigh'] = 'auto'
+    protocol: Literal['openai-chat', 'openai-responses', 'anthropic'] = 'openai-chat'
+    reasoning_effort: Literal['auto', 'none', 'low', 'medium', 'high', 'xhigh', 'max'] = 'auto'
+    web_search: bool = False
+    web_search_mode: Literal['native', 'external'] = 'native'
     context_limit: Literal[272000] = 272000
 
 
@@ -39,6 +42,7 @@ class SessionCreateRequest(StrictInput):
     scope: OrganizerScope = Field(default_factory=OrganizerScope)
     provider_id: Optional[str] = Field(default=None, max_length=100)
     model_name: Optional[str] = Field(default=None, max_length=200)
+    protocol: Literal['openai-chat', 'openai-responses', 'anthropic'] = 'openai-chat'
     confirmation_token: Optional[str] = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     request_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
 
@@ -70,3 +74,4 @@ class SessionCompactRequest(StrictInput):
     request_id: str = Field(min_length=1, max_length=100)
     provider_id: str = Field(min_length=1, max_length=100)
     model_name: str = Field(min_length=1, max_length=200)
+    protocol: Literal['openai-chat', 'openai-responses', 'anthropic'] = 'openai-chat'

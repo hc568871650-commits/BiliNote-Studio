@@ -6,6 +6,7 @@ from app.models.organizer_requests import (PlanRequest, PlanActionRequest, Sessi
 from app.services import organizer
 from app.utils.response import ResponseWrapper as R
 from app.utils.logger import get_logger
+from app.utils.ai_errors import SafeAIError
 
 router = APIRouter(prefix='/organizer')
 logger = get_logger(__name__)
@@ -14,6 +15,8 @@ logger = get_logger(__name__)
 def _call(fn, *args, **kwargs):
     try:
         return R.success(data=fn(*args, **kwargs))
+    except SafeAIError as exc:
+        return R.error(msg=str(exc), code=500, data={'error_details': exc.details})
     except FileNotFoundError as exc:
         return R.error(msg=str(exc), code=404)
     except ValueError as exc:
@@ -28,7 +31,8 @@ def _call(fn, *args, **kwargs):
 @router.post('/plan')
 def plan(data: PlanRequest):
     return _call(organizer.plan, data.instruction, data.scope.model_dump(), data.provider_id, data.model_name,
-                 reasoning_effort=data.reasoning_effort, context_limit=data.context_limit)
+                 reasoning_effort=data.reasoning_effort, context_limit=data.context_limit,
+                 protocol=data.protocol, web_search=data.web_search, web_search_mode=data.web_search_mode)
 
 
 @router.post('/execute')
@@ -60,7 +64,7 @@ def sessions_list():
 @router.post('/sessions')
 def sessions_create(data: SessionCreateRequest):
     return _call(_sessions().create, data.scope.model_dump(), data.provider_id, data.model_name,
-                 data.confirmation_token, data.request_id)
+                 data.confirmation_token, data.request_id, protocol=data.protocol)
 
 
 @router.get('/retention')

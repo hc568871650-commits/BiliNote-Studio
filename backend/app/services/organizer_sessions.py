@@ -26,6 +26,7 @@ from app.services import organizer as service
 from app.services.ai_runtime import estimate_context
 from app.services.context_compaction import compact_history, CONTEXT_LIMIT, AUTO_COMPACT_THRESHOLD
 from app.utils.model_errors import model_error
+from app.utils.ai_errors import SafeAIError
 
 SESSION_ROOT = Path('data') / 'organizer_sessions'
 LOCK = threading.RLock()
@@ -62,6 +63,9 @@ class GraphState(TypedDict, total=False):
     instruction: str
     provider_id: str
     model_name: str
+    protocol: str
+    web_search: bool
+    web_search_mode: str
     scope: dict
     action: str
     route: str
@@ -72,6 +76,8 @@ class GraphState(TypedDict, total=False):
     reasoning_effort: str
     context_limit: int
     context: dict
+    sources: list
+    query_filters: dict
 
 
 @contextmanager
@@ -120,9 +126,12 @@ def _event(session, kind, text):
     session['events'] = events[-200:]
 
 
-def _history(session, role, text, phase='message'):
-    session['history'].append({'id': uuid.uuid4().hex, 'role': role,
-                              'content': text, 'phase': phase, 'created_at': time.time()})
+def _history(session, role, text, phase='message', sources=None):
+    entry = {'id': uuid.uuid4().hex, 'role': role,
+             'content': text, 'phase': phase, 'created_at': time.time()}
+    if sources:
+        entry['sources'] = copy.deepcopy(sources)
+    session['history'].append(entry)
 
 
 def _public(session):
@@ -130,6 +139,8 @@ def _public(session):
               if k not in ('requests', 'graph_thread', 'action', 'owner', 'last_message')}
     result['messages'] = [{**m, 'text': m['content']} for m in result['history']]
     result.setdefault('memory', {'summary': '', 'through_id': None, 'compacted_messages': 0})
+    result.setdefault('protocol', 'openai-chat')
+    result.setdefault('error_details', None)
     result['pending_plan_id'] = ((result.get('plan') or {}).get('plan_id')
                                  if result['status'] == 'awaiting_approval' else None)
     if result['status'] in ('planning', 'executing', 'undoing') and session['session_id'] not in ACTIVE:
@@ -297,7 +308,7 @@ def set_retention(limit, confirmation_token=None, request_id=None):
         return result
 
 
-def create(scope, provider_id=None, model_name=None, confirmation_token=None, request_id=None):
+def create(scope, provider_id=None, model_name=None, confirmation_token=None, request_id=None, protocol='openai-chat'):
     # A UI selection is an upper bound until a message explicitly places work in scope.
     session = {'session_id': uuid.uuid4().hex, 'revision': 0, 'status': 'idle', 'created_at': time.time(),
                'scope': {**scope, 'authorized': False, 'exclude_favorites': False, 'target_count': 0},
@@ -305,11 +316,13 @@ def create(scope, provider_id=None, model_name=None, confirmation_token=None, re
                'target_summary': {'count': 0, 'note_ids': [], 'folder_name': None,
                                   'authorized': False, 'exclude_favorites': False},
                'history': [], 'memory': {'summary': '', 'through_id': None, 'compacted_messages': 0},
-               'events': [], 'plan': None, 'result': None, 'error': None,
+               'events': [], 'plan': None, 'result': None, 'error': None, 'error_details': None,
+               'protocol': protocol, 'web_search': False, 'web_search_mode': 'native',
                'requests': {}, 'action': '', 'provider_id': provider_id, 'model_name': model_name}
     with LOCK, _db() as db:
         signature = _signature('create', {'scope': scope, 'provider_id': provider_id,
-                                         'model_name': model_name, 'confirmation_token': confirmation_token})
+                                         'model_name': model_name, 'confirmation_token': confirmation_token,
+                                         'protocol': protocol})
         key = request_id or ('token:' + confirmation_token if confirmation_token else None)
         prior = _receipt(db, key, signature)
         if prior is not None:
@@ -372,7 +385,8 @@ def _active_history(session):
     return [copy.deepcopy(item) for item in history if item['role'] in ('user', 'assistant')]
 
 
-def _prepare_context(session, provider_id, model_name, force=False, extra_context=None, compaction_token=None):
+def _prepare_context(session, provider_id, model_name, force=False, extra_context=None, compaction_token=None,
+                     protocol='openai-chat'):
     """Only memory changes; authorization, approval and full audit history never do."""
     active = _active_history(session)
     memory = copy.deepcopy(session.get('memory') or {'summary': '', 'through_id': None, 'compacted_messages': 0})
@@ -386,8 +400,11 @@ def _prepare_context(session, provider_id, model_name, force=False, extra_contex
             with LOCK:
                 if COMPACTING.get(session['session_id']) != compaction_token:
                     raise ValueError('压缩已停止，晚到压缩结果已丢弃')
-        outcome = compact_history(service.get_client(provider_id, model_name).client,
-                                  model_name, active, summary=memory['summary'], keep_recent=4)
+        client = service.get_client(provider_id, model_name, protocol=protocol)
+        try:
+            outcome = compact_history(client.client, model_name, active, summary=memory['summary'], keep_recent=4)
+        finally:
+            service.close_client(client.client)
         if not outcome['compacted']:
             if context is None:
                 context = copy.deepcopy(session.get('context'))
@@ -407,6 +424,8 @@ def _prepare_context(session, provider_id, model_name, force=False, extra_contex
         if live['revision'] != session['revision'] or live.get('memory') != session.get('memory'):
             raise ValueError('会话已变化，晚到压缩结果已丢弃')
         live['memory'] = memory
+        if compaction_token is not None:
+            live.update(error=None, error_details=None, compaction_protocol=protocol)
         if context is not None:
             live['context'] = context
             _event(live, 'compacted' if memory != session.get('memory') else 'compact_skipped',
@@ -427,14 +446,16 @@ def compact(session_id, data):
         COMPACTING[session_id] = token
     try:
         live, _ = _prepare_context(session, data['provider_id'], data['model_name'], force=True,
-                                   compaction_token=token)
+                                   compaction_token=token, protocol=data.get('protocol', 'openai-chat'))
         return _public(live)
-    except Exception:
+    except Exception as exc:
         # Failed compaction remains retryable and preserves every previous field.
         with LOCK, _db() as db:
             live = _load(db, session_id)
             if live['revision'] == session['revision']:
                 live['requests'].pop(data['request_id'], None)
+                live['error'] = str(exc) if isinstance(exc, SafeAIError) else model_error(exc)
+                live['error_details'] = copy.deepcopy(exc.details) if isinstance(exc, SafeAIError) else None
                 _save(db, live)
         raise
     finally:
@@ -484,7 +505,7 @@ def _intent(text, previous_action):
     }
     discussing = bool(re.search(r'不要执行|先不执行|先解释|解释一下|只.{0,4}(解释|查询)|能否|如何|怎么', text))
     discussing = discussing or not bool(re.search(r'归档|恢复|整理|移动|移到|移入|挪到|挪入|放到|放入|搬到|重命名|标签|分类|新建|创建|新增|排除|包含|包括|保留|删除|清空|删掉|改写|修改', text))
-    discussing = discussing or bool(re.search(r'查询|查找|找出|哪些|列出|统计|为什么|报错|错误|怎么办', text))
+    discussing = discussing or bool(re.search(r'查询|查找|找出|哪些|列出|统计|为什么|报错|错误|怎么办|搜索|检索|总结|比较|对比|提炼|学习顺序|摘要|阅读|讲解', text))
     creating = bool(re.search(r'(新建|创建|新增).{0,5}文件夹', text))
     if creating:
         operation = 'create_folder'
@@ -534,15 +555,28 @@ def _scope_node(state):
     session = _live(state)
     instruction = state['instruction']
     intent = _intent(instruction, session.get('action', ''))
-    with service.LOCK, service.folders.LOCK, service.library.LOCK, service.notes.LOCK:
-        catalog = service._snapshot()
     upper = state['scope']
     previous = session['scope']
     chosen = copy.deepcopy(previous) if previous.get('authorized') else {
         'kind': 'all', 'folder_id': None, 'task_ids': [], 'authorized': False,
         'exclude_favorites': False}
-    public_folders = service.folders._public(catalog['folders'])['folders']
+    with service.folders.LOCK:
+        public_folders = service.folders._public(service.folders._read())['folders']
     matching = _folder_mentions(instruction, public_folders)
+    if intent['mode'] == 'discuss':
+        # Read authorization is independent of the old UI/query/write scope.
+        # A query must never enlarge or authorize subsequent metadata mutations.
+        filters = {}
+        if len(matching) == 1:
+            filters['folder_id'] = matching[0]['id']
+        if re.search(r'未归档|尚未归档|没有归档', instruction):
+            filters['archived'] = False
+        elif re.search(r'已归档|已经归档|归档的笔记', instruction):
+            filters['archived'] = True
+        return {'route': 'discussion', 'text': '本轮只读查询，可检索全库相关正文与转录，不生成或执行修改。',
+                'scope': copy.deepcopy(previous), 'action': '', 'read_notes': [], 'query_filters': filters or None}
+    with service.LOCK, service.folders.LOCK, service.library.LOCK, service.notes.LOCK:
+        catalog = service._snapshot()
     destination = None
     route, text = 'propose', ''
     if intent['operation'] == 'move_notes' and intent['mode'] == 'apply':
@@ -612,7 +646,7 @@ def _scope_node(state):
     if intent['mode'] == 'refuse':
         route, text = 'refused', '整理助手不支持删除或修改正文、文件及配置。已保留你明确的目标范围，可改为归档。'
     elif intent['mode'] == 'discuss':
-        route, text = 'discussion', '当前没有安排归档或其他修改。整理助手仅依据标题、标签和收藏状态提议元数据操作；明确要求后仍需确认才能执行。'
+        route, text = 'discussion', '当前没有安排归档或其他修改。资料库助手可读取相关正文；整理计划仅依据授权范围元数据并需确认执行。'
         action = ''
     elif not chosen.get('authorized') and action != 'create_folder':
         if route != 'clarification':
@@ -647,7 +681,8 @@ def _scope_node(state):
 def _propose_node(state):
     session, history = _prepare_context(_live(state), state['provider_id'], state['model_name'],
                                         extra_context={'instruction': state['instruction'],
-                                                       'notes': state.get('read_notes', []), 'scope': state['scope']})
+                                                       'notes': state.get('read_notes', []), 'scope': state['scope']},
+                                        protocol=state.get('protocol', 'openai-chat'))
     instruction = state['instruction']
     if state['action'] in ('archive', 'restore'):
         instruction = ('归档' if state['action'] == 'archive' else '恢复归档') + '当前明确范围全部笔记。补充要求：' + instruction
@@ -662,7 +697,7 @@ def _propose_node(state):
                         allow_empty=state['action'] == 'create_folder',
                         reasoning_effort=state.get('reasoning_effort', 'auto'),
                         context_limit=CONTEXT_LIMIT, history=history,
-                        memory_summary=session['memory']['summary'])
+                        memory_summary=session['memory']['summary'], protocol=state.get('protocol', 'openai-chat'))
     try:
         _live(state)
     except ValueError:
@@ -707,17 +742,33 @@ def _answer_node(state):
         return {'text': state['text'] + '\n尚未生成可执行计划，无需确认执行。'}
     session, history = _prepare_context(session, state['provider_id'], state['model_name'],
                                         extra_context={'instruction': state['instruction'],
-                                                       'notes': state.get('read_notes', []), 'constraint': state['text']})
-    context = {}
-    text = service.answer(state['instruction'], state['provider_id'], state['model_name'],
-                          history, state['text'], session['target_summary'], state.get('read_notes', []),
-                          reasoning_effort=state.get('reasoning_effort', 'auto'),
-                          context_limit=CONTEXT_LIMIT, context_sink=context,
-                          memory_summary=session['memory']['summary'])
+                                                       'notes': state.get('read_notes', []), 'constraint': state['text']},
+                                        protocol=state.get('protocol', 'openai-chat'))
+    context, sources = {}, []
+    def cancelled():
+        try:
+            _live(state)
+            return False
+        except ValueError:
+            return True
+    try:
+        text = service.answer(state['instruction'], state['provider_id'], state['model_name'],
+                              history, state['text'], session['target_summary'], state.get('read_notes', []),
+                              reasoning_effort=state.get('reasoning_effort', 'auto'),
+                              context_limit=CONTEXT_LIMIT, context_sink=context,
+                              memory_summary=session['memory']['summary'], protocol=state.get('protocol', 'openai-chat'),
+                              sources_sink=sources, web_search=state.get('web_search', False),
+                              web_search_mode=state.get('web_search_mode', 'native'),
+                              query_filters=state.get('query_filters'), cancellation=cancelled)
+    except Exception as exc:
+        # Successfully read sources remain useful evidence when a later provider
+        # round fails. Revision fencing below still discards cancelled results.
+        exc.sources = sources
+        raise
     _live(state)
     context.update(compacted=bool(session['memory']['compacted_messages']),
                    compacted_messages=session['memory']['compacted_messages'])
-    return {'text': text, 'context': context}
+    return {'text': text, 'context': context, 'sources': sources}
 
 
 def _approval_node(state):
@@ -772,8 +823,9 @@ def _config(session):
 
 def message(session_id, data):
     if data['instruction'].strip().lower() in ('/compact', '压缩上下文'):
-        return compact(session_id, {key: data[key] for key in
-                                   ('expected_revision', 'request_id', 'provider_id', 'model_name')})
+        return compact(session_id, {**{key: data[key] for key in
+                                   ('expected_revision', 'request_id', 'provider_id', 'model_name')},
+                                   'protocol': data.get('protocol', 'openai-chat')})
     with LOCK, _db() as db:
         session = _load(db, session_id)
         if _request(session, 'message', data):
@@ -793,8 +845,10 @@ def message(session_id, data):
             _history(session, 'assistant', '上一版计划已失效；需要重新确认新计划。', 'superseded')
         session['revision'] += 1
         revision = session['revision']
-        session.update(status='planning', plan=None, error=None, result=None, context=None,
+        session.update(status='planning', plan=None, error=None, error_details=None, result=None, context=None,
                        reasoning_effort=data.get('reasoning_effort', 'auto'), context_limit=CONTEXT_LIMIT,
+                       protocol=data.get('protocol', 'openai-chat'), web_search=data.get('web_search', False),
+                       web_search_mode=data.get('web_search_mode', 'native'),
                        query_scope=copy.deepcopy(data['scope']), provider_id=data['provider_id'], model_name=data['model_name'],
                        graph_thread=session_id + ':' + str(revision), last_message=copy.deepcopy(data))
         _history(session, 'user', data['instruction'])
@@ -806,6 +860,9 @@ def message(session_id, data):
             output = graph.invoke({'session_id': session_id, 'revision': revision,
                                    'instruction': data['instruction'], 'scope': data['scope'],
                                    'provider_id': data['provider_id'], 'model_name': data['model_name'],
+                                   'protocol': data.get('protocol', 'openai-chat'),
+                                   'web_search': data.get('web_search', False),
+                                   'web_search_mode': data.get('web_search_mode', 'native'),
                                    'reasoning_effort': data.get('reasoning_effort', 'auto'),
                                    'context_limit': CONTEXT_LIMIT}, _config(session))
         with LOCK, _db() as db:
@@ -817,17 +874,18 @@ def message(session_id, data):
             session.update(status=status, plan=output.get('plan'), error=None, context=output.get('context'))
             if session.get('plan'):
                 session['owner'] = {'session_id': session_id, 'revision': revision}
-            _history(session, 'assistant', output['text'], status)
+            _history(session, 'assistant', output['text'], status, sources=output.get('sources'))
             _event(session, status, output['text'])
             _save(db, session)
             return _public(session)
     except Exception as exc:
-        detail = model_error(exc)
+        detail = str(exc) if isinstance(exc, SafeAIError) else model_error(exc)
         with LOCK, _db() as db:
             session = _load(db, session_id)
             if session['revision'] == revision:
-                session.update(status='failed', error=detail, plan=None)
-                _history(session, 'assistant', '模型请求未完成：' + detail, 'failed')
+                session.update(status='failed', error=detail, plan=None,
+                               error_details=copy.deepcopy(exc.details) if isinstance(exc, SafeAIError) else None)
+                _history(session, 'assistant', '模型请求未完成：' + detail, 'failed', sources=getattr(exc, 'sources', None))
                 _event(session, 'failed', '任务失败，没有执行修改')
                 _save(db, session)
             return _public(session)
@@ -859,7 +917,7 @@ def action(session_id, kind, data):
                 if session['status'] in ('executing', 'undoing'):
                     raise ValueError('执行阶段已提交，请完成后使用撤销')
                 session['revision'] += 1
-                session.update(status='cancelled', plan=None, error=None)
+                session.update(status='cancelled', plan=None, error=None, error_details=None)
                 _history(session, 'assistant', '当前任务已停止，待执行计划已作废。', 'cancelled')
                 _event(session, 'cancelled', '已停止；晚到结果不会恢复计划')
                 _save(db, session)
@@ -889,7 +947,8 @@ def action(session_id, kind, data):
             with _db() as db:
                 session = _load(db, session_id)
                 session['revision'] += 1
-                session.update(status='completed' if kind != 'recover' else 'failed', result=result, error=None)
+                session.update(status='completed' if kind != 'recover' else 'failed', result=result, error=None,
+                               error_details=None)
                 if result:
                     session['plan'] = result
                 if kind == 'recover':

@@ -1,12 +1,11 @@
 import { shouldSendMessage } from '@/utils/sendShortcut'
 import { useInterfaceStore } from '@/store/interfaceStore'
-import { scrollMotion } from '@/utils/motion'
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ArrowUp, Square, Paperclip, X, MessageSquare, Maximize2, Minimize2, ArrowRight, RotateCcw, Settings2, ChevronRight } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useReadingAssistantStore, permanentSessionKey, temporarySessionKey, type ReadingAttachment } from '@/store/readingAssistantStore'
 import { usePurposeModelStore } from '@/store/purposeModelStore'
 import PurposeModelPicker from '@/components/PurposeModelPicker'
@@ -22,21 +21,30 @@ import { readAttachment, wireAttachment, MAX_ATTACHMENTS } from '@/utils/reading
 import './reading-assistant.css'
 import { useChatStore } from '@/store/chatStore'
 import { askQuestionStream } from '@/services/chatStream'
-import { quotePreview } from '@/utils/quotePreview'
+import { useTaskStore } from '@/store/taskStore'
+import { useSourceNavigationStore } from '@/store/sourceNavigationStore'
+import type { QuotePart } from '@/utils/quoteSource'
+import QuoteAttachment from './QuoteAttachment'
 import { useComposerTextarea } from '@/hooks/useComposerTextarea'
+import { useModelCapabilities } from '@/hooks/useModelCapabilities'
+import WebSearchControl from '@/components/WebSearchControl'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import SourceList from '@/components/SourceList'
 
 type ChatMode = 'half' | 'full'
 const durationLabel = (seconds: number) => seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分钟 ${seconds % 60} 秒`
 interface Props { taskId: string; mode: ChatMode; onModeChange: (mode: ChatMode) => void; temporary?: boolean; active?: boolean; onClose?: () => void; onTransfer?: () => void }
 const empty: ReadingSession = { messages: [], input: '', attachments: [], controls: undefined, context: undefined, model: undefined }
 export default function ChatPanel({ taskId, mode, onModeChange, temporary = false, active = true, onClose, onTransfer }: Props) {
+  const navigate = useNavigate()
   const sessionKey = temporary ? temporarySessionKey(taskId) : permanentSessionKey(taskId)
   const session = useReadingAssistantStore(state => state.sessions[sessionKey]) || empty
   const defaultModel = usePurposeModelStore(state => state.defaults.reading)
   const model = session.model === undefined ? defaultModel : session.model
   const protocol = useProviderProtocolStore(state => state.protocols[model?.provider_id || ''] || 'openai-chat')
-  const controlModel = protocol === 'anthropic' ? undefined : model?.model_name
-  const controls = settingsForModel(session.controls || defaultAISettings, controlModel)
+  const controlModel = model?.model_name
+  const { capabilities } = useModelCapabilities(model?.provider_id, model?.model_name, protocol)
+  const controls = settingsForModel(session.controls || defaultAISettings, controlModel, capabilities?.available_efforts || ['auto'])
   const { patch, append, attach } = useReadingAssistantStore.getState()
   const [busy, setBusy] = useState(false)
   const [compacting, setCompacting] = useState(false)
@@ -47,6 +55,7 @@ export default function ChatPanel({ taskId, mode, onModeChange, temporary = fals
   const [errorDetails, setErrorDetails] = useState<ChatErrorDetails | null>(null)
   const [preview, setPreview] = useState<ReadingAttachment | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [chatSettingsOpen, setChatSettingsOpen] = useState(false)
   const streamReading = useInterfaceStore(state => state.streamReading)
   const [streamText, setStreamText] = useState('')
   const [streamPhase, setStreamPhase] = useState('')
@@ -125,6 +134,9 @@ export default function ChatPanel({ taskId, mode, onModeChange, temporary = fals
     let streamed = ''
     let streamFrame: number | undefined
     try {
+      if (!manual && controls.web_search && (controls.web_search_mode === 'external' ? !capabilities?.external_search_available : capabilities?.features.web_native?.status !== 'passed')) {
+        throw new Error('当前联网方式尚不可用，请测试原生搜索或配置外部检索后再发送')
+      }
       if (manual) {
         await compactOnce(session, abort)
         if (!abort.signal.aborted) patch(sessionKey, { input: '' })
@@ -197,16 +209,18 @@ export default function ChatPanel({ taskId, mode, onModeChange, temporary = fals
     }
   }
   const slash = useCompactCommand(session.input, busy || readingFiles, () => { void send('/compact') })
-  const jump = (a: ReadingAttachment) => {
-    const target = a.blockId ? document.getElementById(a.blockId) : null
-    const article = target?.closest<HTMLElement>('[data-note-task]')
-    if (target && article && article.dataset.noteTask === a.taskId && article.dataset.noteVersion === a.versionId) { target.scrollIntoView({ behavior: scrollMotion(), block: 'center' }); target.classList.add('reading-block--flash'); setTimeout(() => target.classList.remove('reading-block--flash'), 1800) }
-    else { setPreview(a) }
+  const jump = (a: ReadingAttachment, parts: QuotePart[]) => {
+    const noteId = a.taskId || taskId
+    if (!useTaskStore.getState().tasks.some(task => task.id === noteId)) {
+      toast.error('原笔记已不可用，可用引用旁的小箭头查看保留的内容'); return
+    }
+    if (mode === 'full') onModeChange('half')
+    useSourceNavigationStore.getState().open({ source_type: 'note', note_id: noteId, version_id: a.versionId,
+      title: a.name, text: parts[0]?.text || a.text || '', quote_parts: parts })
+    useTaskStore.getState().setCurrentTask(noteId)
+    navigate('/?view=read')
   }
-  const attachmentCard = (a: ReadingAttachment, removable = false) => a.type === 'quote' ? <div className="assistant-quote" key={a.id}>
-    <button className="assistant-quote-content" onClick={() => jump(a)} title={quotePreview(a.text, 20)}>{quotePreview(a.text, 12) || '引用'}</button>
-    {removable && <button className="assistant-quote-remove" aria-label={`移除引用 ${quotePreview(a.text, 12)}`} onClick={() => patch(sessionKey, { attachments: session.attachments.filter(item => item.id !== a.id) })}><X size={11} /></button>}
-  </div> : <div className="assistant-attachment" key={a.id}>
+  const attachmentCard = (a: ReadingAttachment, removable = false) => a.type === 'quote' ? <QuoteAttachment key={a.id} attachment={a} onOriginal={parts => jump(a, parts)} onRemove={removable ? () => patch(sessionKey, { attachments: session.attachments.filter(item => item.id !== a.id) }) : undefined} /> : <div className="assistant-attachment" key={a.id}>
     <button className="assistant-attachment-content" onClick={() => setPreview(a)} title="预览附件">
       {a.type === 'image' ? <img src={a.data_url} alt={a.name} /> : <MessageSquare size={15} />}
       <span><strong>{a.name}</strong><small>{a.type === 'image' ? '图片' : a.text?.slice(0, 20)}</small></span>
@@ -215,7 +229,7 @@ export default function ChatPanel({ taskId, mode, onModeChange, temporary = fals
   return <section className={`reading-chat ${temporary ? 'reading-chat--temporary' : ''}`} aria-label={temporary ? '临时聊天' : '常驻阅读对话'}>
     <header className="reading-chat-header"><MessageSquare size={14} /><strong>{temporary ? '临时聊天' : '阅读助手'}</strong><div className="flex-1" />
       {temporary && onTransfer && <button disabled={busy} onClick={onTransfer} title="转入阅读对话" aria-label="转入阅读对话"><ArrowRight size={14} /></button>}
-      <Link className="reading-default-model" to="/settings/purposes" title="默认模型设置" aria-label="默认模型设置"><Settings2 size={14} /></Link>
+      <button className="reading-default-model" title={controls.web_search ? "聊天设置 · 联网已开启" : "聊天设置"} aria-label="聊天设置" onClick={() => setChatSettingsOpen(true)}><Settings2 size={14} />{controls.web_search && <i className="reading-web-status" aria-label="联网已开启" />}</button>
       {!temporary && <button disabled={busy} title={mode === 'half' ? '展开对话' : '返回并排阅读'} aria-label={mode === 'half' ? '展开对话' : '返回并排阅读'} onClick={() => onModeChange(mode === 'half' ? 'full' : 'half')}>{mode === 'half' ? <Maximize2 size={15} /> : <Minimize2 size={15} />}</button>}
       <button title="清空本次对话" aria-label="清空本次对话" disabled={busy} onClick={() => setConfirmClear(true)}><RotateCcw size={15} /></button>
       {onClose && <button title="关闭聊天" aria-label="关闭聊天" onClick={onClose}><X size={16} /></button>}
@@ -223,18 +237,18 @@ export default function ChatPanel({ taskId, mode, onModeChange, temporary = fals
     <div ref={messages} className="reading-chat-messages" onScroll={() => { const el = messages.current!; follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60 }}>
       {!session.messages.length && <div className="reading-chat-welcome"><h3>{temporary ? '问问这一段' : '阅读助手'}</h3><div className="reading-chat-prompts">{['解释这段', '整理步骤', '找出关键点'].map(text => <button key={text} onClick={() => { patch(sessionKey, { input: text }); textarea.current?.focus() }}>{text}</button>)}</div></div>}
       {session.messages.map(message => <article key={message.id} className={`reading-message reading-message--${message.role}`}>
-        {message.role === 'user' ? <div className="reading-message-role">你</div> : (message.elapsed_seconds != null || !!message.sources?.length || message.incomplete) && <details className="reading-reply-details">
+        {message.role === 'assistant' && (message.elapsed_seconds != null || !!message.sources?.length || message.incomplete) && <details className="reading-reply-details">
           <summary aria-label={message.elapsed_seconds != null ? `用时 ${durationLabel(message.elapsed_seconds)}，展开详情` : '展开回复详情'} title="查看本轮详情"><span>{message.elapsed_seconds != null ? `用时 ${durationLabel(message.elapsed_seconds)}` : ''}</span><ChevronRight size={13} /></summary>
           <div className="reading-reply-detail-content">
             {message.incomplete && <p>回复已中断</p>}
-            {message.sources?.length ? message.sources.map((source, index) => <div key={index}><strong>{source.section_title || (source.start_time != null ? `转录 ${Math.floor(source.start_time)} 秒` : '笔记内容')}</strong><p>{source.text}</p></div>) : !message.incomplete && <p>未返回参考来源</p>}
+            {message.sources?.length ? <SourceList sources={message.sources} /> : !message.incomplete && <p>未返回参考来源</p>}
           </div>
         </details>}
         {!!message.attachments?.length && <div className="reading-message-attachments">{message.attachments.map(a => attachmentCard(a))}</div>}
         {message.content.trim() ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown> : <p className="reading-chat-error">此前模型没有返回正文，请重新提问。</p>}
       </article>)}
       {busy && <article className={`reading-message reading-message--assistant ${streamText ? 'reading-message--streaming' : ''}`}>
-        <details className="reading-reply-details"><summary aria-label="展开处理状态"><span aria-live="off">用时 {durationLabel(waitSeconds)}</span><ChevronRight size={13} /></summary><div className="reading-reply-detail-content" role="status">{compacting || streamPhase === 'compacting' ? '压缩上下文…' : ['tool', 'retrieving'].includes(streamPhase) ? '查阅笔记…' : streamText ? '回复中…' : '思考中…'}</div></details>
+        <details className="reading-reply-details"><summary aria-label="展开处理状态"><span aria-live="off">用时 {durationLabel(waitSeconds)}</span><ChevronRight size={13} /></summary><div className="reading-reply-detail-content" role="status">{compacting || streamPhase === 'compacting' ? '压缩上下文…' : streamPhase === 'searching' ? '搜索网络资料…' : ['tool', 'retrieving'].includes(streamPhase) ? '查阅笔记…' : streamText ? '回复中…' : '思考中…'}</div></details>
         {streamText && <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamText}</ReactMarkdown>}
       </article>}
       {notice && <p className="reading-thinking" role="status">{notice}</p>}<div ref={end} className="reading-scroll-end" />
@@ -248,6 +262,7 @@ export default function ChatPanel({ taskId, mode, onModeChange, temporary = fals
         onKeyDown={event => { if (slash.onKeyDown(event)) return; if (shouldSendMessage(event, useInterfaceStore.getState().sendKey)) { event.preventDefault(); void send() } }} />
       <div className="reading-chat-actions"><input ref={fileInput} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown" hidden onChange={event => { void addFiles(Array.from(event.target.files || [])); event.target.value = '' }} /><button aria-label="添加图片或文本附件" title="添加图片、TXT、Markdown" disabled={readingFiles || busy} onClick={() => fileInput.current?.click()}><Paperclip size={14} /></button>{readingFiles && <span>读取中…</span>}<div className="flex-1" /><AIControls modelPicker={<PurposeModelPicker inline label="本会话模型" value={model} disabled={busy} controls={controls} onControlsChange={value => patch(sessionKey, { controls: value })} reasoningModel={controlModel || ''} onChange={value => patch(sessionKey, { model: value })} />} modelName={controlModel} value={controls} context={session.context} estimate={estimateLocalContext([session.memory?.summary, wireHistory(activeReadingMessages(session)), session.attachments])} draft={session.input} />{busy ? <button className="reading-send" aria-label="停止等待回答" title="停止回复" onClick={() => { cancelWait(); setBusy(false); setCompacting(false); setNotice('已停止') }}><Square size={11} /></button> : <button className="reading-send" aria-label="发送问题" disabled={!session.input.trim() || readingFiles} onClick={() => void send()}><ArrowUp size={15} /></button>}</div>
     </div>
+    <Dialog open={chatSettingsOpen} onOpenChange={setChatSettingsOpen}><DialogContent className="reading-options-window"><DialogHeader><DialogTitle>聊天设置</DialogTitle><DialogDescription>仅调整当前会话，保留原有消息。</DialogDescription></DialogHeader><div className="reading-options-row"><span>允许联网搜索</span><WebSearchControl value={controls} onChange={value => patch(sessionKey, { controls: value })} providerId={model?.provider_id} modelName={model?.model_name} protocol={protocol} disabled={busy} /></div><Link to="/settings/purposes" onClick={() => setChatSettingsOpen(false)}>默认模型与检索服务设置 →</Link></DialogContent></Dialog>
     {confirmClear && <div className="reading-confirm" role="dialog" aria-label="确认清空对话"><p>清空这次对话及草稿？笔记内容不受影响。</p><button onClick={() => setConfirmClear(false)}>取消</button><button onClick={() => { useReadingAssistantStore.getState().clear(sessionKey); setConfirmClear(false) }}>清空对话</button></div>}
     {preview && <div className="reading-file-preview" role="dialog" aria-label="附件预览"><header><strong>{preview.name}</strong><button aria-label="关闭附件预览" onClick={() => setPreview(null)}><X size={18} /></button></header>{preview.type === 'image' ? <img src={preview.data_url} alt={preview.name} /> : <pre>{preview.text}</pre>}</div>}
   </section>

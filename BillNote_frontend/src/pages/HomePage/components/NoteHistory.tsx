@@ -1,9 +1,9 @@
 import { useTaskStore } from '@/store/taskStore'
 import { useFolderStore, ALL_FOLDER_ID, DEFAULT_FOLDER_ID } from '@/store/folderStore'
 import { useLibraryStore, defaultLibraryEntry } from '@/store/libraryStore'
-import { Badge } from '@/components/ui/badge.tsx'
 import { cn } from '@/lib/utils.ts'
-import { Archive, CheckSquare, FolderInput, RotateCcw, Square, Trash2, Star, Pin, Pencil, X, MoreHorizontal, Search, SlidersHorizontal } from 'lucide-react'
+import { Archive, CheckSquare, FolderInput, FolderOpen, RotateCcw, Square, Trash2, Star, Pin, Pencil, X, Search, SlidersHorizontal, Download, Info } from 'lucide-react'
+import { invoke, isTauri } from '@tauri-apps/api/core'
 import { Button } from '@/components/ui/button.tsx'
 import { FC, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
@@ -13,6 +13,11 @@ import LibraryMetadataDialog from '@/pages/HomePage/components/LibraryMetadataDi
 import { defaultLibraryFilters, filterAndSortLibraryTasks, type LibraryFilters } from '@/utils/libraryFilters'
 import type { LearningStatus } from '@/services/noteLibrary'
 import { hasReadableContent, readingLabels } from '@/utils/readingStatus'
+import { generationTitle } from '@/utils/taskProgress'
+import { noteVersions } from '@/utils/noteActions'
+import NoteActionsPopover from './NoteActionsPopover'
+import NoteExportDialog from './NoteExportDialog'
+import GenerationDetailsDialog from './GenerationDetailsDialog'
 
 interface NoteHistoryProps { onSelect: (taskId: string) => void; selectedId: string | null; archived: boolean; foldersReady: boolean }
 
@@ -39,6 +44,10 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId, archived, fol
   const [moveBusy, setMoveBusy] = useState(false)
   const [metadataId, setMetadataId] = useState<string | null>(null)
   const [metadataBusy, setMetadataBusy] = useState(false)
+  const [actionId, setActionId] = useState<string | null>(null)
+  const [detailsId, setDetailsId] = useState<string | null>(null)
+  const [exportId, setExportId] = useState<string | null>(null)
+  const [openingFolderId, setOpeningFolderId] = useState<string | null>(null)
 
   useEffect(() => { void loadLibrary().catch(() => undefined) }, [loadLibrary])
   const visibleTasks = useMemo(() => tasks.filter(task => Boolean(task.archived_at) === archived && (assignments[task.id] || DEFAULT_FOLDER_ID) === (folderId === ALL_FOLDER_ID ? DEFAULT_FOLDER_ID : folderId)), [tasks, archived, folderId, assignments])
@@ -46,7 +55,9 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId, archived, fol
   const filteredIds = useMemo(() => new Set(filteredTasks.map(task => task.id)), [filteredTasks])
   const selectedReadableIds = useMemo(() => filteredTasks.filter(task => selectedIds.includes(task.id) && hasReadableContent(task)).map(task => task.id), [filteredTasks, selectedIds])
   useEffect(() => { setSelectedIds([]); setMoveOpen(false) }, [archived, folderId, filters])
+  useEffect(() => { setActionId(null) }, [archived, folderId, filters])
   useEffect(() => { setSelectedIds(current => current.filter(id => filteredIds.has(id))) }, [filteredIds])
+  useEffect(() => { if (actionId && !filteredIds.has(actionId)) setActionId(null) }, [actionId, filteredIds])
 
   const perform = async (id: string, action: () => Promise<void>, success: string) => {
     if (busyId) return
@@ -63,6 +74,14 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId, archived, fol
     try { await moveTasks(selectedIds, targetFolderId); setSelectedIds([]); setMoveOpen(false); toast.success('笔记已移动') } catch (error) { console.error('移动笔记失败', error) } finally { setMoveBusy(false) }
   }
   const metadataTask = tasks.find(task => task.id === metadataId)
+  const exportTask = tasks.find(task => task.id === exportId)
+  const detailsTask = tasks.find(task => task.id === detailsId)
+  const detailsVersion = detailsTask ? noteVersions(detailsTask)[0] : undefined
+  const openFolder = async (id: string) => {
+    if (!isTauri() || openingFolderId) return
+    setOpeningFolderId(id)
+    try { await invoke('open_note_folder', { taskId: id }) } catch (error) { toast.error(`无法打开教程文件夹：${String(error)}`) } finally { setOpeningFolderId(null) }
+  }
   const hasActiveFilters = Boolean(filters.search || filters.favoriteOnly || filters.learningStatus !== 'all' || filters.taskStatus !== 'all')
   const libraryReady = libraryLoadState === 'ready' && !libraryMutating
 
@@ -94,38 +113,36 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId, archived, fol
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
     {filteredTasks.length === 0 ? <div className="py-6 text-center"><p className="text-xs text-muted-foreground">{hasActiveFilters ? '没有匹配的笔记' : archived ? '归档区暂无笔记' : '此文件夹暂无笔记'}</p></div> : <div className="flex flex-col gap-0.5">{filteredTasks.map(task => {
       const entry = entries[task.id] || defaultLibraryEntry()
-      const title = task.audioMeta?.title || '未命名笔记'
+      const title = generationTitle(task)
       return <div key={task.id} data-note-current={selectedId === task.id} className={cn('group relative rounded-md px-1.5 py-1 transition-colors hover:bg-accent/60', selectedId === task.id && 'note-row-current')}>
         <div className="flex min-w-0 items-center gap-1.5">
           <button type="button" aria-label={`${selectedIds.includes(task.id) ? '取消选择' : '选择'}：${title}`} aria-pressed={selectedIds.includes(task.id)} className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring data-[selected=true]:opacity-100" data-selected={selectedIds.includes(task.id)} onClick={() => toggleSelected(task.id)}>{selectedIds.includes(task.id) ? <CheckSquare className="h-3.5 w-3.5 text-primary" /> : <Square className="h-3.5 w-3.5" />}</button>
           <button type="button" data-note-select title={title} aria-current={selectedId === task.id ? 'true' : undefined} onClick={() => onSelect(task.id)} className="min-w-0 flex-1 rounded py-0.5 pr-7 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
             <span className="block truncate text-xs font-medium text-foreground">{title}</span>
             <span className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <span className={cn(task.status === 'FAILED' && 'text-destructive')}>{task.status === 'SUCCESS' ? '生成完成' : task.status === 'FAILED' ? '失败' : '进行中'}</span>
+              <span className={cn(task.status === 'FAILED' && 'text-destructive', !['SUCCESS', 'FAILED'].includes(task.status) && 'text-primary font-medium')}>{task.status === 'SUCCESS' ? '生成完成' : task.status === 'FAILED' ? '失败' : '进行中'}</span>
               {hasReadableContent(task) && <><span>·</span><span>{readingLabels[entry.learning_status]}</span></>}
               {entry.favorite && <Star aria-label="已收藏" className="h-2.5 w-2.5 fill-current" />}
               {entry.pinned && <Pin aria-label="已置顶" className="h-2.5 w-2.5" />}
             </span>
           </button>
         </div>
-        <details className="ml-5">
-          <summary aria-label={`笔记操作：${title}`} title="笔记操作" className="absolute right-1 top-1 flex h-7 w-6 cursor-pointer list-none items-center justify-center rounded text-muted-foreground opacity-50 hover:bg-accent group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"><MoreHorizontal className="h-3.5 w-3.5" /></summary>
-          <div className="mt-2 border-t border-border pt-1.5">
-            <div className="mb-1 flex flex-wrap items-center gap-1">{archived && <Badge variant="outline" className="px-1 py-0 text-[10px]">已归档</Badge>}{entry.tags.map(tag => <Badge key={tag} variant="secondary" className="max-w-full truncate px-1 py-0 text-[10px]" title={tag}>{tag}</Badge>)}</div>
-            <div className="flex flex-wrap items-center gap-0.5">
-              <Button type="button" size="sm" className="h-7 px-1.5 text-[11px]" variant="ghost" disabled={!libraryReady} onClick={() => void updateMetadata([task.id], { favorite: !entry.favorite }, entry.favorite ? '已取消收藏' : '已收藏')}><Star className="h-3 w-3" />{entry.favorite ? '取消收藏' : '收藏'}</Button>
-              <Button type="button" size="sm" className="h-7 px-1.5 text-[11px]" variant="ghost" disabled={!libraryReady} onClick={() => void updateMetadata([task.id], { pinned: !entry.pinned }, entry.pinned ? '已取消置顶' : '已置顶')}><Pin className="h-3 w-3" />{entry.pinned ? '取消置顶' : '置顶'}</Button>
-              <Button type="button" size="sm" className="h-7 px-1.5 text-[11px]" variant="ghost" disabled={!libraryReady} onClick={() => setMetadataId(task.id)}><Pencil className="h-3 w-3" />标签与备注</Button>
-              <Button type="button" size="sm" className="h-7 px-1.5 text-[11px]" variant="ghost" disabled={!foldersReady} onClick={() => { setSelectedIds([task.id]); setMoveOpen(true) }}><FolderInput className="h-3 w-3" />移动</Button>
-              <Button type="button" size="sm" className="h-7 px-1.5 text-[11px]" variant="ghost" disabled={Boolean(busyId) || !['SUCCESS', 'FAILED'].includes(task.status)} onClick={() => { if (archived) void perform(task.id, () => restoreTask(task.id), '笔记已恢复'); else void perform(task.id, () => archiveTask(task.id), '笔记已归档') }}>{archived ? <RotateCcw className="h-3 w-3" /> : <Archive className="h-3 w-3" />}{archived ? '恢复' : '归档'}</Button>
-              {archived && <Button type="button" size="sm" className="h-7 px-1.5 text-[11px] text-destructive" variant="ghost" disabled={Boolean(busyId) || !['SUCCESS', 'FAILED'].includes(task.status)} onClick={() => setConfirmId(task.id)}><Trash2 className="h-3 w-3" />彻底删除</Button>}
-            </div>
-          </div>
-        </details>
+        <NoteActionsPopover title={title} open={actionId === task.id} onOpenChange={open => setActionId(open ? task.id : null)} actions={[
+          { label: entry.favorite ? '取消收藏' : '收藏', icon: <Star />, pressed: entry.favorite, disabled: !libraryReady, onSelect: () => void updateMetadata([task.id], { favorite: !entry.favorite }, entry.favorite ? '已取消收藏' : '已收藏') },
+          { label: entry.pinned ? '取消置顶' : '置顶', icon: <Pin />, pressed: entry.pinned, disabled: !libraryReady, onSelect: () => void updateMetadata([task.id], { pinned: !entry.pinned }, entry.pinned ? '已取消置顶' : '已置顶') },
+          { label: '标签备注', icon: <Pencil />, disabled: !libraryReady, onSelect: () => setMetadataId(task.id) },
+          { label: '移动', icon: <FolderInput />, disabled: !foldersReady, onSelect: () => { setSelectedIds([task.id]); setMoveOpen(true) } },
+          { label: '打开文件夹', icon: <FolderOpen />, disabled: !isTauri() || Boolean(openingFolderId), description: !isTauri() ? '仅桌面版可打开本地教程文件夹' : '在文件资源管理器中打开该笔记的教程目录', onSelect: () => void openFolder(task.id) },
+          { label: '导出', icon: <Download />, disabled: !hasReadableContent(task), description: !hasReadableContent(task) ? '暂无可导出的正文' : '选择该笔记的版本并导出 Markdown', onSelect: () => setExportId(task.id) },
+          { label: '生成详情', icon: <Info />, onSelect: () => setDetailsId(task.id) },
+          { label: archived ? '恢复' : '归档', icon: archived ? <RotateCcw /> : <Archive />, disabled: Boolean(busyId) || !['SUCCESS', 'FAILED'].includes(task.status), onSelect: () => { if (archived) void perform(task.id, () => restoreTask(task.id), '笔记已恢复'); else void perform(task.id, () => archiveTask(task.id), '笔记已归档') } },
+        ]} deleteAction={archived ? { label: '彻底删除', icon: <Trash2 />, destructive: true, disabled: Boolean(busyId) || !['SUCCESS', 'FAILED'].includes(task.status), onSelect: () => setConfirmId(task.id) } : undefined} />
       </div>
     })}</div>}
     </div>
     <MoveNotesDialog open={moveOpen} folders={folders} count={selectedIds.length} busy={moveBusy} onOpenChange={open => { if (!moveBusy) setMoveOpen(open) }} onMove={target => void moveSelected(target)} />
+    {exportTask && <NoteExportDialog key={exportTask.id} task={exportTask} onClose={() => setExportId(null)} />}
+    {detailsTask && <GenerationDetailsDialog key={`${detailsTask.id}:${detailsVersion?.ver_id || ''}`} taskId={detailsTask.id} noteTitle={generationTitle(detailsTask)} versionId={detailsVersion?.ver_id || ''} modelName={detailsVersion?.model_name || detailsTask.formData?.model_name || ''} allowComparison={detailsTask.status === 'SUCCESS' && Boolean(detailsVersion)} pollGenerationRuns={!['SUCCESS', 'FAILED'].includes(detailsTask.status)} onClose={() => setDetailsId(null)} />}
     {metadataTask && <LibraryMetadataDialog open={Boolean(metadataId)} title={metadataTask.audioMeta?.title || '未命名笔记'} entry={entries[metadataTask.id] || defaultLibraryEntry()} busy={metadataBusy} showReadingStatus={hasReadableContent(metadataTask)} onOpenChange={open => { if (!open && !metadataBusy) setMetadataId(null) }} onSave={changes => { setMetadataBusy(true); void updateEntries([metadataTask.id], changes).then(() => { toast.success('笔记信息已保存'); setMetadataId(null) }).catch(error => { console.error('保存笔记信息失败', error); toast.error('保存失败，请稍后重试') }).finally(() => setMetadataBusy(false)) }} />}
     <Dialog open={Boolean(confirmId)} onOpenChange={open => { if (!open && !busyId) setConfirmId(null) }}><DialogContent onEscapeKeyDown={event => { if (busyId) event.preventDefault() }} onPointerDownOutside={event => { if (busyId) event.preventDefault() }}><DialogHeader><DialogTitle>彻底删除笔记？</DialogTitle><DialogDescription>将永久删除《{tasks.find(task => task.id === confirmId)?.audioMeta?.title || '未命名笔记'}》的笔记、历史版本、配图及关联记录，无法通过归档区恢复。不会删除原始视频和共享音视频缓存。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" disabled={Boolean(busyId)} onClick={() => setConfirmId(null)}>取消</Button><Button variant="destructive" disabled={Boolean(busyId)} onClick={() => { if (!confirmId) return; const id = confirmId; setBusyId(id); void removeTask(id).then(() => { toast.success('笔记已彻底删除'); setConfirmId(null) }).catch(error => { console.error('删除失败', error); toast.error('删除失败，请稍后重试') }).finally(() => setBusyId(null)) }}>{busyId ? '删除中…' : '彻底删除'}</Button></DialogFooter></DialogContent></Dialog>
   </div>
