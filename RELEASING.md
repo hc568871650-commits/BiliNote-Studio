@@ -1,6 +1,6 @@
 # Studio 源码同步与发行流程
 
-更新日期：2026-10-12。发行目标为 [hc568871650-commits/BiliNote-Studio](https://github.com/hc568871650-commits/BiliNote-Studio)。本仓库源码、版本和独立安装包已完成 `0.1.0-preview.8` 发行准备及安装/旧包升级验收，GitHub公开发布尚在流程中。累计内容见 [preview.8 发布说明](docs/releases/0.1.0-preview.8.md)，本次实测见[验证记录](docs/releases/0.1.0-preview.8-validation.md)。
+更新日期：2026-10-12。[`v0.1.0-preview.8`已作为预发行版公开](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.1.0-preview.8)。源码、版本和独立安装包已完成安装/旧包升级验收，GitHub检查与匿名附件/标签源码核验通过。累计内容见 [preview.8 发布说明](docs/releases/0.1.0-preview.8.md)，本次实测见[验证记录](docs/releases/0.1.0-preview.8-validation.md)。
 
 ## 源码同步边界
 
@@ -37,4 +37,4 @@
 6. 核对授权、目标仓库、提交与工作流，再推送、创建 `v0.1.0-preview.8` 标签和预发行版，上传实际附件。
 7. 匿名下载附件，检查大小和 SHA-256、tag 对应提交、安装包版本及页面状态；通过后更新 README 和发布说明的状态与下载链接。
 
-本次源码同步、版本统一、独立安装包构建与验收已经完成；推送、标签、公开附件和匿名下载结果仍需分别记录。各阶段以本版本新验证记录及发行结果为准。
+本次源码同步、版本统一、独立安装包构建与验收、推送/标签、公开附件及匿名下载均已完成。标签对应发行源码提交 `c8dbc37281868660b91d0d523372243619d4bafd`；发布后的文档状态更新不重写该标签。

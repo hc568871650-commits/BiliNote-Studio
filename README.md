@@ -6,7 +6,7 @@ BiliNote Studio 是基于 [JefferyHcool/BiliNote](https://github.com/JefferyHcoo
 
 在一个工作区中组织笔记、记录学习进度、引用原文提问，再通过可审阅的计划整理笔记库。
 
-> **版本状态（2026-10-12）**：本仓库源码、应用版本和独立安装包已完成 `0.1.0-preview.8` 发行准备及实际安装/旧包升级验收。GitHub公开发布和匿名下载核验尚在流程中；当前已公开旧版为 [`0.1.0-preview.1`](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.1.0-preview.1)。本次证据见[验证记录](docs/releases/0.1.0-preview.8-validation.md)。
+> **版本状态（2026-10-12）**：[`0.1.0-preview.8` Windows x64预发行版已公开](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.1.0-preview.8)。源码、独立安装包、实际新安装与公开旧包升级均已核验；GitHub检查通过，公开附件已匿名下载比对。本次证据见[验证记录](docs/releases/0.1.0-preview.8-validation.md)。
 
 ![工作区：文件夹、笔记列表、快捷目录与阅读正文](doc/showcase/studio-20261012/workspace.jpg)
 
@@ -128,7 +128,7 @@ BiliNote Studio 是基于 [JefferyHcool/BiliNote](https://github.com/JefferyHcoo
 
 ### Windows 安装
 
-`0.1.0-preview.8` Windows x64安装包已完成构建和实际安装/旧版升级验收，正在执行GitHub发行流程。当前已公开旧包为 [`0.1.0-preview.1`](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.1.0-preview.1)；新附件公开核验完成后更新下载链接。
+下载 [`0.1.0-preview.8` Windows x64预发行安装版](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.1.0-preview.8)及随附的 `SHA256SUMS.txt`，核对摘要后安装。安装包75,538,618字节，已完成实际新安装与公开preview.1升级验收、GitHub检查和匿名下载核验。
 
 程序与笔记数据分开保存，数据位于 `%LOCALAPPDATA%\BiliNoteStudio`。使用独立目录，不覆盖原版 BiliNote，也不自动导入旧数据库。首次使用视频生成功能需另外安装 FFmpeg，并配置转写与模型服务；阅读已有资料不需要 FFmpeg。
 
@@ -186,7 +186,7 @@ Studio 的方向是独立安装、独立数据目录与新的笔记存储结构�
 - [早期升级总览](CUSTOMIZATIONS.md)：上游归属与早期技术说明。
 - [第三方许可与来源](THIRD_PARTY_NOTICES.md)：依赖归属与许可材料入口。
 - [上游 BiliNote](https://github.com/JefferyHcool/BiliNote)：原项目介绍与使用资料。
-- [变更记录](CHANGELOG.md)：Studio 待发布更新及保留的上游历史。
+- [变更记录](CHANGELOG.md)：Studio 发行更新及保留的上游历史。
 
 ## 许可证
 

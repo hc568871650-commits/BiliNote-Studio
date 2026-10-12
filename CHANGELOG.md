@@ -1,12 +1,12 @@
 # Changelog
 
-> Studio待发布更新列在前面，上游历史保留在后面。本地版本号不代表已公开发布；公开首发仍为`v0.1.0-preview.1`（2026-10-12核对）。
+> Studio发行更新列在前面，上游历史保留在后面。当前公开预发行版为`v0.1.0-preview.8`（2026-10-12），`preview.2`至`preview.7`为本地迭代。
 
 本项目所有重要变更记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased] — 目标 0.1.0-preview.8
+## [Studio 0.1.0-preview.8] - 2026-10-12
 
-相对公开`preview.1`的累计更新，截至2026-10-12。源码、应用版本和独立安装包已完成准备及实际新安装/旧包升级验收；公开发行尚在流程中。完整说明见[发布说明](docs/releases/0.1.0-preview.8.md)。
+相对公开`preview.1`的累计更新。源码、应用版本和独立安装包已完成实际新安装/旧包升级验收，GitHub检查、公开发行和匿名下载核验均已完成。完整说明见[发布说明](docs/releases/0.1.0-preview.8.md)。
 
 ### Added
 
