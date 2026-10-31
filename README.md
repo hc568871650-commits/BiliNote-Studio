@@ -6,13 +6,11 @@ BiliNote Studio 是基于 [JefferyHcool/BiliNote](https://github.com/JefferyHcoo
 
 在一个工作区中组织笔记、记录学习进度、引用原文提问，再通过可审阅的计划整理笔记库。
 
-> **版本状态（2026-10-12）**：[`0.1.0-preview.8` Windows x64预发行版已公开](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.1.0-preview.8)。源码、独立安装包、实际新安装与公开旧包升级均已核验；GitHub检查通过，公开附件已匿名下载比对。本次证据见[验证记录](docs/releases/0.1.0-preview.8-validation.md)。
-
-本分支包含 `0.1.0-preview.31` 的累计更新，发行准备情况见[预发行说明](docs/releases/0.1.0-preview.31.md)。公开下载状态以 Releases 页面为准。
+> **版本状态（2026-10-31）**：[`0.1.0-preview.31` Windows x64 预发行版已公开](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.1.0-preview.31)。最终安装包已完成新安装及公开 preview.8 升级验收，公开附件匿名下载核对通过；详见[本次验证](docs/releases/0.1.0-preview.31-validation.md)。
 
 ![工作区：文件夹、笔记列表、快捷目录与阅读正文](doc/showcase/studio-20261012/workspace.jpg)
 
-本页截图来自 2026-10-12 的隔离预览，使用合成笔记与模拟模型，不包含个人教程或真实模型质量结论。累计变化见 [preview.8 发布说明](docs/releases/0.1.0-preview.8.md)。
+本页截图来自 2026-10-12 的隔离预览，使用合成笔记与模拟模型，不包含个人教程或真实模型质量结论，也不完全代表当前界面。累计变化见 [preview.31 发布说明](docs/releases/0.1.0-preview.31.md)。
 
 ## 本次累计更新
 
@@ -36,7 +34,7 @@ BiliNote Studio 是基于 [JefferyHcool/BiliNote](https://github.com/JefferyHcoo
 | 管理长对话 | 上下文用量提示、自动压缩与 `/compact` 手动压缩 |
 | 调整工作环境 | 深浅主题、跟随系统、强调色、字体字号与动态效果 |
 
-视频流程、基础问答与桌面能力来自上游；学习型笔记库、阅读工作台、引用聊天和计划式整理是本版的主要扩展。早期技术归属见[升级总览](CUSTOMIZATIONS.md)，本轮变化与验证范围见[累计发布说明](docs/releases/0.1.0-preview.8.md)。
+视频流程、基础问答与桌面能力来自上游；学习型笔记库、阅读工作台、引用聊天和计划式整理是本版的主要扩展。早期技术归属见[升级总览](CUSTOMIZATIONS.md)，本轮变化与验证范围见[累计发布说明](docs/releases/0.1.0-preview.31.md)。
 
 ## 从视频到学习笔记
 
@@ -130,7 +128,7 @@ BiliNote Studio 是基于 [JefferyHcool/BiliNote](https://github.com/JefferyHcoo
 
 ### Windows 安装
 
-下载 [`0.1.0-preview.8` Windows x64预发行安装版](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.1.0-preview.8)及随附的 `SHA256SUMS.txt`，核对摘要后安装。安装包75,538,618字节，已完成实际新安装与公开preview.1升级验收、GitHub检查和匿名下载核验。
+下载 [`0.1.0-preview.31` Windows x64 预发行安装版](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.1.0-preview.31)及随附的 `SHA256SUMS.txt`，核对摘要后安装。安装包 75,236,815 字节，已完成实际新安装与公开 preview.8 升级验收。
 
 程序与笔记数据分开保存，数据位于 `%LOCALAPPDATA%\BiliNoteStudio`。使用独立目录，不覆盖原版 BiliNote，也不自动导入旧数据库。首次使用视频生成功能需另外安装 FFmpeg，并配置转写与模型服务；阅读已有资料不需要 FFmpeg。
 
@@ -177,13 +175,13 @@ Studio 的方向是独立安装、独立数据目录与新的笔记存储结构�
 - 整理助手当前按单进程、单 worker 运行约束设计，不承诺多实例共享数据库的安全性。
 - 全仓 TypeScript 仍有历史问题，专项构建与测试不等于所有类型检查通过。
 - 动态取帧、局部重蒸馏和对照测试仍需结合原始来源判断质量；尚未完成真实长软件教程“生成后照做”的完整验收。
-- 本次独立安装包已完成新安装及真实`preview.1`升级检查；新干净Windows虚拟机和首次WebView2联网安装仍未验证。当前证据见[preview.8 验证](docs/releases/0.1.0-preview.8-validation.md)，首发历史见[VALIDATION.md](VALIDATION.md)。
+- 本次独立安装包已完成新安装及真实 `preview.8` 升级检查；干净 Windows 虚拟机和首次 WebView2 联网安装仍未验证。当前证据见 [preview.31 验证](docs/releases/0.1.0-preview.31-validation.md)，首发历史见 [VALIDATION.md](VALIDATION.md)。
 
 ## 文档与上游
 
-- [preview.8 发布说明](docs/releases/0.1.0-preview.8.md)：累计变化、验证范围和发行状态。
+- [preview.31 发布说明](docs/releases/0.1.0-preview.31.md)：累计变化、验证范围和发行状态。
 - [源码同步与发行流程](RELEASING.md)：Git 同步范围、版本检查和安装包发布步骤。
-- [用户指南](docs/studio/USER_GUIDE.md)与[preview.8 验证记录](docs/releases/0.1.0-preview.8-validation.md)：当前安装与使用范围。[首发验证](VALIDATION.md)单独保留。
+- [用户指南](docs/studio/USER_GUIDE.md)与 [preview.31 验证记录](docs/releases/0.1.0-preview.31-validation.md)：当前安装与使用范围。[首发验证](VALIDATION.md)单独保留。
 - [首发公告](docs/studio/RELEASE_ANNOUNCEMENT.md)：2026-10-08 的历史发布说明。
 - [早期升级总览](CUSTOMIZATIONS.md)：上游归属与早期技术说明。
 - [第三方许可与来源](THIRD_PARTY_NOTICES.md)：依赖归属与许可材料入口。

@@ -1,8 +1,8 @@
 # Studio 源码同步与发行流程
 
-2026-10-31：本分支准备 `v0.1.0-preview.31`，当前公开基线为 `preview.8`。最终附件与新安装、旧包升级验证见 [preview.31 验收](docs/releases/0.1.0-preview.31-validation.md)。上传目标为预发行草稿；草稿上传与公开发布分别记录。
+2026-10-31：`v0.1.0-preview.31` 已作为预发行版公开。最终附件与新安装、旧包升级验证见 [preview.31 验收](docs/releases/0.1.0-preview.31-validation.md)。
 
-更新日期：2026-10-12。[`v0.1.0-preview.8`已作为预发行版公开](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.1.0-preview.8)。源码、版本和独立安装包已完成安装/旧包升级验收，GitHub检查与匿名附件/标签源码核验通过。累计内容见 [preview.8 发布说明](docs/releases/0.1.0-preview.8.md)，本次实测见[验证记录](docs/releases/0.1.0-preview.8-validation.md)。
+历史记录（2026-10-12）：[`v0.1.0-preview.8` 已作为预发行版公开](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.1.0-preview.8)。源码、版本和独立安装包已完成安装/旧包升级验收，GitHub 检查与匿名附件/标签源码核验通过。累计内容见 [preview.8 发布说明](docs/releases/0.1.0-preview.8.md)，当时实测见[验证记录](docs/releases/0.1.0-preview.8-validation.md)。
 
 ## 源码同步边界
 
