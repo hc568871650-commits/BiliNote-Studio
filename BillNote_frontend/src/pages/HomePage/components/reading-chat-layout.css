@@ -1,0 +1,23 @@
+.reading-chat-layout { position:relative; display:flex; height:100%; width:100%; min-height:0; min-width:0; overflow:hidden; }
+.reading-chat-layout-group { min-height:0; min-width:0; }
+.reading-chat-layout-reader,.reading-chat-layout-chat { height:100%; min-height:0; min-width:0; }
+.reading-chat-layout-reader > .reading-note-column { height:100%; }
+.reading-chat-layout-chat { display:flex; flex-direction:column; position:relative; z-index:11; background:var(--surface-page); }
+.reading-chat-layout-chat-content { flex:1; min-height:0; min-width:0; overflow:hidden; }
+.reading-chat-layout .reading-chat-layout-handle { flex:0 0 8px; width:8px; background:transparent; z-index:12; outline-offset:-2px; }
+.reading-chat-layout-handle::before { content:''; position:absolute; inset:0 3px; background:var(--surface-border); transition:background 120ms ease; }
+.reading-chat-layout-handle::after { width:8px; }
+.reading-chat-layout-handle:hover::before,.reading-chat-layout-handle:focus-visible::before,.reading-chat-layout-handle[data-resize-handle-state=drag]::before { background:var(--primary); }
+.reading-chat-layout-handle:focus-visible { outline:2px solid var(--primary); }
+.reading-chat-layout[data-chat-layout-mode=closed] .reading-chat-layout-chat,
+.reading-chat-layout:not([data-chat-layout-mode=half]) .reading-chat-layout-handle,
+.reading-chat-layout[data-chat-layout-narrow=true] .reading-chat-layout-handle { display:none; }
+.reading-chat-layout[data-chat-layout-mode=closed] .reading-chat-layout-reader { flex:1 1 0 !important; }
+.reading-chat-layout[data-chat-layout-mode=full] .reading-chat-layout-reader,
+.reading-chat-layout[data-chat-layout-mode=half][data-chat-layout-narrow=true] .reading-chat-layout-reader { display:none; }
+.reading-chat-layout[data-chat-layout-mode=full] .reading-chat-layout-chat,
+.reading-chat-layout[data-chat-layout-mode=half][data-chat-layout-narrow=true] .reading-chat-layout-chat { flex:1 1 0 !important; }
+.reading-chat-layout-narrow-bar { display:flex; flex-shrink:0; justify-content:space-between; align-items:center; min-height:30px; padding:3px 10px; border-bottom:1px solid var(--surface-border); font-size:11px; color:var(--surface-description); }
+.reading-chat-layout-narrow-bar button { color:var(--surface-text); border-radius:4px; padding:2px 6px; }
+.reading-chat-layout-narrow-bar button:hover { background:var(--surface-hover); }
+@media(prefers-reduced-motion:reduce) { .reading-chat-layout-handle::before { transition:none; } }

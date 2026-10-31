@@ -5,7 +5,7 @@ import { isTranscriptionModel } from '@/utils/modelCapabilities'
 // 比如 onboarding 撞名重试这种预期内失败）
 interface CallOpts { silent?: boolean }
 const cfg = (o?: CallOpts) => (o?.silent ? { suppressToast: true } : undefined)
-interface RegisteredModel { id: string; provider_id: string; model_name: string }
+export interface RegisteredModel { id: number | string; provider_id: string; model_name: string; display_name?: string | null }
 const modelArray = (list: unknown): RegisteredModel[] => {
   if (!Array.isArray(list)) throw new Error('模型列表返回格式异常')
   return list as RegisteredModel[]
@@ -45,10 +45,18 @@ export const fetchTranscriptionModelsByProvider = async (id: string) => {
 }
 
 export async function addModel(
-  data: { provider_id: string; model_name: string },
+  data: { provider_id: string; model_name: string; display_name?: string | null },
   opts?: CallOpts,
 ) {
-  return request.post('/models', data, cfg(opts))
+  const result = await request.post('/models', data, cfg(opts))
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('model-list-updated'))
+  return result
+}
+
+export async function updateModelDisplayName(data: { id: number; display_name: string | null }, opts?: CallOpts) {
+  const result = await request.post('/models/display_name', data, cfg(opts))
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('model-list-updated'))
+  return result
 }
 
 export const fetchEnableModels = async (opts?: CallOpts) => {
@@ -57,5 +65,7 @@ export const fetchEnableModels = async (opts?: CallOpts) => {
 }
 
 export const deleteModelById = async (modelId: number) => {
-  return await request.get(`/models/delete/${modelId}`)
+  const result = await request.get(`/models/delete/${modelId}`)
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('model-list-updated'))
+  return result
 }

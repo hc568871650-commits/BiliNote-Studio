@@ -181,7 +181,18 @@ async function run() {
     assert.deepEqual(Object.keys(preferences).sort(), ['controls', 'model', 'modelOverridden'])
     assert.equal(preferences.model.model_name, 'gemini-3.8-flash')
     assert.equal(preferences.controls.reasoning_effort, 'medium')
-    console.log('Organizer sessions: revisions, follow-up, cancellation race, query scope, explicit recovery, stale poll, server restoration, composer preferences passed')
+    current.status = 'planning'; current.plan = null; current.revision++; current.updated_at++
+    current.streaming_reply = '来自上游的第一段'
+    await store.getState().restore(current.session_id)
+    assert.equal(store.getState().messages.at(-1)?.text, '来自上游的第一段')
+    assert.equal(store.getState().messages.at(-1)?.plan, undefined, 'Partial text grants no approval authority')
+    current.streaming_reply += '，第二段'; current.updated_at++
+    await store.getState().refresh()
+    assert.equal(store.getState().messages.at(-1)?.text, '来自上游的第一段，第二段')
+    current.status = 'cancelled'; current.streaming_reply = ''; current.revision++; current.updated_at++
+    await store.getState().refresh()
+    assert.equal(store.getState().messages.some(message => message.id.endsWith(':stream')), false, 'Cancellation removes provisional text')
+    console.log('Organizer sessions: revisions, follow-up, cancellation race, query scope, explicit recovery, stale poll, server restoration, composer preferences, upstream partial text passed')
   } finally { request.get = originalGet; request.post = originalPost }
 }
 void run().catch(error => { console.error(error); process.exitCode = 1 })

@@ -15,7 +15,7 @@ class MemoryStorage {
 globalThis.localStorage = new MemoryStorage()
 globalThis.sessionStorage = new MemoryStorage()
 let reloads = 0
-globalThis.location = { search: '', hash: '#/organizer', reload() { reloads += 1 } }
+globalThis.location = { origin: 'http://localhost', search: '', hash: '#/organizer', reload() { reloads += 1 } }
 // Catch any accidental network fallback, including future adapter refactors.
 globalThis.fetch = () => { throw new Error('Tests prohibit network access') }
 globalThis.XMLHttpRequest = class { constructor() { throw new Error('Tests prohibit network access') } }
@@ -23,6 +23,7 @@ const require = createRequire(import.meta.url)
 const { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
 const bundled = await build({ entryPoints: [fileURLToPath(new URL('../src/dev/previewMock.ts', import.meta.url))],
   bundle: true, write: false, platform: 'node', format: 'esm',
+  plugins: [{ name: 'fixture-urls', setup(build) { build.onResolve({ filter: /\.svg\?url/ }, args => ({ path: args.path, namespace: 'fixture-url' })); build.onLoad({ filter: /.*/, namespace: 'fixture-url' }, args => ({ contents: `export default ${JSON.stringify(args.path)}`, loader: 'js' })) } }],
   alias: { '@': fileURLToPath(new URL('../src', import.meta.url)) }, logLevel: 'warning' })
 const source = bundled.outputFiles[0].text
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`

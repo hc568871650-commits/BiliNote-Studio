@@ -1,3 +1,5 @@
+import type { ProviderProtocol } from '../store/providerProtocolStore'
+
 // Existing saved URLs are never replaced by these opt-in presets.
 export const providerPresets = [
   { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1' },
@@ -17,8 +19,31 @@ export function selectProviderPreset<T extends { name: string; baseUrl: string }
   return {
     draft: preset ? { ...draft, name: preset.name, baseUrl: preset.baseUrl } : draft,
     customEditing: !preset,
-    protocol: preset ? (preset.id === 'claude' ? 'anthropic' as const : 'openai-chat' as const) : undefined,
+    protocol: preset ? officialProviderProtocol(preset.baseUrl) || 'openai-chat' as const : undefined,
   }
+}
+
+export function officialProviderPreset(baseUrl: string) {
+  const normalized = normalizeProviderUrl(baseUrl)
+  if (!normalized) return undefined
+  const aliases: Record<string, string[]> = {
+    deepseek: ['https://api.deepseek.com/v1'],
+    claude: ['https://api.anthropic.com/v1'],
+  }
+  return providerPresets.find(item => item.id !== 'ollama' && (normalizeProviderUrl(item.baseUrl) === normalized || aliases[item.id]?.includes(normalized)))
+}
+
+export function officialProviderProtocol(baseUrl: string): ProviderProtocol | undefined {
+  const preset = officialProviderPreset(baseUrl)
+  if (!preset) return undefined
+  if (preset.id === 'openai') return 'openai-responses'
+  if (preset.id === 'claude') return 'anthropic'
+  if (preset.id === 'gemini') return 'gemini'
+  return 'openai-chat'
+}
+
+export function resolveProviderProtocol(baseUrl: string, preference?: ProviderProtocol): ProviderProtocol {
+  return officialProviderProtocol(baseUrl) || preference || 'openai-chat'
 }
 
 export function normalizeProviderUrl(value: string): string | null {
@@ -30,7 +55,6 @@ export function normalizeProviderUrl(value: string): string | null {
 }
 
 export function classifyProvider(_id: string | undefined, baseUrl: string) {
-  const normalized = normalizeProviderUrl(baseUrl)
   let hostname = ''
   try {
     const url = new URL(baseUrl.trim())
@@ -38,7 +62,7 @@ export function classifyProvider(_id: string | undefined, baseUrl: string) {
     hostname = url.hostname
   } catch { return { kind: 'unconfigured' as const, label: '未配置有效连接', hostname } }
   if (['localhost', '127.0.0.1', '[::1]'].includes(hostname)) return { kind: 'local' as const, label: '本地连接', hostname }
-  const preset = providerPresets.find(item => normalizeProviderUrl(item.baseUrl) === normalized)
+  const preset = officialProviderPreset(baseUrl)
   if (preset) return { kind: 'official' as const, label: '官方预设地址', hostname }
   return { kind: 'custom' as const, label: '自定义连接', hostname }
 }

@@ -2,12 +2,12 @@ import { useInterfaceStore } from '@/store/interfaceStore'
 import '@/components/interface.css'
 import { useEffect } from 'react'
 import { useAccentStore } from '@/store/accentStore'
+import { accentVariants } from '@/utils/accentColor'
 import '@/accent.css'
 import type { ReactNode, FC } from 'react'
 // import "@/global.css"
 import { Toaster } from 'react-hot-toast'
 import { ThemeProvider } from 'next-themes'
-import ThemeToggle from '@/components/ThemeToggle'
 import DesktopChrome from '@/components/DesktopChrome'
 
 interface RootLayoutProps {
@@ -30,7 +30,14 @@ const RootLayout: FC<RootLayoutProps> = ({ children, previewWindow = false }) =>
     root.dataset.reducedMotion = String(preferences.reducedMotion)
   }, [preferences.fontSize, preferences.codeSize, preferences.font, preferences.reducedMotion])
   const accent = useAccentStore(state => state.accent)
-  useEffect(() => { document.documentElement.dataset.accent = accent }, [accent])
+  const customColor = useAccentStore(state => state.customColor)
+  useEffect(() => {
+    const root = document.documentElement
+    root.dataset.accent = accent
+    const colors = accentVariants(customColor)
+    root.style.setProperty('--custom-accent-light', colors.light)
+    root.style.setProperty('--custom-accent-dark', colors.dark)
+  }, [accent, customColor])
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem storageKey="bilinote-theme">
       <div className="min-h-screen bg-background font-sans text-foreground">
@@ -46,7 +53,6 @@ const RootLayout: FC<RootLayoutProps> = ({ children, previewWindow = false }) =>
           }}
         />
         <DesktopChrome preview={previewWindow}>{children}</DesktopChrome>
-        <ThemeToggle />
       </div>
     </ThemeProvider>
   )

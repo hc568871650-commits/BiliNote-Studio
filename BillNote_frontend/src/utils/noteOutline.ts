@@ -88,6 +88,6 @@ export function scrollToChapter(target: HTMLElement, behavior: ScrollBehavior) {
   if (!viewport) return
   // Use current geometry rather than offsetTop (headings may be nested in quote wrappers).
   const top = viewport.scrollTop + target.getBoundingClientRect().top - viewport.getBoundingClientRect().top - viewport.clientTop - 16
-  viewport.dispatchEvent(new Event('note-chapter-jump'))
+  viewport.dispatchEvent(new CustomEvent('note-chapter-jump', { detail: { id: target.id, behavior } }))
   viewport.scrollTo({ top: Math.max(0, top), behavior })
 }

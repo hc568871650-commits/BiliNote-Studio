@@ -429,8 +429,7 @@ class UniversalGPT(GPT):
     def _assemble_partials(partials: list) -> str:
         if len(partials) == 1:
             return partials[0]
-        return ('> 以下保留各来源分段的完整正文，未进行跨段模型合并。\n\n' +
-                '\n\n---\n\n'.join(f'## 来源分段 {index}\n\n{text}' for index, text in enumerate(partials, 1)))
+        return '\n\n---\n\n'.join(f'## 来源分段 {index}\n\n{text}' for index, text in enumerate(partials, 1))
 
     def _merge_partials(self, partials: list, checkpoint_key: str | None, source_signature: str | None) -> str:
         def build_messages(texts, *_args, **_kwargs):

@@ -10,8 +10,8 @@ export function rehypeReadingBlocks() {
       if (node.type !== 'element') return node
       const id = `note-block-${index++}`
       const text = node.position?.start.offset != null && node.position?.end.offset != null ? String(file.value).slice(node.position.start.offset, node.position.end.offset) : ''
-      return { type: 'element', tagName: 'div', properties: { className: ['reading-block'], 'data-note-block': id, 'data-note-text': text, id }, children: [
-        { type: 'element', tagName: 'button', properties: { type: 'button', className: ['reading-block-pick'], 'data-block-pick': id, 'aria-label': `选择第 ${index} 段`, title: '选择段落' }, children: [{ type: 'text', value: '+' }] }, node,
+      return { type: 'element', tagName: 'div', properties: { className: ['reading-block'], 'data-note-block': id, 'data-note-text': text, 'data-source-start': node.position?.start.offset, 'data-source-end': node.position?.end.offset, id }, children: [
+        { type: 'element', tagName: 'button', properties: { type: 'button', className: ['reading-block-pick'], 'data-block-pick': id, 'aria-label': `选择第 ${index} 段`, title: '选择段落，可加入 AI 问答' }, children: [{ type: 'text', value: '+' }] }, node,
       ] }
     })
   }

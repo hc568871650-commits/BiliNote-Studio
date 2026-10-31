@@ -10,6 +10,7 @@ export interface TaskStatusResponse {
   task_id: string
   request_id?: string
   status: string
+  cancelled?: boolean
   message?: string
   last_active_status?: string
   started_at?: string | null
@@ -25,6 +26,8 @@ export const importNotes = (tasks: Task[]) => request.post('/notes/import', { ta
 export const archiveNote = (id: string) => request.post(`/notes/${encodeURIComponent(id)}/archive`) as unknown as Promise<Task>
 export const restoreNote = (id: string) => request.post(`/notes/${encodeURIComponent(id)}/restore`) as unknown as Promise<Task>
 export const deleteNote = (id: string) => request.delete(`/notes/${encodeURIComponent(id)}`)
+export const cancelGeneration = (id: string, requestId?: string) =>
+  request.post(`/notes/${encodeURIComponent(id)}/cancel`, { request_id: requestId }) as unknown as Promise<{ cancel_requested?: boolean }>
 
 export interface GenerateNotePayload {
   video_url: string

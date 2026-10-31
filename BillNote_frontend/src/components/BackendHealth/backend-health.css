@@ -1,7 +1,8 @@
-.backend-status-trigger { position: fixed; right: 20px; bottom: 18px; z-index: 40; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--card); color: var(--card-foreground); font-size: 12px; box-shadow: 0 3px 14px #00000010; cursor: pointer; }
+.backend-status-trigger { position: fixed; right: 16px; bottom: 16px; z-index: 40; display: inline-flex; max-width: calc(100vw - 32px); height: 36px; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--border); border-radius: 12px; padding: 0 12px; background: var(--card); color: var(--card-foreground); box-shadow: 0 4px 16px #0002; font-size: 12px; cursor: pointer; }
 .backend-status-trigger:hover { background: var(--accent); }
 .backend-status-trigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
-.backend-status-label { color: var(--muted-foreground); padding-left: 8px; border-left: 1px solid var(--border); }
+.backend-status-label { max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); padding-left: 6px; border-left: 1px solid var(--border); }
+.backend-status-name { white-space: nowrap; }
 .backend-dot { display: inline-block; width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: var(--muted-foreground); }
 .backend-dot-green { background: #16a34a; }.backend-dot-yellow { background: #d97706; }.backend-dot-red { background: #dc2626; }
 .backend-management-panel { width: min(760px, calc(100vw - 32px)); max-width: min(760px, calc(100vw - 32px)) !important; max-height: calc(100dvh - 40px); overflow: auto; gap: 14px; border-radius: 20px; padding: 24px; }
@@ -22,7 +23,4 @@
 .backend-log-error, .backend-log-error .backend-log-level { color: var(--destructive); }
 .backend-log-empty { padding: 28px 8px; text-align: center; color: var(--muted-foreground); }
 .backend-log-note { font-size: 11px; color: var(--muted-foreground); }
-@media (max-width: 520px) { .backend-management-panel { padding: 20px 16px; }.backend-health-summary { grid-template-columns: 1fr; }.backend-log-line { gap: 6px; }.backend-status-trigger { right: 12px; bottom: 12px; } }
-
-html[data-backend-health-reserved="true"] .reading-chat { padding-bottom: 58px; }
-html[data-backend-health-reserved="organizer"] .organizer-compose-area { padding-bottom: 72px; }
+@media (max-width: 520px) { .backend-management-panel { padding: 20px 16px; }.backend-health-summary { grid-template-columns: 1fr; }.backend-log-line { gap: 6px; } }

@@ -79,6 +79,7 @@ class AdmissionTests(unittest.TestCase):
         self.storage = storage
         self.ns = {'Path': Path, 'json': json, 'hashlib': hashlib, 'uuid': uuid, 'os': os, 'math': math,
                    'shutil': shutil, 'logger': Mock(spec=logging.Logger), 'note_storage': storage,
+                   'note_diagnostics': Mock(),
                    'R': Response, 'HTTPException': HTTPError, 'NOTE_OUTPUT_DIR': storage.ROOT,
                    '_active_tasks': set(), '_active_requests': {}, '_active_lock': threading.RLock(),
                    'task_serial_executor': types.SimpleNamespace(run=lambda call: call())}
@@ -99,7 +100,7 @@ class AdmissionTests(unittest.TestCase):
                             audio_meta={'title': 'test', 'platform': 'local'})
 
         self.ns['NoteGenerator'] = SlowGenerator
-        methods(ROOT / 'app/routers/note.py', {'generate_note', 'get_task_status', 'run_note_task', '_poll_result',
+        methods(ROOT / 'app/routers/note.py', {'generate_note', 'get_task_status', 'run_note_task', '_poll_result', 'cancel_generation',
                                               '_persist_prefetched_transcript'}, self.ns)
         self.background = Mock()
         self.readiness = Mock(return_value={'ready': True})
@@ -117,6 +118,29 @@ class AdmissionTests(unittest.TestCase):
 
     def poll(self):
         return self.ns['get_task_status']('test-task')
+
+    def test_cancel_pending_has_zero_generator_calls_and_is_retryable(self):
+        self.admit()
+        cancel = self.ns['cancel_generation']('test-task', types.SimpleNamespace(request_id='attempt-1'))
+        self.assertTrue(cancel['data']['cancel_requested'])
+        self.ns['run_note_task']('test-task', 'local.mp4', 'local', 'medium', model_name='test',
+                                 provider_id='test', request_id='attempt-1')
+        self.assertEqual(self.constructed, 0)
+        self.assertEqual(self.poll()['data']['status'], 'FAILED')
+        self.assertTrue(self.poll()['data']['cancelled'])
+        self.assertTrue(self.storage.get_task('test-task')['cancelled'])
+        self.assertEqual(self.admit(request_id='attempt-2')['code'], 0)
+        self.assertFalse(self.poll()['data']['cancelled'])
+        self.storage.check_cancellation('test-task', 'attempt-2')
+        stale = self.ns['cancel_generation']('test-task', types.SimpleNamespace(request_id='attempt-1'))
+        self.assertEqual(stale['code'], 409)
+
+    def test_cancel_cannot_interrupt_saving(self):
+        self.admit()
+        self.storage.write_status('test-task', 'SAVING')
+        response = self.ns['cancel_generation']('test-task', types.SimpleNamespace(request_id='attempt-1'))
+        self.assertEqual(response['code'], 409)
+        self.storage.check_cancellation('test-task', 'attempt-1')
 
     def test_admission_does_not_initialize_slow_transcriber_and_polls_pending(self):
         self.assertEqual(self.admit()['code'], 0)

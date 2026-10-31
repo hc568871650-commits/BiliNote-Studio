@@ -67,11 +67,11 @@ class AskRequest(StrictInput):
     context_mode: Literal['note', 'selection'] = 'note'
     provider_id: str = Field(min_length=1, max_length=100)
     model_name: str = Field(min_length=1, max_length=200)
-    protocol: Literal['openai-chat', 'openai-responses', 'anthropic'] = 'openai-chat'
+    protocol: Literal['openai-chat', 'openai-responses', 'anthropic', 'gemini'] = 'openai-chat'
     reasoning_effort: Literal['auto', 'none', 'low', 'medium', 'high', 'xhigh', 'max'] = 'auto'
-    web_search: bool = False
+    web_search: bool = True
     web_search_mode: Literal['native', 'external'] = 'native'
-    context_limit: Literal[272000] = 272000
+    context_limit: int = Field(default=272000, ge=8192, le=272000, strict=True)
 
     @model_validator(mode='after')
     def total_limit(self):
@@ -88,10 +88,11 @@ class CompactRequest(StrictInput):
     task_id: str = Field(pattern=r'^[a-zA-Z0-9_-]{1,100}$')
     provider_id: str = Field(min_length=1, max_length=100)
     model_name: str = Field(min_length=1, max_length=200)
-    protocol: Literal['openai-chat', 'openai-responses', 'anthropic'] = 'openai-chat'
+    protocol: Literal['openai-chat', 'openai-responses', 'anthropic', 'gemini'] = 'openai-chat'
     history: list[ChatMessage] = Field(default_factory=list, max_length=200)
     summary: str = Field(default='', max_length=12000)
     keep_recent: Literal[0, 4] = 4
+    context_limit: int = Field(default=272000, ge=8192, le=272000, strict=True)
 
     @model_validator(mode='after')
     def total_limit(self):

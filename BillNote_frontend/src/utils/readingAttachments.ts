@@ -1,10 +1,16 @@
 import type { ReadingAttachment } from '@/store/readingAssistantStore'
 
 export const MAX_ATTACHMENTS = 8
+export const MAX_IMAGE_BYTES = 2 * 1024 * 1024
+export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+export function validateReadingAttachments(attachments: ReadingAttachment[]) {
+  if (attachments.length > MAX_ATTACHMENTS) throw new Error('每条消息最多 8 份引用或附件')
+  if (new TextEncoder().encode(JSON.stringify(attachments)).byteLength > MAX_ATTACHMENT_BYTES) throw new Error('本条消息附件总量过大，请减少图片')
+}
 export async function readAttachment(file: File): Promise<ReadingAttachment> {
   const id = crypto.randomUUID()
   if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) {
-    if (file.size > 2 * 1024 * 1024) throw new Error('每张图片最多 2 MB，请压缩后再添加')
+    if (file.size > MAX_IMAGE_BYTES) throw new Error('每张图片最多 2 MB，请压缩后再添加')
     const data_url = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('图片读取失败')); reader.readAsDataURL(file) })
     return { id, type: 'image', name: file.name || '粘贴的图片', data_url }
   }

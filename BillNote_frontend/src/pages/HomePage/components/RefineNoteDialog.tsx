@@ -4,7 +4,9 @@ import gfm from 'remark-gfm'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import PurposeModelPicker from '@/components/PurposeModelPicker'
 import { usePurposeModelStore, type PurposeModelSelection } from '@/store/purposeModelStore'
-import { useProviderProtocolStore } from '@/store/providerProtocolStore'
+import { useEffectiveProviderProtocol } from '@/hooks/useEffectiveProviderProtocol'
+import { useProviderStore } from '@/store/providerStore'
+import { officialProviderProtocol } from '@/utils/providerProfiles'
 import type { ProviderProtocol } from '@/store/providerProtocolStore'
 import type { Task } from '@/store/taskStore'
 import { getRefinementContext, previewRefinement, applyRefinement, type RefinementContext, type RefinementPreview } from '@/services/noteRefinement'
@@ -26,8 +28,9 @@ const errorMessage = (error: unknown) => {
 export default function RefineNoteDialog({ task, versionId, texts, originalModel, originalProtocol, onClose, onApplied }: Props) {
   const readingDefault = usePurposeModelStore(state => state.defaults.reading)
   const [model, setModel] = useState<PurposeModelSelection | null>(originalModel || readingDefault)
-  const providerProtocol = useProviderProtocolStore(state => state.protocols[model?.provider_id || ''] || 'openai-chat')
-  const protocol = originalProtocol && originalModel?.provider_id === model?.provider_id && originalModel?.model_name === model?.model_name ? originalProtocol : providerProtocol
+  const providerProtocol = useEffectiveProviderProtocol(model?.provider_id)
+  const officialProtocol = useProviderStore(state => officialProviderProtocol(state.provider.find(item => item.id === model?.provider_id)?.baseUrl || ''))
+  const protocol = officialProtocol || (originalProtocol && originalModel?.provider_id === model?.provider_id && originalModel?.model_name === model?.model_name ? originalProtocol : providerProtocol)
   const [context, setContext] = useState<RefinementContext | null>(null)
   const [draft, setDraft] = useState<RefinementPreview | null>(null)
   const [start, setStart] = useState('')

@@ -1,0 +1,73 @@
+.settings-page.api-settings { max-width:920px; padding:20px 24px 28px; font-size:calc(var(--ui-font-size) - 1px); }
+.api-page-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
+.api-page-header h1 { min-width:0; font-size:20px; font-weight:600; overflow-wrap:anywhere; }
+.api-tag { flex-shrink:0; border:1px solid var(--border); border-radius:5px; padding:3px 7px; color:var(--muted-foreground); font-size:11px; }
+.api-surface { min-width:0; margin-bottom:12px; padding:14px; border:1px solid var(--border); border-radius:9px; background:var(--card); }
+.api-connection-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px 18px; }
+.api-field { min-width:0; display:flex; flex-direction:column; gap:5px; }
+.api-field > label { color:var(--muted-foreground); font-size:12px; }
+.api-field-wide { grid-column:1 / -1; }
+.api-settings input { min-width:0; width:100%; height:32px; padding:5px 9px; border:1px solid var(--border); border-radius:6px; background:var(--background); color:var(--foreground); font-size:13px; }
+.api-settings input:focus-visible,.api-settings button:focus-visible,.api-settings summary:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+.api-settings input:disabled { opacity:.6; }
+.api-settings .settings-button { min-height:30px; padding:5px 10px; border-radius:6px; font-size:12px; white-space:nowrap; }
+.api-settings .choice-select { min-width:0; width:100%; }
+.api-settings .choice-trigger { width:100%; min-height:32px; margin:0; padding:5px 9px; font-size:13px; border:1px solid var(--border); border-radius:6px; background:var(--background); }
+.api-input-action { display:flex; align-items:center; gap:7px; min-width:0; }
+.api-input-action > input { flex:1; }
+.api-icon-button { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; width:30px; height:30px; border-radius:5px; color:var(--muted-foreground); }
+.api-icon-button:hover:not(:disabled) { background:var(--accent); color:var(--foreground); }
+.api-icon-button:disabled { opacity:.3; cursor:not-allowed; }
+.api-save-row,.api-section-header,.api-model-footer { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.api-save-row { border-top:1px solid var(--border); padding-top:10px; }
+.api-muted,.api-field small { color:var(--muted-foreground); font-size:11px; }
+.api-saved { display:inline-flex; align-items:center; gap:4px; }
+.api-section-header { margin-bottom:10px; }
+.api-section-header h2 { font-size:13px; font-weight:600; }
+.api-section-header h2 span { margin-left:5px; color:var(--muted-foreground); font-weight:400; }
+.api-model-table-head,.api-model-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) 66px; gap:10px; align-items:center; }
+.api-model-table-head { margin-bottom:5px; color:var(--muted-foreground); font-size:11px; }
+.api-model-row { padding:6px 0; }
+.api-model-row + .api-model-row { border-top:1px solid var(--border); }
+.api-model-row code { min-width:0; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.api-model-actions { display:flex; gap:5px; justify-content:flex-end; }
+.api-model-add { margin-top:6px; padding-top:10px; border-top:1px solid var(--border); }
+.api-model-options { margin:8px 0; }
+.api-model-footer { margin-top:8px; font-size:11px; }
+.api-test-actions { display:flex; gap:8px; align-items:center; }
+.api-test-actions > .choice-trigger { flex:1; min-width:0; }
+.api-capability-fold { padding:0; }
+.api-capability-fold > summary { padding:12px 14px; cursor:pointer; font-weight:500; }
+.api-capability-fold > summary > span { margin-left:12px; font-size:11px; color:var(--muted-foreground); font-weight:400; }
+.api-capability-fold .model-capabilities-panel { border:0; border-top:1px solid var(--border); border-radius:0; background:transparent; padding:12px 14px; }
+.api-capability-fold .settings-row { padding:0; gap:10px; }
+.api-capability-fold .settings-row h2 { font-size:13px; }
+.api-capability-fold .settings-row p { margin:3px 0 0; font-size:11px; }
+.api-capability-fold .capability-checks { gap:8px 14px; margin:12px 0 8px; }
+.api-capability-fold .capability-checks input { width:13px; height:13px; padding:0; }
+.api-capability-fold .capability-checks legend,.api-capability-fold .capability-checks label { font-size:12px; }
+.api-capability-fold .capability-estimate,.api-capability-fold small,.api-capability-fold .capability-empty { font-size:11px; }
+.api-provider-group-title { display:flex; align-items:center; gap:7px; color:var(--muted-foreground); font-size:12px; margin:16px 0 7px; }
+.api-provider-group-title > span { opacity:.7; }
+.api-provider-list { padding:0 12px; }
+.api-provider-row { display:flex; align-items:center; gap:12px; padding:10px 0; }
+.api-provider-row + .api-provider-row { border-top:1px solid var(--border); }
+.api-provider-info { flex:1; min-width:0; text-align:left; display:flex; flex-direction:column; gap:3px; border-radius:4px; }
+.api-provider-info strong { font-size:13px; font-weight:500; }
+.api-provider-info > span { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; color:var(--muted-foreground); }
+.api-provider-row .settings-row-controls { gap:10px; }
+.api-empty { color:var(--muted-foreground); }
+@media(max-width:760px) {
+  .settings-page.api-settings { padding:16px; }
+  .api-connection-grid { grid-template-columns:1fr; gap:10px; }
+  .api-model-table-head { display:none; }
+  .api-model-row { grid-template-columns:minmax(0,1fr) 66px; gap:6px 10px; }
+  .api-model-row > code,.api-model-add > input:first-child { grid-column:1 / -1; }
+  .api-model-row > input { grid-column:1; }
+  .api-capability-fold > summary > span { display:none; }
+  .api-model-footer { align-items:flex-start; }
+}
+.api-provider-idle > summary { cursor:pointer; list-style:none; }
+.api-provider-idle > summary::before { content:'▸'; font-size:10px; transition:transform .15s; }
+.api-provider-idle[open] > summary::before { transform:rotate(90deg); }
+.api-provider-idle > summary::-webkit-details-marker { display:none; }

@@ -11,6 +11,7 @@ import { Link } from 'react-router-dom'
 import { hasLocalWhisper, quickTranscriberTypes } from '@/utils/edition'
 import { fetchTranscriptionModelsByProvider } from '@/services/model'
 import { buildTranscriberUpdate, loadTranscriberDraft, type TranscriberDraft } from '@/utils/transcriberSettings'
+import './transcriber.css'
 import {
   getTranscriberConfig,
   updateTranscriberConfig,
@@ -33,6 +34,7 @@ export default function Transcriber() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [downloadNotice, setDownloadNotice] = useState<string | null>(null)
+  const [deleteKeyNotice, setDeleteKeyNotice] = useState(false)
   const [selectedType, setSelectedType] = useState('')
   const [fastModel, setFastModel] = useState(transcriberDraft?.fastModel || '')
   const [mlxModel, setMlxModel] = useState(transcriberDraft?.mlxModel || '')
@@ -128,7 +130,7 @@ export default function Transcriber() {
     return () => clearInterval(timer)
   }, [modelStatuses, mlxModelStatuses, fetchModelsStatus])
 
-  const handleSave = async (confirmed = false) => {
+  const handleSave = async (confirmed = false, keyDeletionConfirmed = false) => {
     if (!selectedType || (!hasLocalWhisper && !quickTranscriberTypes.includes(selectedType))) return
     if (selectedType === 'groq') {
       try {
@@ -136,6 +138,10 @@ export default function Transcriber() {
         if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
       } catch { toast.error('请输入有效的 Groq HTTP API 地址'); return }
       if (!groqModel.trim()) { toast.error('请输入 Groq 转写模型名称'); return }
+      if (!keyDeletionConfirmed && config?.groq_connection?.api_key && !groqConnection.api_key.trim()) {
+        setDeleteKeyNotice(true)
+        return
+      }
     }
     // 切到本地 whisper 引擎且选了未下载的模型时，提前 confirm，避免用户保存后到首次任务才发现要下 GB 级模型
     if (!confirmed && isWhisperType(selectedType)) {
@@ -160,6 +166,8 @@ export default function Transcriber() {
       const payload = buildTranscriberUpdate({ type: selectedType, fastModel, mlxModel, groqModel, connection: groqConnection, newName: newModelName, newTarget: newModelTarget })
       await updateTranscriberConfig(payload)
       setDownloadNotice(null)
+      setDeleteKeyNotice(false)
+      if (selectedType === 'groq') await reloadConfig()
       toast.success('转写器配置已保存')
     } catch {
       toast.error('保存失败')
@@ -229,26 +237,23 @@ export default function Transcriber() {
   const currentModels = selectedType === 'mlx-whisper' ? mlxModelStatuses : modelStatuses
 
   return (
-    <article className="settings-page">
+    <article className="settings-page transcriber-settings">
       <header className="settings-page-header">
         <h1>音频转写</h1>
-        <p>
-          选择视频音频转写为文字所使用的引擎，保存后对新任务立即生效
-        </p>
       </header>
 
       {/* 转写引擎选择 */}
-      <h2 className="settings-section-title">转写引擎</h2>
-      <section className="settings-card">
-          <div className="settings-row">
-            <div><h2>转写器类型</h2><p>选择将视频音频转换为文字的引擎。</p></div>
+      <section className="settings-card transcriber-connection">
+          <div className="transcriber-field transcriber-engine">
+            <label>转写引擎</label>
             <ChoiceSelect label="转写器类型" value={selectedType} onChange={setSelectedType} disabled={saving} options={config.available_types.filter(type => hasLocalWhisper || quickTranscriberTypes.includes(type.value)).map(type => ({ value: type.value, label: type.label }))} />
+            {selectedType === 'groq' && <label className="transcriber-enabled" title="关闭后无法用于新的转写任务"><input type="checkbox" disabled={saving} checked={groqConnection.enabled} onChange={event => setGroqConnection({ ...groqConnection, enabled: event.target.checked })} />启用连接</label>}
           </div>
 
           {hasLocalWhisper && isWhisperType(selectedType) && (
-            <div className="settings-row">
-              <div><h2>Whisper 模型大小</h2><p>模型越大通常精度越高，但速度更慢、占用更多显存。</p></div>
-              <ChoiceSelect label="Whisper 模型大小" value={selectedModelSize} onChange={setSelectedModelSize} options={config.whisper_model_sizes.map(size => {
+            <div className="transcriber-field">
+              <label title="较大的模型通常更准确，但更慢且占用更多显存">Whisper 模型</label>
+              <ChoiceSelect label="Whisper 模型大小" disabled={saving} value={selectedModelSize} onChange={setSelectedModelSize} options={config.whisper_model_sizes.map(size => {
                     const status = currentModels.find(m => m.model_size === size)
                     return { value: size, label: <span className="flex items-center gap-2">
                           {size}
@@ -271,23 +276,22 @@ export default function Transcriber() {
             </Alert>
           )}
           {selectedType === 'groq' && <>
-            <div className="settings-field"><label htmlFor="groq-transcription-url">Groq API 地址</label><Input id="groq-transcription-url" value={groqConnection.base_url} onChange={event => setGroqConnection({ ...groqConnection, base_url: event.target.value })} placeholder="https://api.groq.com/openai/v1" /></div>
-            <div className="settings-field"><label htmlFor="groq-transcription-key">Groq API 密钥</label><div className="settings-key-input"><Input id="groq-transcription-key" type={showKey ? 'text' : 'password'} autoComplete="off" value={groqConnection.api_key} onChange={event => setGroqConnection({ ...groqConnection, api_key: event.target.value })} placeholder="输入 API 密钥" /><button type="button" aria-label={showKey ? '隐藏密钥' : '显示密钥'} onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff size={16} /> : <Eye size={16} />}</button></div><small>已有密钥以掩码显示；保持掩码不变会沿用，清空并保存会删除密钥。未保存的修改仅保留在本次会话中。</small></div>
-            <div className="settings-row"><div><h2>启用 Groq 连接</h2><p>关闭后 Groq 无法用于新转写任务；保存其他引擎时不会修改此连接。</p></div><input type="checkbox" aria-label="启用 Groq 连接" checked={groqConnection.enabled} onChange={event => setGroqConnection({ ...groqConnection, enabled: event.target.checked })} /></div>
-            <div className="settings-row"><div><h2>Groq 转写模型</h2><p>仅用于语音转写，不出现在笔记生成或问答模型中。</p></div><ChoiceSelect label="Groq 转写模型" value={groqModel} onChange={setGroqModel} options={[...new Set(['whisper-large-v3-turbo', 'whisper-large-v3', ...registeredAudioModels, groqModel])].filter(Boolean).map(name => ({ value:name, label:name }))} /></div>
-            <div className="settings-field"><label htmlFor="groq-transcription-model">其他语音模型名称</label><Input id="groq-transcription-model" value={groqModel} onChange={event => setGroqModel(event.target.value)} placeholder="输入服务商支持的转写模型名称" /><small>连接与模型统一在此保存。切换引擎不会自动保存，也不会清空各引擎的草稿。</small></div>
+            <div className="transcriber-field"><label htmlFor="groq-transcription-url">API 地址</label><Input id="groq-transcription-url" disabled={saving} value={groqConnection.base_url} onChange={event => setGroqConnection({ ...groqConnection, base_url: event.target.value })} placeholder="https://api.groq.com/openai/v1" /></div>
+            <div className="transcriber-field"><label htmlFor="groq-transcription-key">API 密钥</label><div className="transcriber-key"><Input id="groq-transcription-key" disabled={saving} type={showKey ? 'text' : 'password'} autoComplete="off" value={groqConnection.api_key} onChange={event => setGroqConnection({ ...groqConnection, api_key: event.target.value })} placeholder="输入 API 密钥" /><button type="button" aria-label={showKey ? '隐藏密钥' : '显示密钥'} onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff size={16} /> : <Eye size={16} />}</button></div><small className="transcriber-field-note">保留掩码沿用密钥；清空并保存会删除。</small></div>
+            <div className="transcriber-field"><label htmlFor="groq-transcription-model">转写模型</label><Input id="groq-transcription-model" list="groq-transcription-models" disabled={saving} value={groqModel} onChange={event => setGroqModel(event.target.value)} placeholder="选择或输入模型名称" title="选择已有模型，或输入服务商支持的实际语音模型名称" /><datalist id="groq-transcription-models">{[...new Set(['whisper-large-v3-turbo', 'whisper-large-v3', ...registeredAudioModels])].filter(Boolean).map(name => <option key={name} value={name} />)}</datalist></div>
           </>}
-          {['bcut', 'kuaishou'].includes(selectedType) && <div className="settings-row"><div><h2>{selectedType === 'bcut' ? '必剪在线转写' : '快手在线转写'}</h2><p>此引擎无需配置 API 密钥，当前没有可调整的转写参数。保存后使用该在线服务进行音频转写，需要联网；可用性与限制取决于服务响应。</p></div></div>}
+          {['bcut', 'kuaishou'].includes(selectedType) && <p className="transcriber-hint">无需密钥。保存后通过{selectedType === 'bcut' ? '必剪' : '快手'}在线转写，需要联网。</p>}
 
       </section>
-      {!hasLocalWhisper && <p className="settings-footnote">此版本使用 Groq、必剪或快手在线转写，需要联网；Groq 需配置自己的 API 连接，服务费用与额度以服务商为准。此安装版本暂不包含本地 Whisper。</p>}
-      <div className="settings-actions"><button type="button" className="settings-button is-primary" onClick={() => void handleSave()} disabled={saving || !selectedType || (selectedType === 'groq' && !groqModel.trim()) || (selectedType === 'mlx-whisper' && !config.mlx_whisper_available)}>{saving ? '保存中…' : '保存配置'}</button></div>
+      <div className="settings-actions transcriber-save"><button type="button" className="settings-button is-primary" onClick={() => void handleSave()} disabled={saving || !selectedType || (selectedType === 'groq' && !groqModel.trim()) || (selectedType === 'mlx-whisper' && !config.mlx_whisper_available)}>{saving ? '保存中…' : '保存配置'}</button><span>对新任务生效</span></div>
 
-      <h2 className="settings-section-title">测试转写</h2>
-      <section className="settings-card">
-        <div className="settings-row"><div><h2>使用 30–60 秒语音清晰的短视频</h2><p>先保存配置，再创建新的短视频任务。建议使用普通话、少背景音乐、含一句可核对的原话，检查笔记的「原文参照」是否有这句话以及对应时间戳。</p><p>{!hasLocalWhisper ? '配置已保存只代表准备就绪' : '模型已下载或 API 连接成功只代表准备就绪'}；真实任务完成转写才说明引擎可用。失败时查看任务错误和运行状态；字幕缓存命中的旧任务不能用于验证刚修改的引擎。</p></div></div>
-        <div className="settings-row"><div><h2>测试入口</h2><p>转写测试会走真实任务，在线引擎可能产生 API 用量，后续笔记生成也会调用你选择的 AI 模型。</p></div><Link className="settings-link" to="/?view=create">创建短视频任务 →</Link></div>
-      </section>
+      <details className="transcriber-help"><summary>配置与测试说明</summary><div>
+        <p>切换引擎不自动保存，各引擎草稿保留在本次会话中；只保存当前引擎的配置。</p>
+        {!hasLocalWhisper && <p>此版本暂不包含本地 Whisper，在线转写需要联网。Groq 的费用与额度以服务商为准。</p>}
+        <p>先保存，再用 30–60 秒语音清晰的短视频创建新任务，在「原文参照」核对文字和时间戳。旧任务可能命中字幕缓存；保存配置或下载模型不代表真实转写成功，失败时查看任务错误。</p>
+        <p>测试会产生真实任务，在线转写可能消耗 API 额度，笔记生成也会调用所选 AI 模型。</p>
+        <Link className="settings-link" to="/?view=create">创建短视频任务 →</Link>
+      </div></details>
 
       {/* Whisper 模型管理 */}
       {hasLocalWhisper && isWhisperType(selectedType) && currentModels.length > 0 && (
@@ -347,17 +351,15 @@ export default function Transcriber() {
         <section>
           <h2 className="settings-section-title">自定义模型</h2>
           <div className="settings-card">
-            <Alert className="settings-transcriber-notice">
-              <AlertDescription>
+            <details className="transcriber-help transcriber-custom-help"><summary>模型路径说明</summary><div>
                 填 <strong>HF repo_id</strong>（如{' '}
                 <code className="rounded bg-muted px-1">Systran/faster-whisper-large-v3</code>
                 ，会自动下载）或<strong>本地模型目录</strong>（如{' '}
                 <code className="rounded bg-muted px-1">/app/backend/models/my-whisper</code>
                 ，目录内需含 <code className="rounded bg-muted px-1">model.bin</code>，下载会跳过）。
-                添加后即可在上方「模型大小」下拉中选用。Docker 部署请把模型目录挂载进容器（见 README 的{' '}
+                添加后即可在上方「Whisper 模型」中选用。Docker 部署请把模型目录挂载进容器（见 README 的{' '}
                 <code className="rounded bg-muted px-1">models</code> 卷）。
-              </AlertDescription>
-            </Alert>
+            </div></details>
 
             {config.whisper_custom_models &&
             Object.keys(config.whisper_custom_models).length > 0 ? (
@@ -438,6 +440,12 @@ export default function Transcriber() {
         <DialogContent showCloseButton={!saving}>
           <DialogHeader><DialogTitle>保存本地转写模型配置？</DialogTitle><DialogDescription>{downloadNotice}</DialogDescription></DialogHeader>
           <DialogFooter><Button type="button" variant="outline" disabled={saving} onClick={() => setDownloadNotice(null)}>取消</Button><Button type="button" disabled={saving} onClick={() => void handleSave(true)}>{saving ? '保存中…' : '确认保存'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={deleteKeyNotice} onOpenChange={open => { if (!saving) setDeleteKeyNotice(open) }}>
+        <DialogContent showCloseButton={!saving}>
+          <DialogHeader><DialogTitle>删除 Groq 密钥？</DialogTitle><DialogDescription>保存后会删除已有密钥。使用 Groq 转写前需要重新填写密钥。</DialogDescription></DialogHeader>
+          <DialogFooter><Button type="button" variant="outline" disabled={saving} onClick={() => setDeleteKeyNotice(false)}>取消</Button><Button type="button" variant="destructive" disabled={saving} onClick={() => void handleSave(false, true)}>{saving ? '保存中…' : '删除并保存'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </article>

@@ -1,0 +1,8 @@
+.reading-vision-status { color: var(--text-secondary, #777); font-size: 11px; margin: 3px 0 5px; }
+.reading-vision-row { display: flex; gap: 8px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+.reading-vision-status button { font-size: inherit; color: inherit; cursor: pointer; border-radius: 4px; padding: 2px 4px; }
+.reading-vision-status button:hover { background: var(--surface-hover, #8882); }
+.reading-vision-status button:disabled { opacity: .5; cursor: default; }
+.reading-vision-options { border: 1px solid var(--surface-border, #8884); border-radius: 6px; margin-top: 6px; padding: 8px; }
+.reading-vision-options p { margin: 5px 0; overflow-wrap: anywhere; }
+.reading-vision-options [role='alert'] { color: var(--destructive, #c44); }

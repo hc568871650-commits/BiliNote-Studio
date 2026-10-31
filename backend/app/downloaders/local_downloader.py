@@ -71,7 +71,7 @@ class LocalDownloader(Downloader):
             raise RuntimeError('ffprobe 返回了无效媒体信息，无法读取时长') from exc
         raise RuntimeError('无法读取有效媒体时长，请确认本地文件不是损坏或未完成下载的视频')
 
-    def extract_cover(self, input_path: str, output_dir: Optional[str] = None) -> str:
+    def extract_cover(self, input_path: str, output_dir: Optional[str] = None, *, duration: Optional[float] = None) -> str:
         source = self._source(input_path)
         directory = self._output_directory(source, output_dir)
         output_path = directory / f'{source.stem}_cover.jpg'
@@ -79,7 +79,8 @@ class LocalDownloader(Downloader):
             raise ValueError('封面输出路径不能覆盖原媒体文件')
         self._run([
             find_ffmpeg_binary('ffmpeg'), '-nostdin', '-hide_banner', '-loglevel', 'error',
-            '-ss', '0', '-i', str(source), '-frames:v', '1', '-q:v', '2',
+            '-ss', str((duration if duration is not None else self._duration(source)) * .1),
+            '-i', str(source), '-frames:v', '1', '-q:v', '2',
             '-y', str(output_path),
         ], '提取封面')
         if not output_path.is_file() or output_path.stat().st_size == 0:
@@ -112,11 +113,19 @@ class LocalDownloader(Downloader):
         directory = self._output_directory(source, output_dir)
         duration = self._duration(source)
         file_path = self.convert_to_mp3(str(source), str(directory / f'{source.stem}.mp3'))
-        cover_path = self.extract_cover(str(source), str(directory))
+        cover_path = self.extract_cover(str(source), str(directory), duration=duration)
         cover_url = save_cover_to_static(cover_path)
+        title = source.stem
+        if source.parent == (Path.cwd() / 'uploads').resolve():
+            try:
+                original = json.loads((source.parent / '_names' / (source.name + '.json')).read_text(encoding='utf-8'))['filename']
+                title = Path(original).stem
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
         return AudioDownloadResult(
-            file_path=file_path, title=source.stem, duration=duration, cover_url=cover_url,
+            file_path=file_path, title=title, duration=duration, cover_url=cover_url,
             platform='local', video_id=source.stem,
-            raw_info={'path': file_path, 'source_path': str(source), 'cover_path': cover_path},
+            raw_info={'path': file_path, 'source_path': str(source), 'cover_path': cover_path,
+                      'cover_strategy': 'ten-percent'},
             video_path=str(source),
         )

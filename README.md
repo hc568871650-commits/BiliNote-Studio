@@ -8,6 +8,8 @@ BiliNote Studio 是基于 [JefferyHcool/BiliNote](https://github.com/JefferyHcoo
 
 > **版本状态（2026-10-12）**：[`0.1.0-preview.8` Windows x64预发行版已公开](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.1.0-preview.8)。源码、独立安装包、实际新安装与公开旧包升级均已核验；GitHub检查通过，公开附件已匿名下载比对。本次证据见[验证记录](docs/releases/0.1.0-preview.8-validation.md)。
 
+本分支包含 `0.1.0-preview.31` 的累计更新，发行准备情况见[预发行说明](docs/releases/0.1.0-preview.31.md)。公开下载状态以 Releases 页面为准。
+
 ![工作区：文件夹、笔记列表、快捷目录与阅读正文](doc/showcase/studio-20261012/workspace.jpg)
 
 本页截图来自 2026-10-12 的隔离预览，使用合成笔记与模拟模型，不包含个人教程或真实模型质量结论。累计变化见 [preview.8 发布说明](docs/releases/0.1.0-preview.8.md)。
@@ -108,15 +110,15 @@ BiliNote Studio 是基于 [JefferyHcool/BiliNote](https://github.com/JefferyHcoo
 
 生成、阅读、整理可以使用不同服务商与默认模型，也可以共用同一模型。会话内的临时选择用于当前会话，不混淆不同服务商的同名模型。
 
-阅读、资料库问答与整理计划可按服务商配置使用 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages；视频总结目前仍走 Chat Completions 兼容接口。
+阅读、资料库问答与整理计划可按服务商配置使用 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 或 Gemini 协议；视频总结目前仍走 Chat Completions 兼容接口。
 
 模型设置提供基础回复、流式、工具、联网与候选思考档位的能力检测。主动检测会发送有界测试请求；已有记录可直接查看。参数被接受不等同于服务商内部采用了对应推理强度。
 
-阅读问答的联网选项位于聊天设置中，默认关闭；可使用已验证的 Responses 原生搜索或配置的 SearXNG。当前资料库助手界面不启用联网搜索。
+阅读与资料库助手可按模型配置原生联网或外部检索，外部检索支持 Tavily 和 SearXNG。助手按需检索并可读取来源网页；实际支持范围取决于服务商、模型协议和本地配置。
 
 长对话提供用量提示和压缩入口。自动压缩或 `/compact` 使用所选模型生成摘要，保留原始聊天记录；整理计划和执行确认独立保存，不因压缩改变授权。
 
-应用当前采用 272K 上下文预算，这不代表每个模型都支持该容量。本地 token 估算也不等同供应商的实际用量或计费。
+聊天设置提供 64K、128K、256K 上下文档位，并保留已有自定义配置。模型实际容量由服务商决定，本地估算也不等同供应商的实际用量或计费。
 
 ## 适合长时间阅读的界面
 

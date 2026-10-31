@@ -1,6 +1,6 @@
 
 
-from app.db.model_dao import insert_model, get_all_models, get_model_by_provider_and_name, delete_model
+from app.db.model_dao import insert_model, get_all_models, get_model_by_provider_and_name, delete_model, update_model_display_name
 from app.db.provider_dao import get_enabled_providers
 from app.enmus.exception import ProviderErrorEnum
 from app.exceptions.provider import ProviderError
@@ -71,6 +71,7 @@ class ModelService:
                 "id": model.get("id"),
                 "provider_id": model.get("provider_id"),
                 "model_name": model.get("model_name"),
+                "display_name": model.get("display_name"),
                 "created_at": model.get("created_at", None),  # 如果有created_at字段
             })
         return formatted
@@ -180,7 +181,9 @@ class ModelService:
             ok = OpenAICompatibleProvider.test_connection(
                 api_key=provider.get('api_key'), base_url=provider.get('base_url'), model=model)
         except ValueError as exc:
-            raise ProviderError(code=ProviderErrorEnum.WRONG_PARAMETER.code, message=str(exc)) from None
+            failure = ProviderError(code=ProviderErrorEnum.WRONG_PARAMETER.code, message=str(exc))
+            failure.error_details = getattr(exc, 'details', None)
+            raise failure from None
         if ok:
             return True
         raise ProviderError(
@@ -199,7 +202,7 @@ class ModelService:
             print(f"[{model_id}] <UNK>: {e}")
             return False
     @staticmethod
-    def add_new_model(provider_id: int, model_name: str) -> bool:
+    def add_new_model(provider_id: int, model_name: str, display_name: str | None = None) -> bool:
         try:
             # 先查供应商是否存在
             provider = ProviderService.get_provider_by_id(provider_id)
@@ -214,12 +217,17 @@ class ModelService:
                 return False
 
             # 插入模型
-            insert_model(provider_id=provider_id, model_name=model_name)
+            insert_model(provider_id=provider_id, model_name=model_name,
+                         display_name=display_name.strip() or None if display_name else None)
             print(f"模型 {model_name} 已成功添加到供应商ID {provider_id}")
             return True
         except Exception as e:
             print(f"添加模型失败: {e}")
             return False
+
+    @staticmethod
+    def set_display_name(model_id: int, display_name: str | None):
+        return update_model_display_name(model_id, display_name)
 
 if __name__ == '__main__':
     # 单个 Provider 测试

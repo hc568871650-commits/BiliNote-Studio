@@ -84,10 +84,17 @@ class WebProtocolTest(unittest.TestCase):
 
     def test_off_does_not_add_search_tool_and_chat_cannot_fake_native(self):
         self.assertNotIn('tools', responses_options('model', [], {}))
-        class ChatClient:
-            protocol = 'openai-chat'
-        with self.assertRaisesRegex(ValueError, '未接入原生联网'):
-            complete(ChatClient(), 'model', [], web_search=True)
+        wire = []
+        def handler(request):
+            wire.append(json.loads(request.content))
+            return httpx.Response(200, json={'id':'fixture','object':'chat.completion','created':0,'model':'fixture',
+                'choices':[{'index':0,'message':{'role':'assistant','content':'I searched the web.'},'finish_reason':'stop'}]})
+        with OpenAI(api_key='synthetic',base_url='https://synthetic.invalid/v1',max_retries=0,
+                    http_client=httpx.Client(transport=httpx.MockTransport(handler))) as client:
+            response, _ = complete(client, 'model', [], web_search=True)
+        self.assertEqual(wire[0]['web_search_options'], {})
+        self.assertFalse(response.web_search_used, 'prose alone cannot prove a native search')
+        self.assertEqual(response.web_sources, [])
 
     def test_anthropic_legacy_and_adaptive_have_distinct_wire_parameters(self):
         legacy = anthropic_options('claude-sonnet-4-5', [], {'reasoning_effort': 'high', 'max_tokens': 6000})
@@ -106,8 +113,10 @@ class WebProtocolTest(unittest.TestCase):
             def search(query):
                 state['cancelled'] = True
                 return [{'source_type': 'web', 'url': 'https://example.org', 'text': 'synthetic'}]
+            from app.services.search_tool import SearchToolSession
+            cancellation = (lambda: state['cancelled']) if callback else state
             with patch('app.services.web_search.search_web', side_effect=search):
                 with self.assertRaisesRegex(ValueError, '已取消'):
-                    complete(client, 'model', [], web_search=True, web_search_mode='external', search_query='public question',
-                             cancellation=(lambda: state['cancelled']) if callback else state)
+                    SearchToolSession(True, 'external', client, cancellation).execute({'query': 'public question'})
+                    complete(client, 'model', [], cancellation=cancellation)
             client.chat.completions.create.assert_not_called()

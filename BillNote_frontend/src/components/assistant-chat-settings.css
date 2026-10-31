@@ -1,0 +1,5 @@
+.assistant-chat-settings { width:min(440px,calc(100vw - 24px)); max-height:calc(100dvh - 32px); overflow-y:auto; gap:20px; padding:24px; }
+.assistant-chat-settings-row { display:flex; align-items:center; justify-content:space-between; gap:14px; font-size:14px; }
+.assistant-chat-settings > a { color:var(--muted-foreground); font-size:12px; width:fit-content; }
+.assistant-chat-settings > a:hover { color:var(--foreground); }
+@media(max-width:420px) { .assistant-chat-settings { padding:20px; } }

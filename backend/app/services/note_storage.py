@@ -1,11 +1,13 @@
 """Durable, task-owned notes. Legacy flat files are read only until imported."""
 
 import json
+import hashlib
 import os
 import re
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +17,53 @@ ROOT = Path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
 TASK_ID = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
 IMAGE_LINK = re.compile(r"(!\[[^\]]*\]\()([^\s)]+)(\))")
 LOCK = threading.RLock()
+
+
+def _diagnostic(task_id, event, **fields):
+    try:
+        from app.services.note_diagnostics import record_event
+        record_event(task_id, event, **fields)
+    except Exception:
+        pass
+
+
+def _replace_note_file(source, target):
+    target = Path(target)
+    task_id = next((part.name.rsplit('__', 1)[-1] for part in target.parents
+                    if '__' in part.name and TASK_ID.fullmatch(part.name.rsplit('__', 1)[-1])), None)
+    role = {'manifest.json': 'manifest', 'result.json': 'metadata', 'transcript.json': 'transcript',
+            'status.json': 'status'}.get(target.name, 'markdown' if target.suffix == '.md' else 'metadata')
+    delays = (0.04, 0.12, 0.3, 0.6)
+    for attempt in range(len(delays) + 1):
+        try:
+            os.replace(source, target)
+            return
+        except OSError as error:
+            retryable = isinstance(error, PermissionError) or getattr(error, 'winerror', None) in (5, 32, 33)
+            existed = parent_exists = None
+            try:
+                existed = target.exists()
+            except OSError:
+                pass
+            try:
+                parent_exists = target.parent.exists()
+            except OSError:
+                pass
+            try:
+                read_only = existed and not bool(target.stat().st_mode & 0o200)
+            except OSError:
+                read_only = None
+            fields = dict(target=role, attempt=attempt + 1, errno=error.errno,
+                          winerror=getattr(error, 'winerror', None), existed=existed,
+                          parent_exists=parent_exists, read_only=read_only)
+            if not retryable or attempt == len(delays):
+                if task_id:
+                    outcome = {'content_saved': False} if role == 'markdown' else {'index_saved': False}
+                    _diagnostic(task_id, 'replace_failed', **fields, **outcome)
+                raise
+            if task_id:
+                _diagnostic(task_id, 'replace_retry', delay_ms=int(delays[attempt] * 1000), **fields)
+            time.sleep(delays[attempt])
 
 
 def valid_id(task_id):
@@ -31,10 +80,13 @@ def _atomic_json(path, data):
             json.dump(data, out, ensure_ascii=False, indent=2)
             out.flush()
             os.fsync(out.fileno())
-        os.replace(name, path)
+        _replace_note_file(name, path)
     finally:
         if os.path.exists(name):
-            os.unlink(name)
+            try:
+                os.unlink(name)
+            except OSError:
+                pass
 
 
 def _atomic_text(path, content):
@@ -45,10 +97,13 @@ def _atomic_text(path, content):
             out.write(content)
             out.flush()
             os.fsync(out.fileno())
-        os.replace(name, path)
+        _replace_note_file(name, path)
     finally:
         if os.path.exists(name):
-            os.unlink(name)
+            try:
+                os.unlink(name)
+            except OSError:
+                pass
 
 
 def _owned(folder):
@@ -108,6 +163,7 @@ def _public(task):
             state = json.loads(snapshot.read_text(encoding="utf-8"))
             task["status"] = state.get("status") or task.get("status")
             task["statusMessage"] = state.get("message") or ""
+            task['cancelled'] = bool(state.get('cancelled'))
             task["last_active_status"] = state.get("last_active_status") or task.get("last_active_status")
             task["status_updated_at"] = state.get("status_updated_at") or datetime.fromtimestamp(snapshot.stat().st_mtime, timezone.utc).isoformat()
             task["started_at"] = state.get("started_at") or task.get("started_at")
@@ -221,7 +277,7 @@ def _publish_evidence(evidence, folder, version_id, staging):
     return result
 
 
-def save_task(task, staging=None, import_legacy=False):
+def save_task(task, staging=None, import_legacy=False, recoverable=False):
     """Merge versions by ID. Import never overwrites a newer server-owned version."""
     task_id = valid_id(task["id"])
     with LOCK:
@@ -248,6 +304,7 @@ def save_task(task, staging=None, import_legacy=False):
                           "style": form.get("style") or "", "model_name": form.get("model_name") or "",
                           "created_at": datetime.now(timezone.utc).isoformat()}] if incoming else [])
         known = {v["ver_id"] for v in versions}
+        pending_version_files = []
         for item in reversed(incoming):
             ver = dict(item)
             ver_id = _version_id(ver.get("ver_id"))
@@ -262,12 +319,30 @@ def save_task(task, staging=None, import_legacy=False):
             known.add(ver_id)
             version_path = folder / "versions" / f"{ver_id}.md"
             version_path.parent.mkdir(parents=True, exist_ok=True)
-            _atomic_text(version_path, content)
+            pending_version_files.append((version_path, content))
         data = dict(previous or {}, **task)
         data.pop("resource_base", None)
         data.update(id=task_id, markdown=versions,
                     archived_at=(previous or {}).get("archived_at"),
                     createdAt=(previous or {}).get("createdAt") or task.get("createdAt") or datetime.now(timezone.utc).isoformat())
+        manifest = {"schema_version": 1, "task": data, "updated_at": datetime.now(timezone.utc).isoformat()}
+        if recoverable and versions:
+            # Persist recovery data before publishing new versions. Never include this file in diagnostics.
+            state = _read_json(status_path(task_id))
+            publication = _publication_contents(data)
+            _atomic_json(folder / '_meta' / 'save-recovery.json', {
+                'schema_version': 1, 'task_id': task_id,
+                'started_at': state.get('started_at'),
+                'request_id': (data.get('formData') or {}).get('request_id'),
+                'previous_fingerprint': _task_fingerprint(previous or {}),
+                'publication_before': {name: _file_digest(_inside(folder / name, folder)) for name in publication},
+                'publication_target': {name: _written_digest(text) for name, text in publication.items()},
+                'manifest': manifest,
+            })
+        for version_path, content in pending_version_files:
+            _atomic_text(version_path, content)
+        if recoverable and versions:
+            _diagnostic(task_id, 'content_saved', target='content')
         if versions:
             current = versions[0]["content"].replace("../images/", "images/")
             _atomic_text(folder / "笔记.md", current)
@@ -282,8 +357,9 @@ def save_task(task, staging=None, import_legacy=False):
         # overwrite valid transcribed segments with the original empty draft.
         if "transcript" in task or not (meta / "transcript.json").exists():
             _atomic_json(meta / "transcript.json", data.get("transcript") or {})
-        _atomic_json(meta / "manifest.json", {"schema_version": 1, "task": data,
-                                             "updated_at": datetime.now(timezone.utc).isoformat()})
+        _atomic_json(meta / "manifest.json", manifest)
+        if recoverable:
+            _diagnostic(task_id, 'index_saved', target='index')
         return _public(data)
 
 
@@ -299,7 +375,162 @@ def save_result(task_id, note, staging=None):
                      'provider_id': form.get('provider_id'), 'created_at': datetime.now(timezone.utc).isoformat()}]
     return save_task({"id": task_id, "markdown": markdown,
                       "transcript": result["transcript"], "audioMeta": result["audio_meta"],
-                      "status": "SUCCESS"}, staging=staging)
+                      "status": "SUCCESS"}, staging=staging, recoverable=True)
+
+
+def _read_json(path):
+    try:
+        if path.is_file() and path.stat().st_size <= 64 * 1024 * 1024:
+            value = json.loads(path.read_text(encoding='utf-8'))
+            return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def _task_fingerprint(task):
+    ignored = {'status', 'statusMessage', 'last_active_status', 'started_at', 'finished_at',
+               'status_updated_at', 'archived_at', 'resource_base'}
+    return hashlib.sha256(json.dumps({k: v for k, v in task.items() if k not in ignored},
+                                    ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def _file_digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def _written_digest(text):
+    return hashlib.sha256(text.replace('\n', os.linesep).encode('utf-8')).hexdigest()
+
+
+def _publication_contents(task):
+    content = task['markdown'][0]['content']
+    return {'笔记.md': content.replace('../images/', 'images/'),
+            '_meta/result.json': json.dumps({'markdown': content, 'transcript': task.get('transcript') or {},
+                                             'audio_meta': task.get('audioMeta') or {}}, ensure_ascii=False, indent=2),
+            '_meta/transcript.json': json.dumps(task.get('transcript') or {}, ensure_ascii=False, indent=2)}
+
+
+def _verified_versions(folder, versions, allow_missing_ids=()):
+    if not isinstance(versions, list) or not versions:
+        return False
+    for version in versions:
+        if not isinstance(version, dict) or not TASK_ID.fullmatch(str(version.get('ver_id', ''))):
+            return False
+        content = version.get('content')
+        path = _inside(folder / 'versions' / (version['ver_id'] + '.md'), folder)
+        if not isinstance(content, str) or not content.strip():
+            return False
+        if not path.is_file():
+            if version['ver_id'] in allow_missing_ids:
+                continue
+            return False
+        if path.read_text(encoding='utf-8') != content:
+            return False
+    return True
+
+
+def _recovery_candidate(task_id):
+    manifest = _manifest(task_id)
+    if not manifest:
+        return None, '笔记不存在'
+    task = manifest['task']
+    public = _public(task)
+    if public.get('archived_at'):
+        return None, '请先恢复归档笔记'
+    if public.get('status') != 'FAILED' or public.get('last_active_status') != 'SAVING':
+        return None, '仅保存阶段失败的任务可重试保存'
+    folder = _note_dir(task_id)
+    journal = _read_json(folder / '_meta' / 'save-recovery.json')
+    if journal:
+        saved_manifest = journal.get('manifest')
+        candidate = saved_manifest.get('task') if isinstance(saved_manifest, dict) else None
+        if not isinstance(candidate, dict):
+            return None, '保存记录损坏，请保留现场检查'
+        if (journal.get('schema_version') != 1 or journal.get('task_id') != task_id or candidate.get('id') != task_id
+                or journal.get('started_at') != public.get('started_at')
+                or journal.get('request_id') != (task.get('formData') or {}).get('request_id')
+                or _task_fingerprint(task) not in (journal.get('previous_fingerprint'), _task_fingerprint(candidate))):
+            return None, '保存记录已变化，不能覆盖当前笔记'
+        publication = _publication_contents(candidate)
+        before, intended = journal.get('publication_before'), journal.get('publication_target')
+        if not isinstance(before, dict) or not isinstance(intended, dict) or set(before) != set(publication) or set(intended) != set(publication):
+            return None, '保存记录不完整，请保留现场检查'
+        for name, text in publication.items():
+            expected = _written_digest(text)
+            if intended[name] != expected or _file_digest(_inside(folder / name, folder)) not in (before[name], expected):
+                return None, '正文或保存文件已修改，不能覆盖现有内容'
+        current_ids = {v.get('ver_id') for v in task.get('markdown', []) if isinstance(v, dict)} if isinstance(task.get('markdown'), list) else set()
+        pending_ids = {v.get('ver_id') for v in candidate.get('markdown', []) if isinstance(v, dict)} - current_ids
+        if not _verified_versions(folder, candidate.get('markdown'), allow_missing_ids=pending_ids):
+            return None, '正文文件缺失或已更改，请保留现场检查'
+        return candidate, '已有完整结果，可重试保存'
+    # Legacy repair requires the current attempt's durable version and all published copies to agree.
+    versions = task.get('markdown')
+    if not _verified_versions(folder, versions):
+        return None, '历史任务缺少完整保存记录'
+    latest = versions[0]
+    try:
+        started = datetime.fromisoformat(public['started_at'])
+        created = datetime.fromisoformat(latest['created_at'])
+        finished = datetime.fromisoformat(public['finished_at'])
+        if not started <= created <= finished:
+            return None, '现有正文来自其他生成任务'
+        result = _read_json(folder / '_meta' / 'result.json')
+        if (result.get('markdown') != latest['content']
+                or result.get('transcript') != (task.get('transcript') or {})
+                or result.get('audio_meta') != (task.get('audioMeta') or {})
+                or (folder / '笔记.md').read_text(encoding='utf-8') != latest['content'].replace('../images/', 'images/')):
+            return None, '历史保存结果不一致，请保留现场检查'
+    except (OSError, ValueError, KeyError, TypeError):
+        return None, '历史任务缺少可核验的保存时间或结果'
+    return task, '已核验本次正文与结果，可重试保存'
+
+
+def save_recovery_summary(task_id):
+    with LOCK:
+        try:
+            candidate, reason = _recovery_candidate(valid_id(task_id))
+            return {'available': candidate is not None, 'reason': reason}
+        except (OSError, ValueError, KeyError, TypeError):
+            return {'available': False, 'reason': '保存现场暂时无法读取，请稍后重试'}
+
+
+def complete_save_recovery(task_id):
+    with LOCK:
+        folder = _note_dir(task_id)
+        if folder:
+            try:
+                (folder / '_meta' / 'save-recovery.json').unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def retry_saved_result(task_id):
+    with LOCK:
+        candidate, reason = _recovery_candidate(valid_id(task_id))
+        if candidate is None:
+            raise ValueError(reason)
+        folder = _note_dir(task_id)
+        versions = candidate['markdown']
+        current = versions[0]['content']
+        for version in versions:
+            path = _inside(folder / 'versions' / (version['ver_id'] + '.md'), folder)
+            if not path.is_file():
+                _atomic_text(path, version['content'])
+        _atomic_text(folder / '笔记.md', current.replace('../images/', 'images/'))
+        _atomic_json(folder / '_meta' / 'result.json', {
+            'markdown': current, 'transcript': candidate.get('transcript') or {}, 'audio_meta': candidate.get('audioMeta') or {},
+        })
+        _atomic_json(folder / '_meta' / 'transcript.json', candidate.get('transcript') or {})
+        _diagnostic(task_id, 'content_saved', target='content')
+        _atomic_json(folder / '_meta' / 'manifest.json', {
+            'schema_version': 1, 'task': dict(candidate, status='SUCCESS'), 'updated_at': datetime.now(timezone.utc).isoformat(),
+        })
+        _diagnostic(task_id, 'index_saved', target='index')
+        write_status(task_id, 'SUCCESS', '已有正文保存完成')
+        complete_save_recovery(task_id)
+        return get_task(task_id)
 
 
 def set_status(task_id, status):
@@ -311,9 +542,35 @@ def set_status(task_id, status):
         _atomic_json(_note_dir(task_id) / "_meta" / "manifest.json", manifest)
 
 
-def write_status(task_id, status, message=None):
+class GenerationCancelled(Exception):
+    cancelled = True
+
+
+def request_cancellation(task_id, request_id):
+    _atomic_json(status_path(task_id).with_suffix('.cancel.json'), {'request_id': request_id})
+
+
+def clear_cancellation(task_id):
+    path = status_path(task_id).with_suffix('.cancel.json')
+    if path.is_file():
+        path.unlink()
+
+
+def check_cancellation(task_id, request_id):
+    path = status_path(task_id).with_suffix('.cancel.json')
+    if path.is_file() and json.loads(path.read_text(encoding='utf-8')).get('request_id') == request_id:
+        raise GenerationCancelled('已取消生成；已发出的请求结束后不再继续处理')
+
+
+def write_status(task_id, status, message=None, *, cancelled=False):
     """Persist both polling and library snapshots; a new attempt resets progress."""
     active = {"PENDING", "PARSING", "DOWNLOADING", "TRANSCRIBING", "SUMMARIZING", "FORMATTING", "SAVING"}
+    try:
+        from app.services.note_diagnostics import record_stage
+        if status in active:
+            record_stage(task_id, status)
+    except Exception:
+        pass
     with LOCK:
         path = status_path(task_id)
         try:
@@ -325,6 +582,7 @@ def write_status(task_id, status, message=None):
             last = previous["status"]
         now = datetime.now(timezone.utc).isoformat()
         state = {"status": status, "message": message or "", "status_updated_at": now,
+                 "cancelled": cancelled,
                  "started_at": now if status == "PENDING" else previous.get("started_at"),
                  "finished_at": (previous.get("finished_at") or now) if status in ("SUCCESS", "FAILED") else None}
         if last:
@@ -332,9 +590,16 @@ def write_status(task_id, status, message=None):
         _atomic_json(path, state)
         manifest = _manifest(task_id)
         if manifest:
-            manifest["task"].update(status=status, statusMessage=message or "", last_active_status=last)
+            manifest["task"].update(status=status, statusMessage=message or "", last_active_status=last,
+                                    cancelled=cancelled)
             manifest["task"].update({key: state[key] for key in ("started_at", "finished_at", "status_updated_at")})
             _atomic_json(_note_dir(task_id) / "_meta" / "manifest.json", manifest)
+        if status not in active:
+            try:
+                from app.services.note_diagnostics import record_stage
+                record_stage(task_id, status)
+            except Exception:
+                pass
         return state
 
 

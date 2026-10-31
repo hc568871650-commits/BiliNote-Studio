@@ -363,10 +363,23 @@ fn spawn_backend_sidecar(app_handle: &tauri::AppHandle) -> Result<CommandChild, 
     let enhanced_path = enhance_path_variable(&current_path, &additional_paths);
     all_env_vars.insert("PATH".to_string(), enhanced_path);
 
+    // New Studio packages use the Studio name. Existing local installations
+    // retain their backend/launcher names until an explicitly authorized migration.
+    let backend_name = if sidecar_dir.join("BiliNoteStudioBackend.exe").is_file()
+        || sidecar_dir.join("BiliNoteStudioBackend").is_file()
+    {
+        "BiliNoteStudioBackend"
+    } else if sidecar_dir.join("BiliNoteBackend.exe").is_file()
+        || sidecar_dir.join("BiliNoteBackend").is_file()
+    {
+        "BiliNoteBackend"
+    } else {
+        return Err("找不到 BiliNote Studio 后端，请重新安装应用。".to_string());
+    };
     let mut sidecar_command = app_handle
         .shell()
-        .sidecar("BiliNoteBackend")
-        .map_err(|e| format!("找不到 BiliNoteBackend sidecar: {}", e))?;
+        .sidecar(backend_name)
+        .map_err(|e| format!("找不到 {} sidecar: {}", backend_name, e))?;
     for (key, value) in &all_env_vars {
         sidecar_command = sidecar_command.env(key, value);
     }

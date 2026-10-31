@@ -18,9 +18,10 @@ interface IModel {
 }
 
 interface IModelListItem {
-  id: string
+  id: number | string
   provider_id: string
   model_name: string
+  display_name?: string | null
   created_at?: string
 }
 
@@ -35,7 +36,7 @@ interface ModelStore {
   loadModels: (providerId: string) => Promise<void>
   loadModelsById: (providerId: string) => Promise<IModelListItem[]>
   loadEnabledModels: (options?: { force?: boolean }) => Promise<void>
-  addNewModel: (providerId: string, modelId: string) => Promise<void>
+  addNewModel: (providerId: string, modelId: string, displayName?: string) => Promise<void>
   deleteModel: (modelId: number) => Promise<void>
   setSelectedModel: (modelId: string) => void
   clearModels: () => void
@@ -43,6 +44,7 @@ interface ModelStore {
 
 let enabledRequest: Promise<void> | null = null
 let enabledLoadedAt = 0
+if (typeof window !== 'undefined') window.addEventListener('model-list-updated', () => { enabledLoadedAt = 0 })
 
 export const useModelStore = create<ModelStore>()(
   devtools((set, get) => ({
@@ -110,9 +112,9 @@ export const useModelStore = create<ModelStore>()(
     },
 
     //  新增模型逻辑
-    addNewModel: async (providerId: string, modelId: string) => {
+    addNewModel: async (providerId: string, modelId: string, displayName?: string) => {
       try {
-        const res = await addModel({ provider_id: providerId, model_name: modelId })
+        const res = await addModel({ provider_id: providerId, model_name: modelId, display_name: displayName?.trim() || null })
         enabledLoadedAt = 0
 
         if (res.code === 0) {

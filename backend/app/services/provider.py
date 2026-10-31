@@ -1,5 +1,5 @@
 from fastapi.encoders import jsonable_encoder
-from kombu import uuid
+from uuid import uuid4
 
 from app.db.models.providers import Provider
 from app.db.provider_dao import (
@@ -78,7 +78,7 @@ class ProviderService:
             existing = get_provider_by_name(name)
             if existing is not None:
                 raise ValueError(f'供应商名称已存在: {name}')
-            id = uuid().lower()
+            id = str(uuid4())
             logo = 'custom'
             return insert_provider(id, name, api_key, base_url, logo, type_, enabled)
         except Exception as  e:

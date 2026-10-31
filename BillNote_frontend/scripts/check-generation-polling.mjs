@@ -24,7 +24,7 @@ if (!process.exitCode) {
 if (!process.exitCode) {
   const progressFile = path.join(root, '.cache/generation-progress-check.mjs')
   await build({ entryPoints: [path.join(root, 'tests/generation-progress.tsx')], outfile: progressFile, bundle: true,
-    platform: 'node', format: 'esm', alias: { '@': path.join(root, 'src') }, loader: { '.css': 'empty' }, jsx: 'automatic', logLevel: 'warning',
+    platform: 'node', format: 'esm', alias: { '@': path.join(root, 'src') }, define: { 'import.meta.env': '{}' }, loader: { '.css': 'empty' }, jsx: 'automatic', logLevel: 'warning',
     banner: { js: "import { createRequire as nodeCreateRequire } from 'node:module'; const require = nodeCreateRequire(import.meta.url);" } })
   process.exitCode = spawnSync(process.execPath, [progressFile], { stdio: 'inherit', cwd: root }).status ?? 1
 }

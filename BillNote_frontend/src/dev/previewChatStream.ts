@@ -13,7 +13,15 @@ export function previewChatStream(payload: AskPayload, signal: AbortSignal): Pro
         const response = await previewAdapter({ url: '/chat/ask', method: 'post', data: JSON.stringify(payload), signal, headers: new AxiosHeaders() })
         if (response.data.code !== 0) throw response.data
         const result = response.data.data
-        emit({ type: 'status', phase: 'generating', reset_text: true })
+        if (result.tool_events?.length) {
+          const progress = '我先检索资料，再核对相关网页。'
+          result.work_log = [progress]
+          emit({ type: 'delta', text: progress })
+          emit({ type: 'work_log', text: progress })
+          emit({ type: 'status', phase: 'searching' })
+        }
+        for (const record of result.tool_events || []) emit({ type: 'tool_event', event: record })
+        emit({ type: 'status', phase: 'generating' })
         // Synthetic UI demonstration; no provider request or production fallback.
         const text = Array.from(result.answer as string)
         for (let offset = 0; offset < text.length; offset += 10) {

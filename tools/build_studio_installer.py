@@ -112,10 +112,13 @@ def desktop(args, work):
             source_paths.add(source)
     for relative in ("BillNote_frontend/vite.config.ts", "BillNote_frontend/package.json", "BillNote_frontend/pnpm-lock.yaml",
                      "BillNote_frontend/src-tauri/Cargo.toml", "BillNote_frontend/src-tauri/Cargo.lock",
-                     "BillNote_frontend/src-tauri/build.rs", "BillNote_frontend/src-tauri/tauri.conf.json"):
+                     "BillNote_frontend/src-tauri/build.rs", "BillNote_frontend/src-tauri/tauri.conf.json",
+                     "tools/build_editions.py", "tools/build_studio_installer.py", "docs/studio/USER_GUIDE.md"):
         source = ROOT / relative
         if source.exists():
             source_paths.add(source)
+    for directory in (FRONTEND / "src-tauri/icons", FRONTEND / "src-tauri/installer"):
+        source_paths.update(source for source in directory.rglob("*") if source.is_file())
     source_hashes = {source.relative_to(ROOT).as_posix(): hashlib.file_digest(source.open("rb"), "sha256").hexdigest()
                      for source in sorted(source_paths)}
     (work / "runtime-source-sha256.json").write_text(json.dumps(source_hashes, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -167,7 +170,8 @@ def desktop(args, work):
     # its missing bin/BiliNoteBackend tree. NSIS hooks install the freezer tree
     # at the sidecar's required _internal location without staging in source.
     hooks = work / "installer-hooks.nsh"
-    install_lines = ['!macro NSIS_HOOK_POSTINSTALL', '  SetOutPath "$INSTDIR\\_internal"',
+    install_lines = ['!include "' + str(FRONTEND / 'src-tauri/installer/studio-process-guard.nsh') + '"',
+                     '!macro NSIS_HOOK_POSTINSTALL', '  SetOutPath "$INSTDIR\\_internal"',
                      '  File /r "' + str(backend_root / "_internal" / "*") + '"',
                      '  SetOutPath "$INSTDIR"', '  File /r "' + str(payload / "*") + '"']
     if args.ffmpeg:
@@ -178,6 +182,7 @@ def desktop(args, work):
                      sum(path.stat().st_size for path in payload.rglob('*') if path.is_file()) + 32 * 1024 * 1024) // 1024
     install_lines += ['  WriteRegDWORD SHCTX "${UNINSTKEY}" "EstimatedSize" ' + str(installed_kib),
                       '!macroend', '!macro NSIS_HOOK_PREUNINSTALL',
+                      '  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
                       '  RMDir /r "$INSTDIR\\_internal"', '  RMDir /r "$INSTDIR\\licenses"',
                       '  Delete "$INSTDIR\\LICENSE.txt"', '  Delete "$INSTDIR\\USER_GUIDE.md"', '!macroend']
     hooks.write_text('\n'.join(install_lines) + '\n', encoding="utf-8")

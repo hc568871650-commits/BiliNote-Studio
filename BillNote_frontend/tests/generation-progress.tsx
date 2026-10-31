@@ -2,16 +2,21 @@ import assert from 'node:assert/strict'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import GenerationProgress from '../src/pages/HomePage/components/GenerationProgress'
-import { generationElapsed, generationPhase, generationTitle, mergeTaskSnapshot } from '../src/utils/taskProgress'
+import { generationElapsed, generationPhase, generationStatusLabel, generationTitle, mergeTaskSnapshot } from '../src/utils/taskProgress'
 import type { Task } from '../src/store/taskStore'
 const task = { id: 'failed', status: 'FAILED', statusMessage: '模型输出因长度限制被截断（finish_reason=length），未保存半截正文', last_active_status: 'SUMMARIZING', started_at: '2026-10-11T00:00:00Z', finished_at: '2026-10-11T00:00:06Z', audioMeta: { title: '真实视频名称' }, markdown: '', formData: { model_name: 'test', platform: 'local', video_url: 'C:\\videos\\课程.mp4', request_id: 'one' } } as Task
 const render = (value: Task) => renderToStaticMarkup(<GenerationProgress task={value} onRetry={async () => undefined} />)
 const html = render(task)
+assert.ok(render({ ...task, cancelled: true }).includes('已取消生成'))
+assert.equal(generationStatusLabel({ ...task, cancelled: true }), '已取消')
+assert.ok(render({ ...task, status: 'TRANSCRIBING' }).includes('取消生成'))
 assert.ok(html.includes('finish_reason=length'))
 assert.ok(html.includes('停止阶段：整理笔记'))
 assert.ok(html.includes('用时 6 秒'))
 assert.ok(html.includes('本次未保存笔记正文'))
 assert.ok(html.includes('真实视频名称'))
+assert.ok(html.includes('诊断与恢复'))
+assert.ok(html.includes('重新生成（调用模型）'))
 assert.ok(!html.includes('刷新进度'))
 assert.ok(!html.includes('已保存的笔记版本仍然保留'))
 assert.ok(!html.includes('正在同步最新状态'))
@@ -33,5 +38,12 @@ assert.equal(mergeTaskSnapshot({ ...task, status: 'SUBMISSION_UNKNOWN', formData
 const unknownUI = renderToStaticMarkup(<GenerationProgress task={{ ...task, status: 'SUBMISSION_UNKNOWN', submissionInFlight: false }} onRetry={async () => undefined} onResume={async () => undefined} />)
 assert.ok(unknownUI.includes('继续提交本次请求'))
 assert.ok(unknownUI.includes('复用同一请求编号'))
+assert.ok(unknownUI.includes('诊断与恢复'))
+assert.ok(!unknownUI.includes('生成详情</button>'))
 assert.ok(!unknownUI.includes('刷新进度'))
+assert.ok(!unknownUI.includes('重新生成'))
+for (const [status, expected] of Object.entries({ PENDING: '等待中', PARSING: '准备中', DOWNLOADING: '获取视频', TRANSCRIBING: '转写中', SUMMARIZING: '生成中', FORMATTING: '整理中', SAVING: '保存中', SUCCESS: '生成完成', FAILED: '失败', SUBMISSION_UNKNOWN: '提交待确认', PROCESSING: '阶段未知' })) {
+  assert.equal(generationStatusLabel({ status } as Task), expected)
+}
+assert.equal(generationStatusLabel({ ...task, last_active_status: 'SAVING' }), '失败', 'terminal status takes priority over last active stage')
 console.log('generation progress: terminal detail / honest phase / fixed time / versions / titles / no manual refresh passed')

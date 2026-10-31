@@ -14,12 +14,20 @@ from pydantic import ValidationError
 from app.models.ai_requests import AskRequest, Attachment
 from app.routers import organizer as organizer_router, chat as chat_router
 from app.services import organizer, note_storage as notes, note_folders as folders, note_library as library, chat_service
-from app.services import ai_client
+from app.services import ai_client, model_context
 from app.services.chat_tools import execute_tool
 
 
 def completion(content, tool_calls=None):
-    return types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(content=content, tool_calls=tool_calls))])
+    from tools.fixture_stream import as_stream
+    class Completion(types.SimpleNamespace):
+        def __iter__(self):
+            return iter(as_stream(self))
+
+        def close(self):
+            pass
+
+    return Completion(choices=[types.SimpleNamespace(message=types.SimpleNamespace(content=content, tool_calls=tool_calls))])
 
 
 class AIUpdatesTest(unittest.TestCase):
@@ -28,7 +36,8 @@ class AIUpdatesTest(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
         for obj, name, value in ((notes, 'ROOT', root / 'notes'), (folders, 'STATE_PATH', root / 'folders.json'),
-                                 (library, 'STATE_PATH', root / 'library.json'), (organizer, 'JOURNAL_ROOT', root / 'plans')):
+                                 (library, 'STATE_PATH', root / 'library.json'), (organizer, 'JOURNAL_ROOT', root / 'plans'),
+                                 (model_context, 'SETTINGS_PATH', root / 'model_context.json')):
             context = patch.object(obj, name, value)
             context.start()
             self.addCleanup(context.stop)
@@ -171,24 +180,31 @@ class AIUpdatesTest(unittest.TestCase):
         call = self.client.client.chat.completions.create.call_args.kwargs
         self.assertEqual(call['reasoning_effort'], 'high')
         self.assertNotIn('temperature', call)
-        self.assertEqual(result['context'], {'input_tokens': 2345, 'estimated': False, 'limit': 272000, 'warning': False})
+        expected = {'input_tokens': 2345, 'estimated': False, 'limit': 61440, 'warning': False}
+        self.assertEqual({key: result['context'][key] for key in expected}, expected)
+        self.assertEqual(call['max_completion_tokens'], 4096)
+        self.assertEqual(result['context']['model_context']['source'], 'unknown')
+        self.assertRegex(result['context']['trace_id'], r'^[a-f0-9]{32}$')
+        self.assertEqual(result['context']['protocol'], 'openai-chat')
+        self.assertFalse(result['context']['stream'])
+        self.assertTrue(result['context']['web_search_requested'])
+        self.assertFalse(result['context']['web_search_used'])
         count = self.client.client.chat.completions.create.call_count
         with self.assertRaisesRegex(ValueError, '上下文接近'):
             complete(self.client.client, 'gpt-5.4', [{'role': 'user', 'content': '大' * 100000}], context_limit=272000)
         with self.assertRaisesRegex(ValueError, '思考档位'):
-            complete(self.client.client, 'unknown-model', [{'role': 'user', 'content': 'x'}], reasoning_effort='high')
+            complete(self.client.client, 'unknown-model', [{'role': 'user', 'content': 'x'}], reasoning_effort='invented')
         self.assertEqual(self.client.client.chat.completions.create.call_count, count)
 
-    def test_gpt6_reasoning_uses_note_context_without_incompatible_tools(self):
+    def test_gpt6_reasoning_provides_note_tools_without_model_name_gate(self):
         self.client.model = 'gpt-6-sol'
         self.client.client.chat.completions.create.return_value = completion('答案')
         with patch.object(chat_service, 'VectorStoreManager') as vector:
             vector.return_value.query.return_value = []
             chat_service.chat('one', '问', [], 'provider', 'gpt-6-sol', reasoning_effort='high')
         call = self.client.client.chat.completions.create.call_args.kwargs
-        self.assertNotIn('tools', call)
+        self.assertEqual(call['tools'], chat_service.TOOLS)
         self.assertEqual(call['reasoning_effort'], 'high')
-        self.assertIn('SECRET_FULL_NOTE', str(call['messages']))
 
     def test_compaction_preserves_original_recent_turns_and_prior_memory(self):
         from app.services.context_compaction import compact_history
@@ -219,10 +235,13 @@ class AIUpdatesTest(unittest.TestCase):
         self.assertEqual(history, original)
 
     def test_reading_auto_compacts_before_answer_without_losing_current_question(self):
+        model_context.save_settings('provider', 'explicit-model', model_window=276096)
         history = [{'role': 'user' if i % 2 == 0 else 'assistant', 'content': f'旧记录{i} ' + 'x' * 30000} for i in range(8)]
         self.client.client.chat.completions.create.side_effect = [completion('压缩摘要：必须保留UV目标，禁止归档。'), completion('回答当前问题')]
         result = chat_service.chat('one', 'CURRENT_QUESTION', history, 'provider', 'explicit-model', context_mode='selection')
         self.assertEqual(result['compaction']['consumed_messages'], 4)
+        self.assertEqual(result['compaction']['context']['limit'], 267904)
+        self.assertEqual(result['context']['limit'], 267904)
         self.assertEqual(result['answer'], '回答当前问题')
         messages = self.client.client.chat.completions.create.call_args.kwargs['messages']
         self.assertEqual(messages[-1]['content'], 'CURRENT_QUESTION')
@@ -230,16 +249,27 @@ class AIUpdatesTest(unittest.TestCase):
         self.assertNotIn(history[0]['content'], str(messages))
         self.assertNotIn('压缩摘要', messages[0]['content'])
 
-    def test_reading_compaction_endpoint_and_fixed_window(self):
+    def test_unknown_model_rejects_oversize_history_without_modifying_original(self):
+        history = [{'role': 'user' if i % 2 == 0 else 'assistant', 'content': 'x' * 80000} for i in range(8)]
+        original = copy.deepcopy(history)
+        with self.assertRaisesRegex(ValueError, '原记录已保留'):
+            chat_service.chat('one', 'CURRENT_QUESTION', history, 'provider', 'explicit-model', context_mode='selection')
+        self.assertEqual(history, original)
+        self.client.client.chat.completions.create.assert_not_called()
+        self.assertFalse(model_context.SETTINGS_PATH.exists())
+
+    def test_reading_compaction_endpoint_and_bounded_user_budget(self):
         history = [{'role': 'user' if i % 2 == 0 else 'assistant', 'content': '重要内容' * 400} for i in range(8)]
         self.client.client.chat.completions.create.return_value = completion('保留重要内容与用户限制。')
         with patch.object(ai_client, 'get_client', return_value=self.client):
             response = self.http.post('/api/chat/compact', json={'task_id': 'one', 'provider_id': 'provider', 'model_name': 'explicit-model', 'history': history}).json()
         self.assertEqual(response['code'], 0)
         self.assertEqual(response['data']['consumed_messages'], 4)
-        self.assertEqual(response['data']['context']['limit'], 272000)
-        with self.assertRaises(ValidationError):
-            AskRequest(task_id='one', question='x', provider_id='p', model_name='m', context_limit=64000)
+        self.assertEqual(response['data']['context']['limit'], 61440)
+        self.assertEqual(AskRequest(task_id='one', question='x', provider_id='p', model_name='m', context_limit=64000).context_limit, 64000)
+        for invalid in (8191, 272001):
+            with self.assertRaises(ValidationError):
+                AskRequest(task_id='one', question='x', provider_id='p', model_name='m', context_limit=invalid)
 
     def test_metadata_only_model_and_plan_does_not_mutate_library(self):
         before = organizer._snapshot()

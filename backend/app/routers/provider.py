@@ -96,5 +96,8 @@ def update_provider(data: ProviderUpdateRequest):
 
 @router.post('/connect_test')
 def gpt_connect_test(data: TestRequest):
-    ModelService().connect_test(data.id, model=data.model)
-    return R.success(msg='连接成功')
+    try:
+        ModelService().connect_test(data.id, model=data.model)
+        return R.success(msg='非流式 Chat Completions 连接成功')
+    except ProviderError as exc:
+        return R.error(msg=exc.message, code=exc.code, data={'error_details': getattr(exc, 'error_details', None)})

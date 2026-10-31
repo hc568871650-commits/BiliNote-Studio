@@ -28,3 +28,8 @@ html[data-reduced-motion=true] *,html[data-reduced-motion=true] *::before,html[d
 .reading-chat,.reading-chat-composer textarea,.organizer-page,.organizer-page textarea { font-size:var(--ui-font-size); }
 .reading-chat-actions > span { font-size:calc(var(--ui-font-size) - 3px); }
 .reading-message pre,.reading-message code,.markdown-body pre,.markdown-body code { font-size:var(--code-font-size) !important; }
+/* Compact select for dense sidebars and filter rows. */
+[data-slot=select-trigger].choice-trigger.choice-compact { min-height:26px; height:26px; padding:2px 8px; gap:4px; border-radius:7px; font-size:11px; }
+.choice-trigger.choice-compact svg { width:13px; height:13px; }
+.choice-menu.choice-menu-compact { min-width:160px !important; }
+.choice-menu-compact [data-slot=select-item] { font-size:12px !important; min-height:30px; padding:6px 30px 6px 8px !important; }

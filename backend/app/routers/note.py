@@ -1,5 +1,7 @@
 # app/routers/note.py
 import json
+import io
+import re
 import hashlib
 import os
 import uuid
@@ -10,10 +12,11 @@ from typing import Optional, Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, validator, field_validator, model_validator
 from app.models.generation_options import GenerationOptions
 from dataclasses import asdict
+from datetime import datetime
 
 from app.db.video_task_dao import get_task_by_video
 from app.enmus.exception import NoteErrorEnum
@@ -21,14 +24,15 @@ from app.enmus.note_enums import DownloadQuality
 from app.exceptions.note import NoteError
 from app.services.note import NoteGenerator, logger, _read_transcript_cache
 from app.services import note_storage
+from app.services import note_diagnostics
 from app.services.task_serial_executor import task_serial_executor
 from app.utils.response import ResponseWrapper as R
 from app.utils.url_parser import extract_video_id, normalize_video_url
 from app.validators.video_url_validator import is_supported_video_url
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
-import httpx
 from app.enmus.task_status_enums import TaskStatus
+from app.services.media_io import save_upload, fetch_cover
 
 # from app.services.downloader import download_raw_audio
 # from app.services.whisperer import transcribe_audio
@@ -142,10 +146,12 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
     run_dir = Path("Temp") / "note_jobs" / task_id / uuid.uuid4().hex
     recorder = None
     def _execute_note_task():
+        note_storage.check_cancellation(task_id, request_id)
         NoteGenerator._update_status(task_id, TaskStatus.PARSING, message="初始化处理器与解析来源")
         generator = NoteGenerator()
         generator.run_dir = run_dir
         generator.generation_recorder = recorder
+        generator.generation_cancel_check = lambda: note_storage.check_cancellation(task_id, request_id)
         return generator.generate(
             video_url=video_url,
             platform=platform,
@@ -181,13 +187,18 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
             logger.warning(f"任务 {task_id} 执行失败，保留诊断文件")
             note_storage.set_status(task_id, "FAILED")
             return
-        saved = note_storage.save_result(task_id, note, staging=run_dir)
+        # Cancellation and committing a completed version have one ordering.
+        # Once saving has begun, the endpoint must not promise cancellation.
+        with _active_lock:
+            note_storage.check_cancellation(task_id, request_id)
+            saved = note_storage.save_result(task_id, note, staging=run_dir)
         if recorder:
             versions = saved.get('markdown') or []
             if versions and isinstance(versions[0], dict):
                 recorder.bind_version(versions[0].get('ver_id'))
             recorder.finish('succeeded')
         NoteGenerator._update_status(task_id, TaskStatus.SUCCESS)
+        note_storage.complete_save_recovery(task_id)
         try:
             from app.services.vector_store import VectorStoreManager
             VectorStoreManager().index_task(task_id)
@@ -200,11 +211,25 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
             except OSError as e:
                 logger.warning(f"临时截图清理待重试: {run_dir}: {e}")
     except Exception as e:
+        if getattr(e, 'cancelled', False):
+            if recorder:
+                recorder.finish('cancelled')
+            note_storage.write_status(task_id, 'FAILED', str(e), cancelled=True)
+            note_diagnostics.record_event(task_id, 'generation_cancelled')
+            return
+        note_diagnostics.record_failure(task_id, e)
         if recorder:
-            recorder.finish('failed', e)
+            try:
+                recorder.finish('failed', e)
+            except Exception:
+                note_diagnostics.record_event(task_id, 'storage_failure', target='metadata')
         logger.exception("笔记结果保存失败 (task_id=%s)", task_id)
-        note_storage.set_status(task_id, "FAILED")
-        NoteGenerator._update_status(task_id, TaskStatus.FAILED, message=str(e))
+        try:
+            NoteGenerator._update_status(task_id, TaskStatus.FAILED, message=str(e))
+        except Exception:
+            note_diagnostics.record_event(task_id, 'status_write_failed', target='status')
+        finally:
+            note_diagnostics.record_stage(task_id, 'FAILED')
     finally:
         with _active_lock:
             _active_tasks.discard(task_id)
@@ -305,14 +330,33 @@ def note_image(task_id: str, relative: str):
 
 @router.post("/upload")
 async def upload(file: UploadFile = File(...)):
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    file_location = os.path.join(UPLOAD_DIR, file.filename)
+    return R.success(await save_upload(file, UPLOAD_DIR))
 
-    with open(file_location, "wb+") as f:
-        f.write(await file.read())
 
-    # 假设你静态目录挂载了 /uploads
-    return R.success({"url": f"/uploads/{file.filename}"})
+class CancelGenerationRequest(BaseModel):
+    request_id: Optional[str] = None
+
+
+@router.post('/notes/{task_id}/cancel')
+def cancel_generation(task_id: str, data: CancelGenerationRequest):
+    try:
+        note_storage.valid_id(task_id)
+    except ValueError:
+        return R.error('任务 ID 不合法', code=400)
+    with _active_lock:
+        task = note_storage.get_task(task_id)
+        if not task:
+            return R.error('笔记不存在', code=404)
+        current_id = (task.get('formData') or {}).get('request_id')
+        if data.request_id != current_id:
+            return R.error('生成请求已变化，请刷新后重试', code=409)
+        if task.get('status') in ('SUCCESS', 'FAILED'):
+            return R.success({'task_id': task_id, 'status': task['status'],
+                              'cancelled': bool(task.get('cancelled'))})
+        if task_id not in _active_tasks or task.get('status') == 'SAVING':
+            return R.error('任务已进入保存或恢复阶段，请等待结果', code=409)
+        note_storage.request_cancellation(task_id, current_id)
+        return R.success({'task_id': task_id, 'cancel_requested': True})
 
 
 @router.post("/generate_note")
@@ -385,6 +429,8 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
             _active_requests[task_id] = (data.request_id, fingerprint)
 
         try:
+            note_storage.clear_cancellation(task_id)
+            note_diagnostics.start_run(task_id, data.request_id)
             form_data = data.model_dump(mode="json", exclude={"prefetched_transcript"})
             note_storage.create_draft(task_id, form_data)
             if existing:
@@ -402,16 +448,128 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
                                       data.screenshot, data.model_name, data.provider_id, data.format, data.style,
                                       data.extras, data.video_understanding, data.video_interval, data.grid_size, data.frame_mode,
                                       getattr(data, 'generation_options', None), data.request_id)
-        except Exception:
+        except Exception as admission_error:
+            note_diagnostics.record_failure(task_id, admission_error)
             with _active_lock:
                 _active_tasks.discard(task_id)
                 _active_requests.pop(task_id, None)
-            note_storage.set_status(task_id, "FAILED")
-            NoteGenerator._update_status(task_id, TaskStatus.FAILED, message="任务入队失败，请重试")
+            try:
+                NoteGenerator._update_status(task_id, TaskStatus.FAILED, message="任务入队失败，请重试")
+            except Exception:
+                note_diagnostics.record_event(task_id, 'status_write_failed', target='status')
+            finally:
+                note_diagnostics.record_stage(task_id, 'FAILED')
             raise
         return R.success({"task_id": task_id})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _diagnostics_payload(task_id):
+    note_storage.valid_id(task_id)
+    task = note_storage.get_task(task_id)
+    if task is None:
+        raise FileNotFoundError('笔记不存在')
+    result = note_diagnostics.get_summary(task_id)
+    result['save_recovery'] = note_storage.save_recovery_summary(task_id)
+    if result.get('historical'):
+        phase = task.get('last_active_status')
+        try:
+            finished_at = datetime.fromisoformat(task.get('finished_at') or '').isoformat()
+        except (ValueError, TypeError):
+            finished_at = None
+        if phase in {'PENDING', 'PARSING', 'DOWNLOADING', 'TRANSCRIBING', 'SUMMARIZING', 'FORMATTING', 'SAVING'}:
+            result['stages'] = [{'name': phase, 'status': 'failed' if task.get('status') == 'FAILED' else 'unknown',
+                                 'started_at': None, 'finished_at': finished_at, 'duration_ms': None,
+                                 'source': 'legacy_status_snapshot'}]
+        if task.get('status') == 'FAILED':
+            message = str(task.get('statusMessage') or '')
+            winerror = re.search(r'\[WinError (\d{1,5})\]', message)
+            timed_out = bool(re.search(r'timed?\s*out|timeout|超时', message, re.I))
+            result['error'] = {'category': 'filesystem' if winerror else 'timeout' if timed_out else 'historical',
+                               'type': 'OSError' if winerror else 'TimeoutError' if timed_out else 'Unknown',
+                               'message': '历史文件操作失败；当时的占用进程未记录。' if winerror else
+                                          '历史请求超时；未记录完整请求现场。' if timed_out else '历史任务失败，未记录完整现场。',
+                               'winerror': int(winerror.group(1)) if winerror else None, 'source': 'legacy_status_snapshot'}
+        if result['save_recovery']['available']:
+            result['outcomes'].update(model_completed=True, content_saved=True)
+    with _active_lock:
+        if task_id in _active_tasks:
+            result['save_recovery'] = {'available': False, 'reason': '任务正在运行，请完成后重试'}
+    return result
+
+
+@router.get('/notes/{task_id}/diagnostics')
+def get_note_diagnostics(task_id: str):
+    try:
+        return R.success(_diagnostics_payload(task_id))
+    except FileNotFoundError:
+        return R.error('笔记不存在', code=404)
+    except ValueError:
+        return R.error('诊断请求不合法', code=400)
+    except OSError:
+        return R.error('诊断暂时无法读取，请稍后重试', code=503)
+
+
+@router.get('/notes/{task_id}/diagnostics/export')
+def export_note_diagnostics(task_id: str):
+    try:
+        summary = _diagnostics_payload(task_id)
+        bundle = note_diagnostics.export_bundle(task_id, summary_extra={
+            key: summary.get(key) for key in ('save_recovery', 'outcomes', 'error', 'historical', 'stages')
+        })
+        name = f"BiliNote-Studio-diagnostics-{summary.get('trace_id') or task_id}.zip"
+        return StreamingResponse(io.BytesIO(bundle), media_type='application/zip',
+                                 headers={'Content-Disposition': f'attachment; filename="{name}"', 'Cache-Control': 'no-store'})
+    except FileNotFoundError:
+        return R.error('笔记不存在', code=404)
+    except ValueError:
+        return R.error('诊断请求不合法', code=400)
+    except OSError:
+        return R.error('诊断包暂时无法导出，请稍后重试', code=503)
+
+
+@router.post('/notes/{task_id}/retry-save')
+def retry_note_save(task_id: str):
+    try:
+        note_storage.valid_id(task_id)
+    except ValueError:
+        return R.error('任务 ID 不合法', code=400)
+    with _active_lock:
+        if task_id in _active_tasks:
+            return R.error('任务正在运行，请勿重复保存', code=409)
+        recovery = note_storage.save_recovery_summary(task_id)
+        if not recovery['available']:
+            return R.error(recovery['reason'], code=409)
+        _active_tasks.add(task_id)
+    try:
+        try:
+            previous_trace = note_diagnostics.get_summary(task_id).get('trace_id')
+        except (OSError, ValueError):
+            previous_trace = None
+        note_diagnostics.start_run(task_id)
+        note_diagnostics.record_event(task_id, 'save_retry_started', origin_trace_id=previous_trace)
+        note_diagnostics.record_stage(task_id, 'SAVING')
+        saved = note_storage.retry_saved_result(task_id)
+    except Exception as error:
+        note_diagnostics.record_failure(task_id, error)
+        try:
+            note_storage.write_status(task_id, 'FAILED', '保存仍未完成，请导出诊断包后重试')
+        except Exception:
+            note_diagnostics.record_event(task_id, 'status_write_failed', target='status')
+        finally:
+            note_diagnostics.record_stage(task_id, 'FAILED')
+        return R.error('保存仍未完成；已有正文保留，请刷新诊断后重试', code=500)
+    finally:
+        with _active_lock:
+            _active_tasks.discard(task_id)
+    try:
+        diagnostics = _diagnostics_payload(task_id)
+    except (OSError, ValueError):
+        diagnostics = {'task_id': task_id, 'trace_id': None, 'historical': True, 'stages': [], 'error': None,
+                       'outcomes': {'model_completed': None, 'content_saved': True, 'index_saved': True},
+                       'save_recovery': {'available': False, 'reason': '保存已完成，诊断暂时无法读取'}}
+    return R.success({'task': saved, 'diagnostics': diagnostics})
 
 
 @router.get("/task_status/{task_id}")
@@ -430,6 +588,7 @@ def get_task_status(task_id: str):
 
     def status_response(payload):
         return R.success({"last_active_status": status_content.get("last_active_status") or (stored or {}).get("last_active_status"),
+                          "cancelled": bool(status_content.get('cancelled') or (stored or {}).get('cancelled')),
                           "started_at": status_content.get("started_at") or (stored or {}).get("started_at"),
                           "finished_at": status_content.get("finished_at") or (stored or {}).get("finished_at"),
                           "status_updated_at": status_content.get("status_updated_at") or (stored or {}).get("status_updated_at"),
@@ -515,26 +674,7 @@ def _poll_result(task):
 
 @router.get("/image_proxy")
 async def image_proxy(request: Request, url: str):
-    headers = {
-        "Referer": "https://www.bilibili.com/",
-        "User-Agent": request.headers.get("User-Agent", ""),
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, headers=headers)
-
-            if resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail="图片获取失败")
-
-            content_type = resp.headers.get("Content-Type", "image/jpeg")
-            return StreamingResponse(
-                resp.aiter_bytes(),
-                media_type=content_type,
-                headers={
-                    "Cache-Control": "public, max-age=86400",  #  缓存一天
-                    "Content-Type": content_type,
-                }
-            )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    content, content_type = await fetch_cover(url)
+    return Response(content, media_type=content_type,
+                    headers={'Cache-Control': 'public, max-age=86400',
+                             'X-Content-Type-Options': 'nosniff'})

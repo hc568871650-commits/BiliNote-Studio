@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import { withProviderProtocol } from './providerProtocol'
 import type { Task } from '@/store/taskStore'
 import type { ProviderProtocol } from '@/store/providerProtocolStore'
 
@@ -18,5 +19,5 @@ export interface RefinementRequest extends RefinementSelection {
 const options = { timeout: 180000, suppressToast: true }
 const path = (id: string) => `/notes/${encodeURIComponent(id)}/refine`
 export const getRefinementContext = (id: string, selection: RefinementSelection) => request.post(`${path(id)}/context`, selection, options) as unknown as Promise<RefinementContext>
-export const previewRefinement = (id: string, payload: RefinementRequest) => request.post(`${path(id)}/preview`, payload, options) as unknown as Promise<RefinementPreview>
+export const previewRefinement = async (id: string, payload: RefinementRequest) => request.post(`${path(id)}/preview`, await withProviderProtocol(payload), options) as unknown as Promise<RefinementPreview>
 export const applyRefinement = (id: string, draft_id: string) => request.post(`${path(id)}/apply`, { draft_id }, options) as unknown as Promise<Task>

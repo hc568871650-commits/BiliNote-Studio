@@ -32,18 +32,24 @@ class OpenAICompatibleProvider:
             response = client.with_options(max_retries=0).chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": "Reply with OK only."}],
-                max_tokens=256,
+                max_tokens=1024,
                 temperature=0,
             )
-            if not response.choices or not (response.choices[0].message.content or '').strip():
+            from app.utils.protocol_response import validate_chat_response
+            validate_chat_response(response)
+            if not response.choices or not (response.choices[0].message.content or '').strip() or getattr(response.choices[0].message, 'tool_calls', None):
                 raise ValueError("上游未返回可见文本；请检查模型是否支持聊天、输出预算或上游路由")
             logging.info(f"连通性测试成功（model={model}）")
             return True
         except Exception as e:
             from app.utils.model_errors import model_error
-            detail = model_error(e, api_key)
+            from app.utils.ai_errors import error_details, ResponseFormatError
+            details = error_details(e, 'openai-chat', api_key)
+            detail = details['detail'] if isinstance(e, ResponseFormatError) else model_error(e, api_key)
             logging.warning(f"连通性测试失败（model={model}）：{detail}")
-            raise ValueError(detail) from None
+            failure = ValueError(detail)
+            failure.details = details
+            raise failure from None
         finally:
             if 'client' in locals():
                 client.close()

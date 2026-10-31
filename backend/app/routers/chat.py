@@ -98,7 +98,7 @@ def ask_question(data: AskRequest):
     except Exception as e:
         details = error_details(e, data.protocol)
         logger.warning('Chat 问答失败: %s', details)
-        return R.error(msg=details['detail'], data={'error_details': details})
+        return R.error(msg=details['detail'], data={'error_details': details, 'tool_events': getattr(e, 'tool_events', [])})
 
 
 @router.post('/chat/ask/stream')
@@ -127,7 +127,7 @@ def ask_question_stream(data: AskRequest):
             details = error_details(exc, data.protocol)
             logger.warning('Chat 流式问答失败: %s', details)
             yield 'data: ' + json.dumps({'type': 'error', 'msg': details['detail'],
-                'data': {'error_details': details}}, ensure_ascii=False) + '\n\n'
+                'data': {'error_details': details, 'tool_events': getattr(exc, 'tool_events', [])}}, ensure_ascii=False) + '\n\n'
         finally:
             cancellation['cancelled'] = True
             stream_close = cancellation.get('stream_close')
@@ -146,11 +146,16 @@ def ask_question_stream(data: AskRequest):
 def compact_question_history(data: CompactRequest):
     from app.services.ai_client import get_client, close_client
     from app.services.context_compaction import compact_history
+    from app.services.model_context import resolve as resolve_context
     gpt = None
     try:
         gpt = get_client(data.provider_id, data.model_name, protocol=data.protocol)
-        return R.success(data=compact_history(gpt.client, data.model_name,
-            [m.model_dump(exclude_none=True) for m in data.history], data.summary, data.keep_recent))
+        budget = resolve_context(data.provider_id, data.model_name, data.context_limit)
+        result = compact_history(gpt.client, data.model_name,
+            [m.model_dump(exclude_none=True) for m in data.history], data.summary, data.keep_recent,
+            context_limit=budget['input_limit'], threshold=budget['compact_threshold'], output_reserve=budget['output_reserve'])
+        result['context']['model_context'] = budget
+        return R.success(data=result)
     except Exception as exc:
         details = error_details(exc, data.protocol)
         logger.warning('阅读上下文压缩失败，原始记录未修改: %s', details)

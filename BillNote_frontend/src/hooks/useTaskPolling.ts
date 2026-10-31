@@ -26,6 +26,7 @@ export const useTaskPolling = (interval = 3000) => {
           const now = Date.now()
           const progress = {
             status: res.status, statusMessage: res.message || '', pollingError: undefined,
+            cancelled: Boolean(res.cancelled),
             submissionError: undefined,
             last_active_status: res.last_active_status || (isKnownActivePhase(res.status) ? res.status : current()?.last_active_status || (isKnownActivePhase(current()?.status) ? current()?.status : undefined)),
             started_at: res.started_at || current()?.started_at,

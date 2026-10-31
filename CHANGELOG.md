@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.0-preview.31 候选] — 2026-10-31
+
+相对公开 preview.8 的累计更新，详见[预发行说明](docs/releases/0.1.0-preview.31.md)和[本次验收](docs/releases/0.1.0-preview.31-validation.md)。
+
+- 新增全文查找、阅读分栏与图片引用、聊天中断恢复、按需联网和来源读取。
+- 增加取消生成、资料库范围澄清、本地视频封面与上传及图片代理保护。
+- 右下角只保留后端管理入口，移除独立主题及后台运行浮层。
+- 修正安装器按文件名强制结束同名程序的问题，安装和卸载改为要求先退出后重试。
+
+
 > Studio发行更新列在前面，上游历史保留在后面。当前公开预发行版为`v0.1.0-preview.8`（2026-10-12），`preview.2`至`preview.7`为本地迭代。
 
 本项目所有重要变更记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，遵循 [语义化版本](https://semver.org/lang/zh-CN/)。

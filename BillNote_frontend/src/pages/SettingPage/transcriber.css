@@ -1,0 +1,37 @@
+.settings-page.transcriber-settings { max-width:780px; font-size:calc(var(--ui-font-size) - 1px); }
+.transcriber-settings .settings-page-header { margin-bottom:18px; }
+.transcriber-settings .settings-page-header h1 { font-size:calc(var(--ui-font-size) + 5px); }
+.transcriber-settings .transcriber-connection { padding:16px; }
+.transcriber-field { display:grid; grid-template-columns:86px minmax(0,1fr); align-items:center; gap:8px 14px; margin-bottom:14px; }
+.transcriber-field:last-child { margin-bottom:0; }
+.transcriber-field > label { font-weight:500; }
+.transcriber-field .choice-trigger { width:100%; min-width:0; }
+.transcriber-field > input,.transcriber-key > input { width:100%; min-width:0; height:36px; border:1px solid var(--border); border-radius:8px; background:var(--background); font-size:inherit; }
+.transcriber-engine { grid-template-columns:86px minmax(0,1fr) auto; }
+.transcriber-field .transcriber-enabled { display:flex; align-items:center; gap:6px; white-space:nowrap; font-size:12px; font-weight:400; color:var(--muted-foreground); cursor:pointer; }
+.transcriber-enabled input { accent-color:var(--primary); }
+.transcriber-key { display:flex; gap:8px; align-items:center; min-width:0; }
+.transcriber-key > button { display:flex; align-items:center; justify-content:center; width:30px; height:34px; flex-shrink:0; color:var(--muted-foreground); border-radius:6px; }
+.transcriber-key > button:hover { background:var(--muted); color:var(--foreground); }
+.transcriber-key > button:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+.transcriber-field-note { grid-column:2 / -1; color:var(--muted-foreground); font-size:11px; line-height:1.5; }
+.transcriber-hint { margin:2px 0 0 100px; color:var(--muted-foreground); font-size:12px; line-height:1.65; }
+.transcriber-save { margin-top:14px; }
+.transcriber-save > span { color:var(--muted-foreground); font-size:12px; }
+.transcriber-help { margin-top:20px; color:var(--muted-foreground); font-size:12px; line-height:1.7; }
+.transcriber-help > summary { cursor:pointer; width:fit-content; padding:4px 0; }
+.transcriber-help > summary:hover { color:var(--foreground); }
+.transcriber-help > div { padding:6px 0; }
+.transcriber-help p { margin:0 0 9px; }
+.transcriber-custom-help { margin-top:10px; }
+.transcriber-settings .settings-section-title { margin-top:22px; }
+.transcriber-settings .settings-row { min-height:48px; padding:10px 0; }
+.transcriber-settings .settings-field { padding:12px 0; gap:10px; }
+@media(max-width:760px) {
+  .transcriber-settings .transcriber-connection { padding:14px; }
+  .transcriber-field { grid-template-columns:minmax(0,1fr); gap:7px; }
+  .transcriber-engine { grid-template-columns:minmax(0,1fr) auto; }
+  .transcriber-engine > label:first-child { grid-column:1 / -1; }
+  .transcriber-field-note { grid-column:1 / -1; }
+  .transcriber-hint { margin-left:0; }
+}

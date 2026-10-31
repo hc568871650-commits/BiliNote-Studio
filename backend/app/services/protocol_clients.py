@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+from app.utils.protocol_response import json_response, format_kind
+from app.utils.ai_errors import ResponseFormatError
 
 
 class Message:
@@ -17,6 +19,8 @@ class Message:
 
     def model_dump(self, **kwargs):
         result = {'role': self.role, 'content': self.content}
+        if getattr(self, 'reasoning_content', None) is not None:
+            result['reasoning_content'] = self.reasoning_content
         if self.tool_calls:
             result['tool_calls'] = [{'id': call.id, 'type': 'function',
                                     'function': vars(call.function)} for call in self.tool_calls]
@@ -28,12 +32,14 @@ def _dict(value):
 
 
 def _response(text, calls, count, reason='stop', native=None, raw_usage=None, request_id=None, reasoning=None):
+    from app.services.native_search import anthropic_search
+    searched, citations = anthropic_search(native or [])
     return SimpleNamespace(choices=[SimpleNamespace(message=Message(text, calls, native=native),
                                                   finish_reason=reason)],
                            usage=SimpleNamespace(prompt_tokens=count), raw_usage=raw_usage or {},
                            request_id=request_id, effective_reasoning=reasoning,
-                           web_sources=_web_sources(native or []),
-                           web_search_used=any(item.get('type') == 'web_search_call' and item.get('status') == 'completed' for item in (native or [])))
+                           web_sources=_web_sources(native or []) + citations,
+                           web_search_used=searched or any(item.get('type') == 'web_search_call' and item.get('status') == 'completed' for item in (native or [])))
 
 
 def _web_sources(output):
@@ -136,7 +142,11 @@ class ResponsesClient:
     def create(self, *, model, messages, **options):
         kwargs = responses_options(model, messages, options)
         response = self.client.responses.create(**kwargs)
+        if not isinstance(response, dict) and not callable(getattr(response, 'model_dump', None)) and not hasattr(response, '__dict__'):
+            raise ResponseFormatError('json', format_kind(response))
         data = _dict(response)
+        if not isinstance(data, dict):
+            raise ResponseFormatError('object', 'object')
         if data.get('error'):
             from app.utils.ai_errors import ProtocolResponseError
             raise ProtocolResponseError(data['error'], request_id=getattr(response, '_request_id', None))
@@ -208,7 +218,7 @@ def _anthropic_input(messages):
     return '\n\n'.join(system), result
 
 
-def anthropic_options(model, messages, options):
+def anthropic_options(model, messages, options, *, deepseek=False):
     options = dict(options)
     effort = options.pop('reasoning_effort', None)
     system, wire = _anthropic_input(messages)
@@ -225,14 +235,21 @@ def anthropic_options(model, messages, options):
                 payload['thinking'] = {'type': 'enabled', 'budget_tokens': budget}
                 payload['max_tokens'] = max(payload['max_tokens'], budget + 1024)
             else:
-                payload['thinking'] = {'type': 'adaptive'}
-                payload['output_config'] = {'effort': effort}
+                payload['thinking'] = {'type': 'enabled' if deepseek else 'adaptive'}
+                payload['output_config'] = {'effort': {'medium': 'high', 'xhigh': 'high'}.get(effort, effort) if deepseek else effort}
         else:
             raise ValueError('Anthropic 思考档位未适配')
     tools = options.pop('tools', None)
     if tools:
-        payload['tools'] = [{'name': tool['function']['name'], 'description': tool['function'].get('description', ''),
-                             'input_schema': tool['function']['parameters']} for tool in tools]
+        payload['tools'] = []
+        for tool in tools:
+            if tool.get('type') == 'web_search':
+                payload['tools'].append({'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': 1})
+            elif tool.get('type') == 'function':
+                payload['tools'].append({'name': tool['function']['name'], 'description': tool['function'].get('description', ''),
+                                         'input_schema': tool['function']['parameters']})
+            else:
+                raise ValueError('Anthropic 工具类型尚未适配')
     if options.pop('tool_choice', None) == 'none':
         payload['tool_choice'] = {'type': 'none'}
     payload.update(options)
@@ -249,11 +266,12 @@ class AnthropicClient:
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
 
     def create(self, *, model, messages, **options):
-        payload = anthropic_options(model, messages, options)
+        payload = anthropic_options(model, messages, options,
+                                    deepseek=getattr(self, 'bilinote_official_deepseek', False) is True)
         response = self.client.post(self.url, headers={'x-api-key': self.api_key, 'anthropic-version': '2023-06-01',
                                                       'content-type': 'application/json'}, json=payload)
         response.raise_for_status()
-        data = response.json()
+        data = json_response(response)
         if data.get('type') == 'error' or data.get('error'):
             from app.utils.ai_errors import ProtocolResponseError
             raise ProtocolResponseError(data.get('error') or {}, request_id=response.headers.get('request-id'),

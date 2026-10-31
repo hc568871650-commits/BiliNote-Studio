@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { ALL_FOLDER_ID, DEFAULT_FOLDER_ID, useFolderStore } from '@/store/folderStore'
+import { useLibrarySearchStore } from '@/store/librarySearchStore'
 import type { Task } from '@/store/taskStore'
 
 interface FolderSidebarProps {
@@ -18,7 +19,13 @@ const FolderSidebar = ({ tasks, archived, disabled, onCreate, onRename, onDelete
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('bilinote-folder-section-v1') === 'collapsed' } catch { return false }
   })
+  // A library-wide search folds folders away so results get the height; a click peeks without changing the saved state.
+  // Folder-scoped search keeps them visible because switching folders changes the search scope.
+  const searching = useLibrarySearchStore(state => Boolean(state.query.trim()) && state.scope === 'all')
+  const [peek, setPeek] = useState(false)
+  useEffect(() => { if (!searching) setPeek(false) }, [searching])
   const toggleCollapsed = () => {
+    if (searching) { setPeek(value => !value); return }
     setCollapsed(value => {
       const next = !value
       try { localStorage.setItem('bilinote-folder-section-v1', next ? 'collapsed' : 'expanded') } catch { /* Keep session usability. */ }
@@ -39,23 +46,28 @@ const FolderSidebar = ({ tasks, archived, disabled, onCreate, onRename, onDelete
     if (selectedFolderId === ALL_FOLDER_ID) selectFolder(DEFAULT_FOLDER_ID)
   }, [selectedFolderId, selectFolder])
   const folderRows = folders
+  const folded = searching ? !peek : collapsed
   const selectedFolderName = folderRows.find(folder => folder.id === selectedFolderId)?.name || '默认文件夹'
   return <aside aria-label="笔记文件夹" className="library-folders flex min-h-0 w-full shrink-0 flex-col border-b border-border pb-1">
     <div className="flex items-center justify-between px-1 pb-1">
-      <button type="button" className="library-folders-toggle" aria-label={collapsed ? '展开文件夹区域' : '收起文件夹区域'} aria-expanded={!collapsed} aria-controls="library-folder-rows" onClick={toggleCollapsed} title={collapsed ? `当前：${selectedFolderName}，点击展开文件夹` : '收起文件夹，为笔记列表腾出空间'}>
-        {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}<span>{collapsed ? selectedFolderName : '文件夹'}</span>{collapsed && <small>{count(selectedFolderId)}</small>}
+      <button type="button" className="library-folders-toggle" aria-label={folded ? '展开文件夹区域' : '收起文件夹区域'} aria-expanded={!folded} aria-controls="library-folder-rows" onClick={toggleCollapsed} title={folded ? `当前：${selectedFolderName}，点击展开文件夹` : '收起文件夹，为笔记列表腾出空间'}>
+        {folded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}<span>{folded ? selectedFolderName : '文件夹'}</span>{folded && <small>{count(selectedFolderId)}</small>}
       </button>
       <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={disabled} onClick={onCreate} title="新建文件夹" aria-label="新建文件夹">
         <Plus className="h-3.5 w-3.5" />
       </Button>
     </div>
-    <div id="library-folder-rows" className={`library-folders-collapse ${collapsed ? 'is-collapsed' : ''}`} aria-hidden={collapsed} inert={collapsed}><div className="library-folders-clip">
+    <div id="library-folder-rows" className={`library-folders-collapse ${folded ? 'is-collapsed' : ''}`} aria-hidden={folded} inert={folded}><div className="library-folders-clip">
     <div className="library-folder-list flex min-h-0 min-w-0 flex-col overflow-y-auto pb-1">
       {folderRows.map(folder => {
         const system = folder.id === DEFAULT_FOLDER_ID
         const selected = selectedFolderId === folder.id
         return <div key={folder.id} className={cn('group flex min-w-0 items-center rounded-md', selected && 'bg-accent')}>
-          <button type="button" disabled={disabled} aria-current={selected ? 'true' : undefined} onClick={() => selectFolder(folder.id)}
+          <button type="button" disabled={disabled} aria-current={selected ? 'true' : undefined} onClick={() => {
+            selectFolder(folder.id)
+            const search = useLibrarySearchStore.getState()
+            if (search.query.trim() && search.scope === 'folder') search.change({ folderId: folder.id })
+          }}
             className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed">
             {selected ? <FolderOpen className="h-4 w-4 shrink-0 text-primary" /> : <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />}
             <span className="min-w-0 flex-1 truncate">{folder.name}</span>

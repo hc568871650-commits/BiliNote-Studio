@@ -1,0 +1,4 @@
+.reading-turn-recovery { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin-top:10px; font-size:12px; color:var(--muted-foreground); }
+.reading-turn-recovery button { border:1px solid var(--border); border-radius:6px; padding:4px 8px; background:var(--background); color:var(--foreground); }
+.reading-turn-recovery button:disabled { opacity:.6; cursor:default; }
+.reading-turn-recovery small { font-size:11px; }

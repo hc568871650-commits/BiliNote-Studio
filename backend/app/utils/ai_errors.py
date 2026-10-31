@@ -17,6 +17,17 @@ class SafeAIError(RuntimeError):
         self.details = details
 
 
+class ResponseFormatError(ProtocolResponseError):
+    def __init__(self, expected, actual, *, request_id=None, status_code=None):
+        labels = {'json': 'JSON', 'object': 'JSON 对象', 'sse': 'SSE 流式数据',
+                  'sse-json': 'SSE 中的 JSON 对象', 'html': 'HTML 页面', 'text': '普通文本',
+                  'invalid-json': '无效 JSON', 'chat-completion': '聊天响应结构'}
+        self.expected_format = expected if expected in labels else 'json'
+        self.actual_format = actual if actual in labels else 'object'
+        message = f'上游响应格式不匹配：预期{labels[self.expected_format]}，收到{labels[self.actual_format]}。请检查网关的流式转换和协议配置。'
+        super().__init__({'code': 'invalid_response_format', 'message': message}, request_id, status_code)
+
+
 def _safe(value, secret=None, limit=800):
     if not isinstance(value, (str, int)) or isinstance(value, bool):
         return ''
@@ -63,6 +74,9 @@ def error_details(exc, protocol='openai-chat', api_key=None):
                   '模型响应超时，请检查上游状态' if timeout else
                   '无法连接模型 API，请检查网络和代理' if kind == 'connection' else
                   f'供应商拒绝请求（HTTP {status}）' if status else '模型调用失败，请检查模型连接和协议')
-    return {'http_status': status, 'upstream_code': code, 'request_id': _safe(request_id, api_key, 160) or None,
+    result = {'http_status': status, 'upstream_code': code, 'request_id': _safe(request_id, api_key, 160) or None,
             'occurred_at': datetime.now(timezone.utc).isoformat(), 'kind': kind,
             'detail': detail, 'protocol': protocol}
+    if isinstance(exc, ResponseFormatError):
+        result.update(kind='protocol_response', expected_format=exc.expected_format, actual_format=exc.actual_format)
+    return result

@@ -133,7 +133,9 @@ def _merge(chunks, responses):
 
 class GroqTranscriber(Transcriber, ABC):
     @timeit
-    def transcript(self, file_path: str) -> TranscriptResult:
+    def transcript(self, file_path: str, *, cancel_check=None) -> TranscriptResult:
+        check = cancel_check or (lambda: None)
+        check()
         provider = ProviderService.get_provider_by_id("groq")
         if not provider:
             raise ValueError("Groq 未配置，请在设置 → 音频转写中配置连接")
@@ -144,6 +146,8 @@ class GroqTranscriber(Transcriber, ABC):
             api_key=provider.get("api_key"), base_url=provider.get("base_url"),
             key_label="Groq 转写引擎的 API Key",
         )
+        if callable(getattr(client, 'with_options', None)):
+            client = client.with_options(max_retries=0)
         source = Path(file_path)
         workdir = None
         if source.stat().st_size <= MAX_UPLOAD_BYTES:
@@ -164,6 +168,7 @@ class GroqTranscriber(Transcriber, ABC):
                 cache_dir.mkdir(parents=True, exist_ok=True)
             responses = []
             for index, (path, _start, _end) in enumerate(chunks):
+                check()
                 size = path.stat().st_size
                 if not size or size > MAX_UPLOAD_BYTES:
                     raise ValueError(f"第 {index + 1} 段音频大小不符合上传限制: {size} bytes")
@@ -186,6 +191,7 @@ class GroqTranscriber(Transcriber, ABC):
                     except Exception as exc:
                         logger.exception("Groq 转写失败 (chunk=%s/%s, bytes=%s)", index + 1, len(chunks), size)
                         raise RuntimeError(f"Groq 转写第 {index + 1}/{len(chunks)} 段失败: {exc}") from exc
+                    check()
                     response = result.to_dict()
                     if cache_file:
                         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".tmp",

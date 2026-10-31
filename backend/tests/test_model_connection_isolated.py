@@ -56,7 +56,7 @@ class ModelConnectionTests(unittest.TestCase):
                 self.assertNotIn(KEY, str(call), 'warning logs must not disclose API keys')
         self.assertEqual(len(calls), 1, 'connectivity probes must not retry automatically')
         self.assertEqual(calls[0]['model'], 'explicit-test-model')
-        self.assertEqual(calls[0]['max_tokens'], 256)
+        self.assertEqual(calls[0]['max_tokens'], 1024)
         self.assertTrue(clients[0].is_closed(), 'probe client must close on success and failure')
         return result
 

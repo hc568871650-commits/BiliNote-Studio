@@ -49,7 +49,7 @@ export const HomePage: FC = () => {
   }
   const findRecentNote = useCallback(() => resolveReadableNote(tasks, null, recentNoteId.current), [tasks])
   const openNotes = () => {
-    const note = tasks.find(task => task.id === currentTaskId && !task.archived_at) || resolveReadableNote(tasks, null, recentNoteId.current)
+    const note = tasks.find(task => task.id === currentTaskId) || resolveReadableNote(tasks, null, recentNoteId.current)
     setCurrentTask(note?.id || null)
     setView('notes')
     window.dispatchEvent(new Event('bilinote-refresh-task'))
@@ -67,7 +67,7 @@ export const HomePage: FC = () => {
     if (requested === 'create') setView('create')
     if (requested === 'read') {
       const state = useTaskStore.getState()
-      const target = state.tasks.find(task => task.id === state.currentTaskId && !task.archived_at) || resolveReadableNote(state.tasks, null, recentNoteId.current)
+      const target = state.tasks.find(task => task.id === state.currentTaskId) || resolveReadableNote(state.tasks, null, recentNoteId.current)
       setCurrentTask(target?.id || null)
       setView('notes')
       window.dispatchEvent(new Event('bilinote-refresh-task'))

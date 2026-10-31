@@ -7,6 +7,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 def _install_stubs():
@@ -83,14 +84,15 @@ def _install_stubs():
 
 
 def _load_universal_gpt_class():
-    _install_stubs()
     root = pathlib.Path(__file__).resolve().parents[1]
     module_path = root / "app" / "gpt" / "universal_gpt.py"
     spec = importlib.util.spec_from_file_location("universal_gpt", module_path)
     if spec is None or spec.loader is None:
         raise ImportError("universal_gpt module spec not found")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with patch.dict(sys.modules):
+        _install_stubs()
+        spec.loader.exec_module(module)
     return module.UniversalGPT
 
 

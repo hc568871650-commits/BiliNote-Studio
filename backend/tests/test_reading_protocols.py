@@ -113,17 +113,17 @@ class ReadingProtocolsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             anthropic_messages_url('https://user:secret@host/v1')
 
-    def test_anthropic_unsupported_effort_rejected_without_request(self):
+    def test_anthropic_invalid_effort_rejected_without_request(self):
         calls = []
         client = self.anthropic_client(lambda request: calls.append(request))
         with self.assertRaisesRegex(ValueError, '思考档位'):
-            complete(client, 'gpt-6-sol', [{'role': 'user', 'content': 'x'}], reasoning_effort='high')
+            complete(client, 'gpt-6-sol', [{'role': 'user', 'content': 'x'}], reasoning_effort='invented')
         self.assertFalse(calls)
         history = [{'role': 'user' if i % 2 == 0 else 'assistant', 'content': 'x' * 30000} for i in range(8)]
         with patch.object(chat_service, 'get_client', return_value=SimpleNamespace(model='gpt-6-sol', client=client)):
-            with self.assertRaisesRegex(ValueError, '思考档位'):
+            with self.assertRaisesRegex(ValueError, 'reasoning_effort'):
                 chat_service.chat('one', 'x', history, 'p', 'gpt-6-sol', context_mode='selection',
-                                  protocol='anthropic', reasoning_effort='high')
+                                  protocol='anthropic', reasoning_effort='invented')
         self.assertFalse(calls)
 
     def test_compaction_anthropic_does_not_send_implicit_low(self):

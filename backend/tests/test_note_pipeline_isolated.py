@@ -35,6 +35,7 @@ def load_pipeline():
     namespace['NoteResult'] = NoteResult
     namespace['prepend_source_link'] = lambda markdown, _: markdown
     namespace['VideoReader'] = Mock()
+    namespace['note_diagnostics'] = Mock()
     source = ROOT / 'app/services/note.py'
     tree = ast.parse(source.read_text(encoding='utf-8-sig'), filename=str(source))
     methods = {'generate', '_download_media', '_get_transcript', '_transcribe_audio', '_prepare_video_evidence', '_summarize_text'}
@@ -79,7 +80,7 @@ class PipelineRegressionTests(unittest.TestCase):
         self.generator._update_status = Mock()
         self.generator._handle_exception = Mock()
         self.generator._get_downloader = Mock(return_value=self.downloader)
-        self.generator._get_gpt = Mock(return_value=object())
+        self.generator._get_gpt = Mock(return_value=types.SimpleNamespace())
         self.generator._summarize_text = Mock(return_value='# 生成笔记')
         self.generator._save_metadata = Mock()
         self.generator._post_process_markdown = Mock(return_value='# 截图笔记')
@@ -97,6 +98,41 @@ class PipelineRegressionTests(unittest.TestCase):
 
     def write_transcript(self, transcript):
         self.paths['transcript'].write_text(json.dumps(asdict(transcript), ensure_ascii=False), encoding='utf-8')
+
+    def test_cancel_during_transcription_never_summarizes(self):
+        class Cancelled(Exception):
+            cancelled = True
+        stopped = False
+        def check():
+            if stopped:
+                raise Cancelled()
+        def transcribe(**kwargs):
+            nonlocal stopped
+            stopped = True
+            return self.transcript
+        self.generator.generation_cancel_check = check
+        self.generator.transcriber.transcript.side_effect = transcribe
+        with self.assertRaises(Cancelled):
+            self.generate()
+        self.generator._summarize_text.assert_not_called()
+        self.generator._save_metadata.assert_not_called()
+
+    def test_cancel_after_model_discards_late_result(self):
+        class Cancelled(Exception):
+            cancelled = True
+        stopped = False
+        def check():
+            if stopped:
+                raise Cancelled()
+        def summarize(**kwargs):
+            nonlocal stopped
+            stopped = True
+            return '# late result'
+        self.generator.generation_cancel_check = check
+        self.generator._summarize_text.side_effect = summarize
+        with self.assertRaises(Cancelled):
+            self.generate()
+        self.generator._save_metadata.assert_not_called()
 
     def generate(self, **kwargs):
         return self.generator.generate(str(self.video), 'local', task_id='test', output_path=str(self.root / 'run'), **kwargs)

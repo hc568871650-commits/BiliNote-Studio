@@ -1,7 +1,8 @@
 import request from '@/utils/request'
+import { withProviderProtocol } from './providerProtocol'
 import type { AISettings, ContextUsage } from '@/utils/aiSettings'
-export type ChatProtocol = 'openai-chat' | 'openai-responses' | 'anthropic'
-export const chatProtocolLabels: Record<ChatProtocol, string> = { 'openai-chat': 'Chat Completions', 'openai-responses': 'Responses', anthropic: 'Anthropic' }
+export type ChatProtocol = 'openai-chat' | 'openai-responses' | 'anthropic' | 'gemini'
+export const chatProtocolLabels: Record<ChatProtocol, string> = { 'openai-chat': 'Chat Completions', 'openai-responses': 'Responses', anthropic: 'Anthropic', gemini: 'Gemini 原生' }
 export interface ChatErrorDetails {
   http_status: number | null
   upstream_code: string | null
@@ -19,6 +20,14 @@ export interface ChatMessage {
 }
 
 export interface ChatSource {
+  evidence_type?: 'snippet' | 'page'
+  retrieved_at?: string
+  truncated?: boolean
+  read_complete?: boolean
+  read_characters?: number
+  total_length?: number
+  search_provider?: 'google'
+  search_suggestions_html?: string
   text: string
   source_type: 'markdown' | 'transcript' | 'note' | 'web'
   source_id?: string
@@ -33,7 +42,28 @@ export interface ChatSource {
   end_time?: number
 }
 
+export interface ToolEvent {
+  id: string
+  tool: string
+  status: 'succeeded' | 'failed' | 'cached' | 'blocked' | 'unconfirmed'
+  service?: string
+  query?: string
+  url?: string
+  offset?: number
+  next_offset?: number | null
+  characters?: number
+  source_count?: number
+  elapsed_ms?: number
+  occurred_at?: string
+  retrieved_at?: string
+  truncated?: boolean
+  budget_exhausted?: boolean
+  error?: string
+}
+
 export interface AskResponse {
+  work_log?: string[]
+  tool_events?: ToolEvent[]
   answer: string
   sources: ChatSource[]
   context?: ContextUsage
@@ -47,8 +77,8 @@ export interface CompactionResult {
   after_tokens: number
   context: ContextUsage
 }
-export const compactChat = (data: { task_id: string; provider_id: string; model_name: string; protocol?: ChatProtocol; history: ChatMessage[]; summary: string; keep_recent: 0 | 4 }, signal?: AbortSignal): Promise<CompactionResult> =>
-  request.post('/chat/compact', data, { timeout: 120000, signal, suppressToast: true })
+export const compactChat = async (data: { task_id: string; provider_id: string; model_name: string; protocol?: ChatProtocol; history: ChatMessage[]; summary: string; keep_recent: 0 | 4; context_limit?: number }, signal?: AbortSignal): Promise<CompactionResult> =>
+  request.post('/chat/compact', await withProviderProtocol(data), { timeout: 120000, signal, suppressToast: true })
 
 export type IndexStatus = 'idle' | 'indexing' | 'indexed' | 'failed'
 
@@ -73,7 +103,7 @@ export type AskPayload = {
   context_mode?: 'note' | 'selection'
 } & Partial<AISettings>
 export const askQuestion = async (data: AskPayload, signal?: AbortSignal): Promise<AskResponse> => {
-  return await request.post('/chat/ask', data, { timeout: 120000, signal, suppressToast: true })
+  return await request.post('/chat/ask', await withProviderProtocol(data), { timeout: 120000, signal, suppressToast: true })
 }
 
 export const getChatStatus = async (taskId: string): Promise<ChatStatusResponse> => {

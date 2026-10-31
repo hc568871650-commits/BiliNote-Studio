@@ -6,24 +6,30 @@ import { estimateLocalContext } from '@/utils/aiSettings'
 import type { OrganizerOperation, OrganizerPlan, OrganizerScope, OrganizerRetentionPreview } from '@/services/organizer'
 import type { GroqConnection } from '@/services/transcriber'
 import { advanceGenerationFixture, fixtureDelay, generationScenario, generationTransportFailure, hasGenerationFixture, startGenerationFixture } from './generationPreview'
+import { imageReaderContent } from './imageReaderFixture'
+import { diagnosticsEndpoint, diagnosticsPreview, diagnosticsTaskId } from './diagnosticsPreview'
 
-export const PREVIEW_STORAGE_KEY = generationScenario ? 'bilinote-generation-preview-synthetic-v1' : 'bilinote-ui-preview-synthetic-v3'
+const imageReaderPreview = new URLSearchParams(location.search).get('images') === '1'
+export const PREVIEW_STORAGE_KEY = diagnosticsPreview ? 'bilinote-diagnostics-synthetic-v1' : imageReaderPreview ? 'bilinote-image-reader-synthetic-v3' : generationScenario ? 'bilinote-generation-preview-synthetic-v1' : 'bilinote-ui-preview-synthetic-v3'
 export const PREVIEW_DEFAULTS_KEY = 'bilinote-preview-purpose-initialized-v1'
 export const PREVIEW_SETTINGS_KEY = 'bilinote-preview-settings-v1'
 export const PREVIEW_ORGANIZER_KEY = 'bilinote-organizer-preview-sessions-v1'
 export const PREVIEW_RETENTION_KEY = 'bilinote-organizer-preview-retention-v1'
 const sampleModel = '通用示例模型'
 interface PreviewProvider { id: string; name: string; logo: string; api_key: string; base_url: string; type: string; enabled: number }
-interface PreviewModel { id: number; provider_id: string; model_name: string }
+interface PreviewModel { id: number; provider_id: string; model_name: string; display_name?: string | null }
 interface PreviewLibrary { tasks: Task[]; folders: { id: string; name: string }[]; assignments: Record<string, string>; entries: Record<string, NoteLibraryEntry> }
 interface PreviewState extends PreviewLibrary { providers: PreviewProvider[]; models: PreviewModel[]; sample_version?: number }
 interface PreviewBody {
+  model_window?: number | null; user_limit?: number; output_reserve?: number; context_limit?: number;
+  web_search?: boolean; web_search_mode?: 'native' | 'external';
+  provider?: 'tavily' | 'searxng';
   protocol?: string;
   history?: ChatMessage[]; summary?: string; keep_recent?: 0 | 4;
   operation?: 'create' | 'set_limit'; limit?: number; confirmation_token?: string;
   request_id?: string; expected_revision?: number;
   instruction?: string; scope?: OrganizerScope; plan_id?: string; task_id?: string; task_ids?: string[];
-  folder_id?: string; name?: string; changes?: Partial<NoteLibraryEntry>; provider_id?: string; model_name?: string;
+  folder_id?: string; name?: string; changes?: Partial<NoteLibraryEntry>; provider_id?: string; model_name?: string; display_name?: string | null;
   id?: string; base_url?: string; api_key?: string; type?: string; logo?: string; enabled?: number | boolean; url?: string; cookie?: string;
   question?: string; context_mode?: string; attachments?: { type: string; name: string; text?: string; data_url?: string }[];
   tasks?: Task[]; video_url?: string; platform?: string; quality?: string; style?: string;
@@ -33,6 +39,23 @@ interface PreviewSettings { groq_model: string; transcriber_type: string; whispe
 // Network configuration is inert and session-only in the UI sandbox.
 let previewProxy = { enabled: false, url: '', effective: '' }
 let previewGroqConnection: GroqConnection = { base_url: 'https://api.groq.com/openai/v1', api_key: '', enabled: true }
+const previewSearch = { provider: 'tavily' as 'tavily' | 'searxng', enabled: true, profiles: {
+  tavily: { base_url: 'https://api.tavily.com', api_key: '********' },
+  searxng: { base_url: 'http://127.0.0.1:38485', api_key: '' },
+} }
+let previewUsageAt = 0
+type PreviewContextProfile = { model_window: number | null; user_limit: number; output_reserve: number }
+const contextStorageKey = 'bilinote-preview-context-profiles-v1'
+const previewContextProfiles: Record<string, PreviewContextProfile> = (() => {
+  try { return JSON.parse(localStorage.getItem(contextStorageKey) || '{}') } catch { return {} }
+})()
+const previewContext = (providerId: string, modelName: string, requestLimit?: number) => {
+  const profile = previewContextProfiles[JSON.stringify([providerId, modelName])] || { model_window: null, user_limit: 272000, output_reserve: 4096 }
+  const inputLimit = Math.min(profile.model_window || 65536, profile.user_limit, requestLimit || profile.user_limit) - profile.output_reserve
+  return { provider_id: providerId, model_name: modelName, ...profile,
+    effective_window: profile.model_window || 65536, input_limit: inputLimit, compact_threshold: Math.floor(inputLimit * .8),
+    source: profile.model_window ? 'manual' : 'unknown', source_label: profile.model_window ? '手动声明（未核实）' : '容量未知（按 65,536 处理）', verified: false }
+}
 const previewCookies = new Set<string>()
 export type PreviewChatScenario = 'normal' | 'slow' | 'upstream-error' | 'timeout'
 let previewChatScenario: PreviewChatScenario = 'normal'
@@ -113,7 +136,7 @@ const syntheticTask = (id: string, title: string, modelName = sampleModel): Task
   const sample = sampleForTitle(title)
   return {
   id, status: 'SUCCESS', createdAt: new Date().toISOString(), archived_at: null,
-  markdown: [{ ver_id: 'preview-v1', content: sampleContent(sample), style: 'tutorial', model_name: modelName, created_at: new Date().toISOString() }],
+  markdown: [{ ver_id: 'preview-v1', content: imageReaderPreview && id === 'ui-general-1' ? imageReaderContent : sampleContent(sample), style: 'tutorial', model_name: modelName, created_at: new Date().toISOString() }],
   transcript: { full_text: `模拟原文：${sample.overview}${sample.steps.join('')}`, language: 'zh', raw: null, segments: [{ start: 0, end: 15, text: sample.overview }, { start: 15, end: 30, text: sample.steps.join('') }] },
   audioMeta: { title, cover_url: '', duration: 720, file_path: '', platform: 'local', raw_info: null, video_id: 'sample' },
   formData: { video_url: '/sample.mp4', platform: 'local', quality: 'medium', model_name: modelName, provider_id: 'preview-1', style: 'tutorial', link: false, screenshot: false },
@@ -153,6 +176,10 @@ if (state.sample_version !== 4) {
   try { localStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(state)) } catch { /* Migration remains usable in this tab. */ }
 }
 const persist = () => { try { localStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(state)) } catch { /* This tab remains usable without persistence. */ } }
+if (diagnosticsPreview && !state.tasks.some(task => task.id === diagnosticsTaskId)) {
+  state.tasks.unshift({ ...syntheticTask(diagnosticsTaskId, '保存失败但正文可读（合成示例）'), status: 'FAILED', statusMessage: '合成示例：索引保存失败，正文已保留' })
+  persist()
+}
 // Named models exercise the controls; requests still terminate in this mock adapter.
 for (const [id, model_name] of [[540, 'gpt-5.4'], [380, 'gemini-3.8-flash']] as const) {
   if (!state.models.some(model => model.provider_id === 'preview-2' && model.model_name === model_name)) state.models.push({ id, provider_id: 'preview-2', model_name })
@@ -462,8 +489,54 @@ export const previewAdapter: AxiosAdapter = async config => {
   let errorData: unknown = null
   try {
     refreshGenerationTasks()
+    const diagnosticResponse = await diagnosticsEndpoint(config, state.tasks)
+    if (diagnosticResponse) { if (method !== 'get') persist(); return diagnosticResponse }
     if (url === '/organizer/retention' || url === '/organizer/retention/preview') data = retentionEndpoint(url, method, body)
     else if (url === '/organizer/sessions' || url.startsWith('/organizer/sessions/')) data = sessionEndpoint(url, method, body)
+    else if (url === '/model_capabilities' && method === 'get') data = {
+      provider_id: config.params?.provider_id, model_name: config.params?.model_name,
+      protocol: config.params?.protocol || 'openai-chat', features: {}, stale: false,
+      candidates: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+      available_efforts: ['auto', 'none', 'low', 'medium', 'high', 'xhigh', 'max'],
+      external_search_available: previewSearch.enabled && Boolean(previewSearch.profiles[previewSearch.provider].base_url)
+        && (previewSearch.provider !== 'tavily' || Boolean(previewSearch.profiles.tavily.api_key)), simulated: true,
+    }
+    else if (url === '/model_capabilities/tests' && method === 'get') data = []
+    else if (url === '/model_context/settings') {
+      const providerId = String(config.params?.provider_id || ''), modelName = String(config.params?.model_name || '')
+      if (!providerId || !modelName) throw new Error('请选择示例模型')
+      if (method === 'put') {
+        const profile = { model_window: body.model_window ?? null, user_limit: body.user_limit ?? 272000, output_reserve: body.output_reserve ?? 4096 }
+        if ((profile.model_window !== null && (!Number.isInteger(profile.model_window) || profile.model_window < 8192 || profile.model_window > 4000000))
+          || !Number.isInteger(profile.user_limit) || profile.user_limit < 8192 || profile.user_limit > 272000
+          || !Number.isInteger(profile.output_reserve) || profile.output_reserve < 512 || profile.output_reserve > 65536
+          || Math.min(profile.model_window || 65536, profile.user_limit) - profile.output_reserve < 4096) throw new Error('上下文预算无效，输入预算至少需要 4,096 tokens')
+        previewContextProfiles[JSON.stringify([providerId, modelName])] = profile
+        localStorage.setItem(contextStorageKey, JSON.stringify(previewContextProfiles))
+      }
+      data = previewContext(providerId, modelName)
+    }
+    else if (url === '/web_search/settings' && method === 'get') data = { ...previewSearch, ...previewSearch.profiles[previewSearch.provider] }
+    else if (url.startsWith('/web_search/profiles/') && method === 'put') {
+      const provider = url.split('/').at(-1) as 'tavily' | 'searxng'
+      if (!(provider in previewSearch.profiles)) throw new Error('未知示例搜索服务')
+      previewSearch.profiles[provider] = { base_url: provider === 'tavily' ? 'https://api.tavily.com' : body.base_url || '', api_key: body.api_key ? '********' : '' }
+      if (provider === 'tavily') previewUsageAt = 0
+      data = { ...previewSearch, ...previewSearch.profiles[previewSearch.provider] }
+    } else if (url === '/web_search/selection' && method === 'put') {
+      if (body.provider) previewSearch.provider = body.provider
+      if (body.enabled !== undefined) previewSearch.enabled = Boolean(body.enabled)
+      data = { ...previewSearch, ...previewSearch.profiles[previewSearch.provider] }
+    } else if (url === '/web_search/tavily/usage' && method === 'get') {
+      const configured = Boolean(previewSearch.profiles.tavily.api_key)
+      const elapsed = Date.now() - previewUsageAt
+      const cached = elapsed < 300000 && !(config.params?.refresh && elapsed >= 65000)
+      if (configured && !cached) previewUsageAt = Date.now()
+      data = { simulated: true, configured, checked_at: configured ? new Date(previewUsageAt).toISOString() : null,
+        cached, stale: false, error: null, retry_after_seconds: configured ? Math.max(0, Math.ceil((65000 - (Date.now() - previewUsageAt)) / 1000)) : 0,
+        account: configured ? { plan: '示例套餐', used: 120, limit: 1000, remaining: 880, paygo_used: 0, paygo_limit: null } : null,
+        key: configured ? { used: 45, limit: null, remaining: null } : null }
+    }
     else if (url === '/notes') data = state.tasks
     else if (url === '/notes/import') data = state.tasks // Persisted business-store snapshots cannot overwrite synthetic server data.
     else if (url.startsWith('/notes/')) {
@@ -517,7 +590,12 @@ export const previewAdapter: AxiosAdapter = async config => {
     else if (url === '/models') {
       const exists = state.models.find(model => model.provider_id === body.provider_id && model.model_name === body.model_name)
       if (exists) data = exists
-      else { const model = { id: Math.max(0, ...state.models.map(item => item.id)) + 1, provider_id: body.provider_id || '', model_name: body.model_name || sampleModel }; state.models.push(model); data = model }
+      else { const model = { id: Math.max(0, ...state.models.map(item => item.id)) + 1, provider_id: body.provider_id || '', model_name: body.model_name || sampleModel, display_name: body.display_name?.trim() || null }; state.models.push(model); data = model }
+    } else if (url === '/models/display_name') {
+      const model = state.models.find(item => item.id === Number(body.id))
+      if (!model) throw new Error('示例模型不存在')
+      model.display_name = body.display_name?.trim() || null
+      data = model
     } else if (url.startsWith('/models/delete/')) { state.models = state.models.filter(model => model.id !== Number(url.split('/')[3])); data = null }
     else if (url === '/chat/index') data = { simulated: true }
     else if (url === '/chat/status') data = { indexed: true, status: 'indexed' }
@@ -531,7 +609,7 @@ export const previewAdapter: AxiosAdapter = async config => {
       const consumed = compacted ? count : 0
       const after = estimateLocalContext([summary, history.slice(consumed)]) + 1024
       data = { summary, consumed_messages: consumed, compacted, before_tokens: before, after_tokens: after,
-        context: { input_tokens: after, estimated: true, limit: 272000, compacted, compacted_messages: consumed } }
+        context: { input_tokens: after, estimated: true, limit: previewContext(body.provider_id || '', body.model_name || '', body.context_limit).input_limit, compacted, compacted_messages: consumed } }
     }
     else if (url === '/chat/ask') {
       checkModel(body)
@@ -559,7 +637,19 @@ export const previewAdapter: AxiosAdapter = async config => {
       const source = textAttachment?.slice(0, 400) || sample.overview
       const guidance = textAttachment ? `参考选段：${source}\n\n可先提取要点，再记录需要核实的问题。` : /步骤|怎么|如何/u.test(body.question || '') ? sample.steps.map((step, index) => `${index + 1}. ${step}`).join('\n') : sample.overview
       data = { answer: `**模拟回答 · 未调用真实模型**\n\n关于「${body.question || '这篇笔记'}」：${textAttachment ? '你提供的选段或附件中包含以下参考内容' : `可以先从《${task.audioMeta.title}》中的工作顺序开始`}。[1]\n\n${guidance}${image ? '\n\n已收到图片附件。本回答只展示图片附件的交互流程，未进行真实视觉识别。' : ''}`, sources: [{ text: source, source_type: body.context_mode === 'selection' ? 'markdown' : 'transcript', section_title: textAttachment ? '提供的选段 / 附件' : '示例原文', start_time: 0, end_time: 15 }] }
-      Object.assign(data as object, { context: { input_tokens: estimateLocalContext([body.history, body.summary, body.question, body.attachments]) + 1024, estimated: true, limit: 272000 } })
+      const modelContext = previewContext(body.provider_id || '', body.model_name || '', body.context_limit)
+      Object.assign(data as object, { context: { input_tokens: estimateLocalContext([body.history, body.summary, body.question, body.attachments]) + 1024, estimated: true, limit: modelContext.input_limit, model_context: modelContext } })
+      if (body.web_search && body.web_search_mode === 'external' && /联网|搜索|官网|最新|网页/u.test(body.question || '')) {
+        const timestamp = new Date().toISOString()
+        Object.assign(data as object, {
+          tool_events: [
+            { id: crypto.randomUUID(), tool: 'search_web', status: 'succeeded', service: '示例数据', query: '模拟搜索（未发送真实请求）', source_count: 1, elapsed_ms: 120, occurred_at: timestamp },
+            { id: crypto.randomUUID(), tool: 'read_web_page', status: 'succeeded', service: '示例数据', url: 'https://example.com/tutorial', offset: 0, characters: 8000, next_offset: 8000, truncated: true, elapsed_ms: 80, occurred_at: timestamp, retrieved_at: timestamp },
+            { id: crypto.randomUUID(), tool: 'read_web_page', status: 'succeeded', service: '示例数据', url: 'https://example.com/tutorial', offset: 8000, characters: 8000, next_offset: 16000, truncated: true, elapsed_ms: 80, occurred_at: timestamp, retrieved_at: timestamp },
+          ],
+          sources: [{ source_id: 'preview-web', source_type: 'web', url: 'https://example.com/tutorial', title: '示例网页（未真实检索）', text: '此内容仅展示网页证据和续读界面。', evidence_type: 'page', read_characters: 16000, total_length: 40000, read_complete: false, truncated: true, retrieved_at: timestamp }],
+        })
+      }
       if (body.question === '[模拟空回复]') data = { answer: '', sources: [] }
     } else if (url === '/generate_note') {
       checkModel(body)

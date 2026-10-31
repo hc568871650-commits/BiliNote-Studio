@@ -10,14 +10,19 @@ import { previewChatStream } from './previewChatStream'
 import { upgradePreview, upgradePreviewAdapter, loadUpgradePreview, upgradeChatStream } from './upgradePreviewAdapter'
 import { distillationPreview, distillationPreviewAdapter, loadDistillationPreview } from './distillationPreviewAdapter'
 import { generationUsagePreview, generationUsagePreviewAdapter, loadGenerationUsagePreview } from './generationUsagePreviewAdapter'
+import { desktopExperiencePreview, desktopExperiencePreviewAdapter, loadDesktopExperiencePreview } from './desktopExperiencePreview'
 
 // This entry is never imported by main.tsx. All API requests use synthetic local data.
-request.defaults.adapter = generationUsagePreview ? generationUsagePreviewAdapter : distillationPreview ? distillationPreviewAdapter : upgradePreview ? upgradePreviewAdapter : graphPreview ? graphPreviewAdapter : previewAdapter
+request.defaults.adapter = desktopExperiencePreview ? desktopExperiencePreviewAdapter : generationUsagePreview ? generationUsagePreviewAdapter : distillationPreview ? distillationPreviewAdapter : upgradePreview ? upgradePreviewAdapter : graphPreview ? graphPreviewAdapter : previewAdapter
 setChatStreamTransport(upgradePreview ? upgradeChatStream : graphPreview ? async () => { throw new Error('此环境只验证整理流程，请返回交互预览试用阅读聊天') } : previewChatStream)
 const { useTaskStore } = await import('@/store/taskStore')
 await useTaskStore.persist.rehydrate()
 let tasks = getPreviewTasks()
 let startupError = ''
+if (desktopExperiencePreview) {
+  try { tasks = await loadDesktopExperiencePreview() }
+  catch (error) { startupError = error instanceof Error ? error.message : '电脑版隔离验收服务未就绪'; tasks = [] }
+}
 if (generationUsagePreview) {
   try { tasks = await loadGenerationUsagePreview() }
   catch (error) { startupError = error instanceof Error ? error.message : '用量测试服务未就绪'; tasks = [] }
@@ -43,6 +48,9 @@ if (!localStorage.getItem(PREVIEW_DEFAULTS_KEY)) {
   localStorage.setItem(PREVIEW_DEFAULTS_KEY, '1')
 }
 const { useFolderStore } = await import('@/store/folderStore')
+if (desktopExperiencePreview) Object.defineProperty(window, '__desktopExperience', {
+  value: { tasks: useTaskStore, folders: useFolderStore, request }, configurable: true,
+})
 useFolderStore.getState().selectFolder(localStorage.getItem('bilinote-selected-folder') || 'all')
 window.addEventListener('bilinote-preview-reset', () => {
   void resetPreviewData(async () => {

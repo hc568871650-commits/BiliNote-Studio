@@ -55,6 +55,7 @@ class GenerationObservabilityTests(unittest.TestCase):
             'app.services': services, 'app.services.note_storage': self.storage})
         self.modules.start()
         self.addCleanup(self.modules.stop)
+        self.diagnostics = services.note_diagnostics = load('app/services/note_diagnostics.py', 'offline_usage_diagnostics')
         self.usage = load('app/services/generation_usage.py', 'offline_generation_usage')
         self.usage_module = patch.dict(sys.modules, {'app.services.generation_usage': self.usage})
         self.usage_module.start()
@@ -63,6 +64,24 @@ class GenerationObservabilityTests(unittest.TestCase):
 
     def recorder(self, **options):
         return self.usage.GenerationUsageRecorder('task', options, request_id='request-1', model='offline', provider_id='test')
+
+    def test_attempt_diagnostics_capture_request_id_without_body_or_cross_run(self):
+        trace = self.diagnostics.start_run('task')
+        recorder = self.recorder()
+        attempt = recorder.start_attempt()
+        reply = response(text='PRIVATE_BODY')
+        reply._request_id = 'upstream-123'
+        recorder.complete_attempt(attempt, response=reply)
+        report = recorder.report()
+        self.assertEqual(report['attempts'][0]['request_id'], 'upstream-123')
+        summary = self.diagnostics.get_summary('task')
+        self.assertEqual(summary['trace_id'], trace)
+        events = [row for row in summary['events'] if row['event'] == 'model_attempt_completed']
+        self.assertEqual(events[0]['request_id'], 'upstream-123')
+        self.assertNotIn('PRIVATE_BODY', json.dumps(summary))
+        self.diagnostics.start_run('task')
+        recorder.start_attempt()
+        self.assertEqual(len(self.diagnostics.get_summary('task')['events']), 1)
 
     def client(self, answers):
         calls = []

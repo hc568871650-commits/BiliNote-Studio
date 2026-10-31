@@ -3,6 +3,9 @@ import './startup.css'
 import { Button } from '@/components/ui/button'
 import { Loader2, AlertTriangle, RotateCcw, Clipboard, RefreshCw } from 'lucide-react'
 import { redactLog, useBackendEvents } from '@/components/BackendHealth/useBackendEvents'
+import studioMark from '@/assets/studio-mark.svg?raw'
+
+const studioMarkMarkup = studioMark.replaceAll('#fff', 'currentColor')
 
 interface Props {
   open: boolean
@@ -34,7 +37,7 @@ function BackendInitDialog({ open, failed = false, lastError = null, onRetry }: 
   }
   if (!open && !failed) return null
   return <main className="startup-screen">
-    <div className="startup-brand"><span>BiliNote Studio</span><span className="startup-brand-caption">学习工作台</span></div>
+    <div className="startup-brand"><span className="studio-brand-mark" aria-hidden="true" dangerouslySetInnerHTML={{ __html: studioMarkMarkup }} /><span>BiliNote Studio</span><span className="startup-brand-caption">学习工作台</span></div>
     <section className="startup-card" aria-labelledby="startup-title" aria-busy={!failed}>
       <header>
         <h1 id="startup-title" className="startup-title">

@@ -32,6 +32,19 @@ def drain(iterator):
 
 
 class ReadingStreamTest(unittest.TestCase):
+    def test_chat_thinking_artifact_survives_tool_round_without_becoming_visible_text(self):
+        events = [
+            {'choices': [{'index': 0, 'delta': {'reasoning_content': 'provider-'}, 'finish_reason': None}]},
+            {'choices': [{'index': 0, 'delta': {'reasoning_content': 'artifact', 'tool_calls': [
+                {'index': 0, 'id': 'call-1', 'type': 'function', 'function': {'name': 'get_note_content', 'arguments': '{}'}}]}, 'finish_reason': 'tool_calls'}]},
+        ]
+        client = self.sdk(events)
+        visible, (first, _) = drain(complete(client, 'deepseek-synthetic', [{'role': 'user', 'content': 'Public question'}], tools=TOOLS, stream=True))
+        self.assertFalse(any('provider-artifact' in str(event) for event in visible))
+        message = first.choices[0].message
+        drain(complete(client, 'deepseek-synthetic', [message, {'role': 'tool', 'tool_call_id': 'call-1', 'content': 'public result'}], tools=TOOLS, stream=True))
+        self.assertEqual(self.wire[1]['messages'][0]['reasoning_content'], 'provider-artifact')
+
     def sdk(self, events, *, responses=False):
         self.wire = []
         def handler(request):

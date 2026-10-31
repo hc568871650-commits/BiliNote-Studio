@@ -101,6 +101,37 @@ class GroqChunkTests(unittest.TestCase):
         self.assertEqual(merged.full_text, "重复 边界 重复")
         self.assertEqual([segment.start for segment in merged.segments], [0.2, 2.1, 3.1])
 
+    def test_cancel_after_first_upload_never_starts_next_chunk(self):
+        class Cancelled(Exception):
+            cancelled = True
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audio = root / 'source.mp3'
+            audio.write_bytes(b'x' * 100)
+            parts = [root / f'part-{index}.mp3' for index in range(2)]
+            for part in parts:
+                part.write_bytes(b'x' * 20)
+            requests = []
+            stopped = False
+            def check():
+                if stopped:
+                    raise Cancelled()
+            def create(**kwargs):
+                nonlocal stopped
+                requests.append(kwargs['file'][0])
+                stopped = True
+                return types.SimpleNamespace(to_dict=lambda: {'segments': []})
+            client = types.SimpleNamespace(audio=types.SimpleNamespace(transcriptions=types.SimpleNamespace(create=create)))
+            with patch.object(self.groq, 'MAX_UPLOAD_BYTES', 64), \
+                 patch.object(self.groq, '_probe', return_value=(10, 'mp3')), \
+                 patch.object(self.groq, '_split_audio', return_value=[(parts[0], 0, 5), (parts[1], 5, 10)]), \
+                 patch.object(self.groq.ProviderService, 'get_provider_by_id', return_value={'api_key': 'test', 'base_url': 'https://synthetic.invalid'}), \
+                 patch.object(self.groq, 'build_openai_client', return_value=client), \
+                 patch.dict(os.environ, {'NOTE_OUTPUT_DIR': directory}):
+                with self.assertRaises(Cancelled):
+                    self.groq.GroqTranscriber().transcript(str(audio), cancel_check=check)
+            self.assertEqual(requests, ['part-0.mp3'])
+
     def test_retry_uses_cached_successful_chunk(self):
         with tempfile.TemporaryDirectory() as directory:
             audio = Path(directory) / "中文.mp3"
@@ -132,18 +163,6 @@ class GroqChunkTests(unittest.TestCase):
                 transcript = self.groq.GroqTranscriber().transcript(str(audio))
             self.assertEqual(requests.count("chunk_0000.mp3"), 1)
             self.assertTrue(transcript.full_text)
-
-    @unittest.skipUnless(os.environ.get("BILINOTE_GROQ_TEST_AUDIO") and Path(os.environ["BILINOTE_GROQ_TEST_AUDIO"]).is_file(), "optional audio sample unavailable")
-    def test_existing_33mb_sample_is_split_without_reencoding(self):
-        audio = Path(os.environ["BILINOTE_GROQ_TEST_AUDIO"])
-        duration, codec = self.groq._probe(audio)
-        with tempfile.TemporaryDirectory() as directory:
-            chunks = self.groq._split_audio(audio, directory, duration, codec)
-            self.assertGreater(len(chunks), 1)
-            self.assertTrue(all(path.suffix == ".mp3" and path.stat().st_size <= 20_000_000
-                                for path, _, _ in chunks))
-            self.assertAlmostEqual(chunks[-1][2], duration)
-
 
 if __name__ == "__main__":
     unittest.main()

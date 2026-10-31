@@ -2,7 +2,7 @@ import { shouldSendMessage, sendShortcutLabel } from '@/utils/sendShortcut'
 import { scrollMotion } from '@/utils/motion'
 import { useInterfaceStore } from '@/store/interfaceStore'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUp, Check, FolderInput, Loader2, MessageSquare, RotateCcw, X } from 'lucide-react'
+import { ArrowUp, Check, FolderInput, Loader2, MessageSquare, RotateCcw, Settings2, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import PurposeModelPicker from '@/components/PurposeModelPicker'
 import ChoiceSelect from '@/components/ChoiceSelect'
@@ -19,11 +19,19 @@ import type { OrganizerOperation, OrganizerPlan } from '@/services/organizer'
 import './organizer.css'
 import SlashCommandMenu from '@/components/SlashCommandMenu'
 import { useCompactCommand } from '@/hooks/useCompactCommand'
-import { settingsForModel } from '@/utils/aiSettings'
+import { settingsForModel, requestEffortChoices } from '@/utils/aiSettings'
 import { useComposerTextarea } from '@/hooks/useComposerTextarea'
 import SourceList from '@/components/SourceList'
-import { useProviderProtocolStore } from '@/store/providerProtocolStore'
+import { useEffectiveProviderProtocol } from '@/hooks/useEffectiveProviderProtocol'
 import { useModelCapabilities } from '@/hooks/useModelCapabilities'
+import { webSearchState } from '@/utils/webSearch'
+import { useModelWebSearchSettings } from '@/hooks/useModelWebSearchSettings'
+import AssistantChatSettings from '@/components/AssistantChatSettings'
+import useModelContext from '@/hooks/useModelContext'
+import WorkProgress from '@/components/WorkProgress'
+import OrganizerScopePicker from './OrganizerScopePicker'
+import { scopeLabel, scopeRequest } from '@/utils/organizerScope'
+import { rankFolderCandidates } from '@/utils/organizerCandidates'
 
 const actionNames: Record<OrganizerOperation['type'], string> = {
   create_folder: '创建文件夹', rename_folder: '重命名文件夹', move_notes: '移动笔记',
@@ -42,9 +50,13 @@ export default function OrganizerPage() {
   const loadLibrary = useLibraryStore(current => current.loadLibrary)
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [catalogLoading, setCatalogLoading] = useState(true)
-  const { controls, setControls } = state
-  const protocol = useProviderProtocolStore(current => model ? current.protocols[model.provider_id] || 'openai-chat' : 'openai-chat')
+  const [chatSettingsOpen, setChatSettingsOpen] = useState(false)
+  const [scopeOpen, setScopeOpen] = useState(false)
+  const { setControls } = state
+  const protocol = useEffectiveProviderProtocol(model?.provider_id)
   const { capabilities } = useModelCapabilities(model?.provider_id, model?.model_name, protocol)
+  const controls = useModelWebSearchSettings(model, state.controls, true, capabilities?.external_search_available)
+  const { budget: contextBudget } = useModelContext(model?.provider_id, model?.model_name)
   const composer = useComposerTextarea(state.draft, 54)
   const bottom = useRef<HTMLDivElement>(null)
   const busy = Boolean(state.busy) || state.session?.status === 'executing' || state.session?.status === 'undoing'
@@ -87,11 +99,25 @@ export default function OrganizerPage() {
     } catch { setCatalogError('操作已由后端确认，但笔记库刷新失败。请重试刷新以核对当前状态。') }
     finally { setCatalogLoading(false) }
   }
-  const send = (override?: string) => {
+  const send = (override?: string, folderOverride?: { id: string; name: string }) => {
     const instruction = (override ?? state.draft).trim()
     if (!instruction || !model || busy || state.session?.status === 'planning') return
-    // This page searches the library; a saved web toggle must not enable hidden network search.
-    void state.send({ instruction, ...settingsForModel({ ...controls, web_search: false, web_search_mode: undefined }, model.model_name, capabilities?.available_efforts || ['auto']), protocol, provider_id: model.provider_id, model_name: model.model_name, scope: { kind: 'all' } }, '整个资料库')
+    // The chosen scope is the upper bound the backend may act on; an explicit folder or note selection authorizes it.
+    const scope = folderOverride ? { kind: 'folder' as const, folder_id: folderOverride.id } : scopeRequest(state.scope, state.folderId, state.selectedIds)
+    const label = folderOverride?.name || (scope.kind === 'all' ? '整个资料库' : scopeLabel(state.scope, state.folderId, state.selectedIds, folders))
+    void state.send({ instruction, ...webSearchState(settingsForModel(controls, model.model_name, requestEffortChoices(model.model_name, protocol)), capabilities).settings, context_limit: contextBudget.user_limit, protocol, provider_id: model.provider_id, model_name: model.model_name, scope }, label)
+  }
+  const lastUserText = [...state.messages].reverse().find(message => message.role === 'user')?.text || ''
+  const lastAssistantId = [...state.messages].reverse().find(message => message.role === 'assistant')?.id
+  const clarifying = state.session?.status === 'clarification' && !busy
+  const serverCandidates = state.session?.folder_candidates?.map(candidate => folders.find(folder => folder.id === candidate.id)).filter((folder): folder is typeof folders[number] => Boolean(folder)) || []
+  const rankedFolders = clarifying ? serverCandidates.length ? serverCandidates : rankFolderCandidates(lastUserText, folders) : []
+  const folderChoices = rankedFolders.length ? rankedFolders.slice(0, 3) : folders.slice(0, 6)
+  const assignments = useFolderStore(current => current.assignments)
+  const folderCount = (id: string) => tasks.filter(task => !task.archived_at && (assignments[task.id] || 'default') === id).length
+  const retryInFolder = (folder: { id: string; name: string }) => {
+    state.setScope('folder'); state.setFolderId(folder.id)
+    send(lastUserText, folder)
   }
   const slash = useCompactCommand(state.draft, busy || state.session?.status === 'planning', () => send('/compact'))
   const perform = async (message: OrganizerMessage, undo = false) => {
@@ -102,6 +128,7 @@ export default function OrganizerPage() {
   const disabled = busy || state.session?.status === 'planning' || !model || !state.draft.trim()
 
   return <main className={`organizer-page ${!state.messages.length ? 'organizer-page--empty' : ''}`}>
+    <AssistantChatSettings open={chatSettingsOpen} onOpenChange={setChatSettingsOpen} providerId={model?.provider_id} modelName={model?.model_name} protocol={protocol} value={controls} onChange={setControls} disabled={busy} />
     <header className="organizer-topbar">
       <span className="organizer-title"><FolderInput size={16} />资料库助手</span>
       <ChoiceSelect className="organizer-session-select" label="整理会话" value={state.session?.session_id || ''} disabled={busy} onChange={id => { if (id) void state.restore(id) }} options={[{ value: '', label: '选择历史对话' }, ...state.sessions.map(session => ({ value: session.session_id, label: `${session.history.find(item => item.role === 'user')?.content.slice(0, 22) || '新对话'} · ${new Date(session.updated_at * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` }))]} />
@@ -119,8 +146,14 @@ export default function OrganizerPage() {
         </div>}
         {state.messages.map(message => <article className={`organizer-message organizer-message--${message.role}`} key={message.id}>
           {message.scopeLabel && <div className="organizer-message-scope" aria-label="本轮整理范围">{message.scopeLabel}</div>}
-          <p className="organizer-message-text">{message.text}</p>
+          {message.role === 'assistant' && <WorkProgress entries={message.work_log} text={message.active ? message.text : undefined} events={message.tool_events} active={message.active} phase={message.work_phase} />}
+          {!message.active && message.text && <p className="organizer-message-text">{message.text}</p>}
           {!!message.sources?.length && <SourceList sources={message.sources} />}
+          {clarifying && message.id === lastAssistantId && lastUserText && folders.length > 0 && <div className="organizer-clarify" role="group" aria-label="选择整理范围">
+            <span>{rankedFolders.length ? '是指这个文件夹吗？' : '在哪个文件夹里执行？'}</span>
+            {folderChoices.map(folder => <button key={folder.id} type="button" disabled={!model} onClick={() => retryInFolder(folder)}>{folder.name}<small>{folderCount(folder.id)} 篇</small></button>)}
+            <button type="button" className="organizer-clarify-more" onClick={() => { state.setScope('selected'); setScopeOpen(true) }}>选择笔记…</button>
+          </div>}
           {message.phase === 'superseded' && <div className="organizer-result">旧计划已被后续需求替代，不能再执行。</div>}
           {message.plan?.query_note_ids?.length ? <ul className="organizer-query-results">{message.plan.query_note_ids.map(id => <li key={id}>{noteTitle(message.plan!, id)}</li>)}</ul> : null}
           {message.plan && message.plan.operations.length > 0 && <div className="organizer-plan" id={`organizer-plan-${message.id}`}>
@@ -141,7 +174,7 @@ export default function OrganizerPage() {
             {message.phase === 'undone' && <div className="organizer-result"><RotateCcw size={14} />已撤销这次修改，笔记库已恢复。</div>}
           </div>}
         </article>)}
-        {(state.busy || state.session?.status === 'planning') && <div className="organizer-working" role="status"><Loader2 size={14} className="organizer-spin" />{state.busy === 'compacting' ? '正在压缩上下文…' : state.busy === 'executing' ? '正在执行已确认计划…' : state.busy === 'undoing' ? '正在撤销操作…' : state.busy === 'loading' ? '正在读取会话…' : state.busy === 'cancelling' ? '正在停止处理…' : '正在理解需求并核对整理对象…'}</div>}
+        {state.busy && !state.messages.some(message => message.active) && <WorkProgress active phase={state.busy} />}
         {state.error && <div className="organizer-error" role="alert">{state.error}{state.errorDetails && <details className="organizer-error-details"><summary>查看错误详情</summary><dl><dt>类别</dt><dd>{state.errorDetails.kind}</dd><dt>HTTP 状态</dt><dd>{state.errorDetails.http_status ?? '未提供'}</dd><dt>供应商代码</dt><dd>{state.errorDetails.upstream_code || '未提供'}</dd><dt>请求 ID</dt><dd>{state.errorDetails.request_id || '未提供'}</dd><dt>协议</dt><dd>{state.errorDetails.protocol}</dd><dt>时间</dt><dd>{state.errorDetails.occurred_at}</dd></dl><p>{state.errorDetails.detail}</p></details>}</div>}
         <div ref={bottom} />
       </div>
@@ -154,7 +187,9 @@ export default function OrganizerPage() {
           <SlashCommandMenu open={slash.open} id={slash.id} onSelect={slash.select} />
           <textarea ref={composer} aria-controls={slash.open ? slash.id : undefined} aria-activedescendant={slash.open ? `${slash.id}-compact` : undefined} onBlur={slash.dismiss} aria-label="资料库问题或整理指令" maxLength={4000} placeholder={pending ? '继续修改计划…' : '询问资料、比较方法或整理笔记…'} value={state.draft} onChange={event => state.setDraft(event.target.value)} onKeyDown={event => { if (slash.onKeyDown(event)) return; if (shouldSendMessage(event, useInterfaceStore.getState().sendKey)) { event.preventDefault(); send() } }} rows={1} />
           <div className="organizer-compose-toolbar">
-            <AIControls modelPicker={<PurposeModelPicker inline value={model} onChange={state.setModel} label="整理模型" disabled={busy} controls={controls} onControlsChange={setControls} />} modelName={model?.model_name} value={controls} context={state.session?.context || undefined} draft={state.draft} />
+            <OrganizerScopePicker scope={state.scope} folderId={state.folderId} selectedIds={state.selectedIds} folders={folders} tasks={tasks} disabled={busy} open={scopeOpen} onOpenChange={setScopeOpen} onScope={state.setScope} onFolder={state.setFolderId} onToggleNote={state.toggleNote} />
+            <button type="button" className="organizer-text-button organizer-settings-button" aria-label="聊天设置" title="聊天设置" onClick={() => setChatSettingsOpen(true)}><Settings2 size={15} /></button>
+            <AIControls contextBudget={contextBudget} modelPicker={<PurposeModelPicker inline value={model} onChange={state.setModel} label="整理模型" disabled={busy} controls={controls} onControlsChange={setControls} />} modelName={model?.model_name} value={controls} context={state.session?.context || undefined} draft={state.draft} />
             {(state.busy === 'planning' || state.busy === 'compacting' || state.session?.status === 'planning') && state.session ? <button className="organizer-send" aria-label="停止整理处理" title="停止当前处理" onClick={() => void state.cancel()}><X size={17} /></button> : <button className="organizer-send" aria-label="发送整理指令" title={sendShortcutLabel(sendKey)} disabled={disabled} onClick={() => send()}>{busy ? <Loader2 size={17} className="organizer-spin" /> : <ArrowUp size={18} />}</button>}
           </div>
         </div>

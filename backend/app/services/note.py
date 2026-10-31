@@ -39,6 +39,7 @@ from app.utils.video_helper import generate_screenshot
 from app.utils.video_reader import VideoReader
 from app.utils.dynamic_frames import nearest_candidate
 from app.services import note_storage
+from app.services import note_diagnostics
 
 # ------------------ 环境变量与全局配置 ------------------
 
@@ -165,6 +166,8 @@ class NoteGenerator:
             owns_recorder = True
 
         try:
+            check_cancel = getattr(self, 'generation_cancel_check', lambda: None)
+            check_cancel()
             logger.info(f"开始生成笔记 (task_id={task_id})")
             self._update_status(task_id, TaskStatus.PARSING)
 
@@ -172,6 +175,7 @@ class NoteGenerator:
 
             downloader = self._get_downloader(platform)
             gpt = self._get_gpt(model_name, provider_id)
+            gpt.generation_cancel_check = check_cancel
             if generation_options is not None and callable(getattr(gpt, 'configure_generation', None)):
                 gpt.configure_generation(generation_options, recorder)
 
@@ -215,6 +219,7 @@ class NoteGenerator:
             # 有字幕时只提取元信息，不下载音视频文件（除非需要截图/视频理解）
             has_transcript = transcript is not None
             need_full_download = not has_transcript or screenshot or video_understanding
+            check_cancel()
             audio_meta = self._download_media(
                 downloader=downloader,
                 video_url=video_url,
@@ -231,6 +236,7 @@ class NoteGenerator:
             )
 
             note_storage.update_audio_metadata(task_id, asdict(audio_meta))
+            check_cancel()
 
             # 3. 如果前面没拿到字幕，走转写流程
             if transcript is None:
@@ -243,6 +249,7 @@ class NoteGenerator:
                     task_id=task_id,
                 )
 
+            check_cancel()
             # Select only after transcription, so operation cues are available.
             if (screenshot or video_understanding) and self.video_path:
                 self._update_status(task_id, TaskStatus.FORMATTING, message="选取视频证据帧")
@@ -250,6 +257,7 @@ class NoteGenerator:
                                              grid_size, video_understanding)
 
             # 3. GPT 总结
+            check_cancel()
             markdown = self._summarize_text(
                 audio_meta=audio_meta,
                 transcript=transcript,
@@ -262,6 +270,8 @@ class NoteGenerator:
                 extras=extras,
                 video_img_urls=self.video_img_urls,
             )
+            note_diagnostics.record_event(task_id, 'model_completed')
+            check_cancel()
 
             # 4. 截图 & 链接替换
             if _format:
@@ -277,6 +287,7 @@ class NoteGenerator:
             markdown = prepend_source_link(markdown, str(video_url))
 
             # 5. 保存记录到数据库
+            check_cancel()
             self._update_status(task_id, TaskStatus.SAVING)
             self._save_metadata(video_id=audio_meta.video_id, platform=platform, task_id=task_id)
 
@@ -300,10 +311,20 @@ class NoteGenerator:
             return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta, evidence=evidence)
 
         except Exception as exc:
+            if getattr(exc, 'cancelled', False):
+                raise
+            note_diagnostics.record_failure(task_id, exc)
             if recorder:
-                recorder.finish('failed', exc)
+                try:
+                    recorder.finish('failed', exc)
+                except Exception as audit_exc:
+                    logger.warning('生成用量记录失败：%s', type(audit_exc).__name__)
             logger.error(f"生成笔记流程异常 (task_id={task_id})：{exc}", exc_info=True)
-            self._update_status(task_id, TaskStatus.FAILED, message=str(exc))
+            try:
+                self._update_status(task_id, TaskStatus.FAILED, message=str(exc))
+            except Exception as status_exc:
+                note_diagnostics.record_event(task_id, 'status_write_failed', error_type=type(status_exc).__name__)
+                logger.warning('失败状态写入失败：%s', type(status_exc).__name__)
             return None
 
     @staticmethod
@@ -403,6 +424,7 @@ class NoteGenerator:
             raise
 
     def _handle_exception(self, task_id, exc):
+        note_diagnostics.record_failure(task_id, exc)
         logger.error(f"任务异常 (task_id={task_id})", exc_info=True)
         error_message = getattr(exc, 'detail', str(exc))
         if isinstance(error_message, dict):
@@ -410,7 +432,11 @@ class NoteGenerator:
                 error_message = json.dumps(error_message, ensure_ascii=False)
             except:
                 error_message = str(error_message)
-        self._update_status(task_id, TaskStatus.FAILED, message=error_message)
+        try:
+            self._update_status(task_id, TaskStatus.FAILED, message=error_message)
+        except Exception as status_exc:
+            note_diagnostics.record_event(task_id, 'status_write_failed', error_type=type(status_exc).__name__)
+            logger.warning('失败状态写入失败：%s', type(status_exc).__name__)
 
     def _download_media(
         self,
@@ -626,13 +652,19 @@ class NoteGenerator:
             logger.info("开始转写音频")
             if self.transcriber is None:
                 self.transcriber = self._init_transcriber()
-            transcript = self.transcriber.transcript(file_path=audio_file)
+            if getattr(self, 'transcriber_type', None) == 'groq':
+                transcript = self.transcriber.transcript(file_path=audio_file,
+                    cancel_check=getattr(self, 'generation_cancel_check', None))
+            else:
+                transcript = self.transcriber.transcript(file_path=audio_file)
             if not transcript or not transcript.segments or not transcript.full_text.strip():
                 raise ValueError('转写引擎未返回有效文本和时间戳，未调用笔记生成模型；请检查音轨或转写服务')
             transcript_cache_file.write_text(json.dumps(asdict(transcript), ensure_ascii=False, indent=2), encoding="utf-8")
             logger.info(f"转写并缓存成功 ({transcript_cache_file})")
             return transcript
         except Exception as exc:
+            if getattr(exc, 'cancelled', False):
+                raise
             logger.error(f"音频转写失败：{exc}")
             self._handle_exception(task_id, exc)
             raise
@@ -689,6 +721,8 @@ class NoteGenerator:
             logger.info(f"GPT 总结并缓存成功 ({markdown_cache_file})")
             return markdown
         except Exception as exc:
+            if getattr(exc, 'cancelled', False):
+                raise
             logger.error(f"GPT 总结失败：{exc}")
             self._handle_exception(task_id, exc)
             raise

@@ -13,8 +13,9 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from app.services import organizer_sessions as sessions, organizer, note_storage as notes
-from app.services import note_folders as folders, note_library as library
+from app.services import note_folders as folders, note_library as library, model_context
 from app.routers import organizer as routes
+from tools.fixture_stream import streaming_fixture
 
 
 class OrganizerSessionsTest(unittest.TestCase):
@@ -25,7 +26,8 @@ class OrganizerSessionsTest(unittest.TestCase):
         for module, name, value in ((notes, 'ROOT', root / 'notes'), (folders, 'STATE_PATH', root / 'folders.json'),
                                     (library, 'STATE_PATH', root / 'library.json'),
                                     (organizer, 'JOURNAL_ROOT', root / 'plans'),
-                                    (sessions, 'SESSION_ROOT', root / 'sessions')):
+                                    (sessions, 'SESSION_ROOT', root / 'sessions'),
+                                    (model_context, 'SETTINGS_PATH', root / 'model_context.json')):
             context = patch.object(module, name, value)
             context.start()
             self.addCleanup(context.stop)
@@ -52,7 +54,7 @@ class OrganizerSessionsTest(unittest.TestCase):
         app.include_router(routes.router, prefix='/api')
         self.http = TestClient(app)
 
-    def client(self, provider, model, protocol='openai-chat'):
+    def client(self, provider, model, protocol='openai-chat', *, native_search=False):
         self.clients.append(protocol)
         def create(**kwargs):
             payload = json.loads(kwargs['messages'][-1]['content'])
@@ -80,7 +82,7 @@ class OrganizerSessionsTest(unittest.TestCase):
                 {'explanation': '安全范围计划', 'operations': operations, 'query_note_ids': []})))])
         return types.SimpleNamespace(client=types.SimpleNamespace(protocol=protocol,
             close=lambda: self.closed_clients.append(protocol), chat=types.SimpleNamespace(
-            completions=types.SimpleNamespace(create=create))))
+            completions=types.SimpleNamespace(create=streaming_fixture(create)))))
 
     def message(self, text, **extra):
         data = {'instruction': text, 'provider_id': 'fake', 'model_name': 'fake',
@@ -89,11 +91,173 @@ class OrganizerSessionsTest(unittest.TestCase):
         self.session = sessions.message(self.session['session_id'], data)
         return self.session
 
+    def test_true_upstream_deltas_are_visible_before_completion_and_cancel_closes_stream(self):
+        for cancel in (False, True):
+            with self.subTest(cancel=cancel):
+                self.session = sessions.create({'kind': 'all'})
+                sid = self.session['session_id']
+                started, release, closed = threading.Event(), threading.Event(), threading.Event()
+
+                class Stream:
+                    def __iter__(inner):
+                        yield {'choices': [{'index': 0, 'delta': {'content': '真实第一段'}}]}
+                        started.set()
+                        if not release.wait(5):
+                            raise RuntimeError('test stream timeout')
+                        yield {'choices': [{'index': 0, 'delta': {'content': '，第二段'}}]}
+                        yield {'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]}
+                        yield {'choices': [], 'usage': {'prompt_tokens': 123}}
+
+                    def close(inner):
+                        closed.set()
+                        release.set()
+
+                calls = []
+                def create(**kwargs):
+                    calls.append(kwargs)
+                    self.assertTrue(kwargs['stream'])
+                    return Stream()
+                client = types.SimpleNamespace(client=types.SimpleNamespace(chat=types.SimpleNamespace(
+                    completions=types.SimpleNamespace(create=create))))
+                with patch.object(organizer, 'get_client', return_value=client), ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(self.message, '请解释这个软件怎么使用')
+                    self.assertTrue(started.wait(5))
+                    live = sessions.get(sid)
+                    self.assertEqual(live['status'], 'planning')
+                    self.assertEqual(live['streaming_reply'], '真实第一段')
+                    self.assertIsNone(live['plan'])
+                    if cancel:
+                        stopped = sessions.action(sid, 'cancel', {'expected_revision': live['revision'],
+                                                  'request_id': uuid.uuid4().hex})
+                        self.assertTrue(closed.is_set(), 'Cancel closes active upstream handle')
+                        self.assertEqual(stopped['streaming_reply'], '')
+                    else:
+                        release.set()
+                    result = future.result(5)
+                self.assertEqual(len(calls), 1)
+                self.assertTrue(closed.is_set())
+                self.assertEqual(result['streaming_reply'], '')
+                self.assertEqual(result['status'], 'cancelled' if cancel else 'completed')
+                if not cancel:
+                    self.assertEqual(result['history'][-1]['content'], '真实第一段，第二段')
+                    self.assertEqual(result['context']['input_tokens'], 123)
+                self.assertNotIn((sid, live['revision']), sessions.STREAMS)
+
+    def test_cancel_during_final_stream_read_discards_return_value(self):
+        stopped = {'value': False}
+        def iterator():
+            yield {'type': 'delta', 'text': '第一段'}
+            stopped['value'] = True
+            return object(), {}
+        with patch.object(organizer, 'complete', return_value=iterator()):
+            with self.assertRaisesRegex(ValueError, '晚到'):
+                organizer._complete_stream(object(), 'fake', [], cancellation=lambda: stopped['value'])
+
     def action(self, kind, **extra):
         data = {'expected_revision': self.session['revision'], 'request_id': uuid.uuid4().hex,
                 'plan_id': (self.session.get('plan') or {}).get('plan_id'), **extra}
         self.session = sessions.action(self.session['session_id'], kind, data)
         return self.session
+
+    def test_pending_clarification_accepts_screenshot_sequence_and_real_approval(self):
+        folders.move_notes(['a', 'b'], 'distill')
+        first = self.message('帮我归档蒸馏笔记下的所有笔记')
+        self.assertEqual(first['status'], 'clarification')
+        self.assertIn('蒸馏视频', first['history'][-1]['content'])
+        self.assertEqual(self.calls, [])
+        self.session = sessions.get(self.session['session_id'])
+        second = self.message('名字就是这个，是全部笔记')
+        self.assertEqual(second['status'], 'awaiting_approval')
+        self.assertEqual(second['scope']['folder_id'], 'distill')
+        self.assertEqual(second['plan']['operations'][0]['task_ids'], ['a', 'b'])
+        self.assertFalse(notes.get_task('a').get('archived_at'))
+        self.message('确认执行')
+        self.assertFalse(notes.get_task('a').get('archived_at'))
+        self.assertEqual(self.action('approve')['result']['status'], 'executed')
+        self.assertTrue(notes.get_task('a')['archived_at'])
+        self.assertFalse(notes.get_task('c').get('archived_at'))
+
+    def test_pending_scope_only_and_natural_candidate_replies(self):
+        for reply in ('是的，就是这个文件夹，全部笔记', '就是办公效率，是全部笔记', '办公效率，全部笔记'):
+            with self.subTest(reply=reply):
+                self.session = sessions.create({'kind': 'all'})
+                self.assertEqual(self.message('归档办公效文件夹里的全部笔记')['status'], 'clarification')
+                self.assertEqual(self.message(reply)['plan']['operations'][0]['task_ids'], ['a', 'b'])
+        self.session = sessions.create({'kind': 'all'})
+        self.assertEqual(self.message('请归档')['status'], 'clarification')
+        self.assertEqual(self.message('是全部笔记')['plan']['operations'][0]['task_ids'], ['a', 'b', 'c'])
+
+    def test_unknown_named_all_never_authorizes_library(self):
+        for instruction in ('归档不存在文件夹里的全部笔记', '归档“办公效率2”中的全部笔记'):
+            self.session = sessions.create({'kind': 'all'})
+            self.assertEqual(self.message(instruction)['status'], 'clarification')
+            self.assertFalse(self.session['scope']['authorized'])
+            self.assertEqual(self.message('是全部笔记')['status'], 'clarification')
+            self.assertIsNone(self.session['plan'])
+        self.assertEqual(self.calls, [])
+
+    def test_ambiguous_candidates_require_named_selection(self):
+        folders.create_folder('办公效率视频', 'office-video')
+        self.assertEqual(self.message('归档办公效文件夹里的全部笔记')['status'], 'clarification')
+        self.assertEqual(self.message('名字就是这个，是全部笔记')['status'], 'clarification')
+        self.assertEqual(self.calls, [])
+        selected = self.message('办公效率，全部笔记')
+        self.assertEqual(selected['plan']['operations'][0]['task_ids'], ['a', 'b'])
+        self.assertEqual(selected['scope']['folder_id'], 'office')
+
+    def test_clarification_preserves_favorites_count_and_ui_intersection(self):
+        self.message('归档办公效文件夹里的全部笔记，排除已收藏的')
+        self.assertEqual(self.message('名字就是这个，是全部笔记')['plan']['operations'][0]['task_ids'], ['a'])
+        self.session = sessions.create({'kind': 'all'})
+        self.message('归档办公效文件夹里的三篇笔记')
+        self.assertEqual(self.message('名字就是这个，是全部笔记')['status'], 'clarification')
+        self.session = sessions.create({'kind': 'all'})
+        self.message('归档办公效文件夹里的全部笔记', scope={'kind': 'selected', 'task_ids': ['a']})
+        self.assertEqual(self.message('名字就是这个，是全部笔记')['plan']['operations'][0]['task_ids'], ['a'])
+        self.session = sessions.create({'kind': 'all'})
+        self.message('归档选中笔记', scope={'kind': 'selected', 'task_ids': ['a']})
+        self.assertEqual(self.message('归档全部笔记')['plan']['operations'][0]['task_ids'], ['a'])
+        self.message('归档办公效率')
+        self.assertEqual(self.message('归档全部笔记')['plan']['operations'][0]['task_ids'], ['a', 'b'])
+
+    def test_readonly_negation_cancel_new_target_clear_pending(self):
+        for interruption in ('查询所有笔记', '不要归档', '取消', '先解释一下', '你好'):
+            with self.subTest(interruption=interruption):
+                self.session = sessions.create({'kind': 'all'})
+                self.message('归档办公效文件夹里的全部笔记')
+                self.message(interruption)
+                self.assertIsNone(self.message('名字就是这个，是全部笔记')['plan'])
+        self.session = sessions.create({'kind': 'all'})
+        self.message('归档办公效文件夹里的全部笔记')
+        self.action('cancel')
+        self.assertIsNone(self.message('名字就是这个，是全部笔记')['plan'])
+        self.session = sessions.create({'kind': 'all'})
+        self.message('归档办公效文件夹里的全部笔记')
+        self.assertEqual(self.message('归档不存在文件夹里的全部笔记')['status'], 'clarification')
+        self.assertEqual(self.message('名字就是这个，是全部笔记')['status'], 'clarification')
+        self.assertEqual(self.calls, [])
+
+    def test_completed_chat_does_not_reuse_pending_operation(self):
+        self.message('归档办公效率')
+        self.action('approve')
+        count = len(self.calls)
+        self.assertIsNone(self.message('是全部笔记')['plan'])
+        self.assertEqual(len(self.calls), count)
+        self.assertIsNone(self.message('办公效率，全部笔记')['plan'])
+
+    def test_legacy_only_unresolved_user_request_is_migrated(self):
+        self.message('归档办公效文件夹里的全部笔记')
+        with sessions.LOCK, sessions._db() as db:
+            session = sessions._load(db, self.session['session_id'])
+            session.pop('pending_clarification')
+            sessions._save(db, session)
+        self.assertEqual(self.message('名字就是这个，是全部笔记')['status'], 'awaiting_approval')
+
+    def test_archive_scope_does_not_need_body_search(self):
+        from app.services import library_search
+        with patch.object(library_search, 'search_library', side_effect=AssertionError('正文检索不能决定归档范围')):
+            self.message('归档办公效文件夹里的全部笔记')
+            self.assertEqual(self.message('名字就是这个，是全部笔记')['plan']['scope_count'], 2)
 
     def seed_history(self, count):
         with sessions.LOCK, sessions._db() as db:
@@ -104,11 +268,12 @@ class OrganizerSessionsTest(unittest.TestCase):
         self.session = sessions.get(self.session['session_id'])
 
     @staticmethod
-    def fake_compaction(client, model, history, summary='', keep_recent=4):
+    def fake_compaction(client, model, history, summary='', keep_recent=4, *, context_limit=272000,
+                        threshold=None, output_reserve=4096):
         consumed = max(0, len(history) - keep_recent)
         return {'summary': '只读历史摘要', 'consumed_messages': consumed,
                 'compacted': bool(consumed), 'context': {'input_tokens': 2000, 'estimated': True,
-                'limit': 272000, 'compacted': bool(consumed), 'compacted_messages': consumed}}
+                'limit': context_limit, 'compacted': bool(consumed), 'compacted_messages': consumed}}
 
     def compact_data(self):
         return {'expected_revision': self.session['revision'], 'request_id': uuid.uuid4().hex,
@@ -118,8 +283,11 @@ class OrganizerSessionsTest(unittest.TestCase):
         self.message('归档办公效率')
         self.seed_history(8)
         before = self.session
-        with patch.object(sessions, 'compact_history', side_effect=self.fake_compaction):
+        with patch.object(sessions, 'compact_history', side_effect=self.fake_compaction) as compactor:
             self.session = sessions.compact(before['session_id'], self.compact_data())
+        self.assertEqual(compactor.call_args.kwargs['context_limit'], 61440)
+        self.assertEqual(compactor.call_args.kwargs['threshold'], 49152)
+        self.assertEqual(compactor.call_args.kwargs['output_reserve'], 4096)
         for key in ('revision', 'plan', 'status', 'history', 'scope', 'target_summary', 'pending_plan_id'):
             self.assertEqual(self.session[key], before[key], key)
         self.assertEqual(len(sessions._active_history(self.session)), 4)
@@ -151,15 +319,32 @@ class OrganizerSessionsTest(unittest.TestCase):
             self.assertGreater(sessions.compact(before['session_id'], data)['memory']['compacted_messages'], before['memory']['compacted_messages'])
 
     def test_auto_compaction_preserves_full_history_and_sends_summary_recent_turns(self):
+        model_context.save_settings('fake', 'fake', model_window=276096)
         self.seed_history(160)
         before = self.session['history']
         with patch.object(sessions, 'compact_history', side_effect=self.fake_compaction) as compact:
             self.message('解释这个错误')
         compact.assert_called_once()
+        self.assertEqual(compact.call_args.kwargs['context_limit'], 267904)
         self.assertEqual(self.session['history'][:160], before)
         payload = json.loads(self.answer_calls[-1]['messages'][-1]['content'])
         self.assertEqual(len(payload['history']), 4)
         self.assertEqual(payload['untrusted_history_summary'], '只读历史摘要')
+
+    def test_unknown_capacity_rejects_large_first_message_without_changing_history(self):
+        self.seed_history(6)
+        with sessions.LOCK, sessions._db() as db:
+            session = sessions._load(db, self.session['session_id'])
+            session['history'][0]['content'] = 'x' * 80000
+            sessions._save(db, session)
+        before = sessions.get(self.session['session_id'])
+        with self.assertRaisesRegex(ValueError, '原记录已保留'):
+            sessions.compact(before['session_id'], self.compact_data())
+        after = sessions.get(before['session_id'])
+        self.assertEqual(after['history'], before['history'])
+        self.assertEqual(after['memory'], before['memory'])
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.answer_calls, [])
 
     def test_manual_command_and_concurrent_cancellation_fence(self):
         self.seed_history(8)
@@ -244,6 +429,19 @@ class OrganizerSessionsTest(unittest.TestCase):
         self.assertIsNone(self.session['plan'])
         self.assertEqual(self.calls, [])
 
+    def test_informal_folder_name_suggests_but_does_not_authorize(self):
+        folders.move_notes(['a'], 'distill')
+        first = self.message('归档蒸馏的那几篇')
+        self.assertEqual(first['status'], 'clarification')
+        self.assertFalse(first['scope']['authorized'])
+        self.assertEqual(first['folder_candidates'][0]['id'], 'distill')
+        self.assertEqual(self.calls, [])
+        self.assertFalse(notes.get_task('a').get('archived_at'))
+        second = self.message('蒸馏视频，全部笔记')
+        self.assertEqual(second['status'], 'awaiting_approval')
+        self.assertEqual(second['plan']['operations'][0]['task_ids'], ['a'])
+        self.assertFalse(notes.get_task('a').get('archived_at'))
+
     def test_conversation_failure_is_visible_without_template_or_write(self):
         self.fail_model = True
         result = self.message('Gemini无法使用，报错401')
@@ -308,7 +506,8 @@ class OrganizerSessionsTest(unittest.TestCase):
         self.assertEqual(result['status'], 'cancelled')
         self.assertIsNone(result['plan'])
         records = [json.loads(p.read_text(encoding='utf-8')) for p in organizer.JOURNAL_ROOT.glob('*.json')]
-        self.assertEqual(records[0]['status'], 'superseded')
+        self.assertTrue(all(record['status'] == 'superseded' for record in records))
+        self.assertEqual(records, [], 'Cancelled upstream stream is discarded before any plan journal is created')
         loaded = sessions.get(stopped['session_id'])
         self.assertEqual(loaded['status'], 'cancelled')
 
@@ -382,7 +581,7 @@ class OrganizerSessionsTest(unittest.TestCase):
                 return types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(
                     content=json.dumps(proposal)))])
             return types.SimpleNamespace(client=types.SimpleNamespace(chat=types.SimpleNamespace(
-                completions=types.SimpleNamespace(create=create))))
+                completions=types.SimpleNamespace(create=streaming_fixture(create)))))
         with patch.object(organizer, 'get_client', side_effect=folder_client):
             self.assertEqual(self.message('新建文件夹叫学习资料')['status'], 'awaiting_approval')
         self.assertFalse(self.session['scope']['authorized'])
@@ -473,22 +672,25 @@ class OrganizerSessionsTest(unittest.TestCase):
         self.assertEqual(self.answer_calls, [])
 
     def test_reasoning_and_context_settings_reach_both_model_paths(self):
+        model_context.save_settings('fake', 'gpt-5.4', model_window=128000, user_limit=64000, output_reserve=8192)
         result = self.message('归档办公效率', model_name='gpt-5.4', reasoning_effort='high', context_limit=272000)
         self.assertEqual(result['status'], 'awaiting_approval')
         self.assertEqual(self.calls[-1]['reasoning_effort'], 'high')
         self.assertNotIn('temperature', self.calls[-1])
-        self.assertEqual(result['context']['limit'], 272000)
+        self.assertEqual(result['context']['limit'], 55808)
+        self.assertEqual(self.calls[-1]['max_completion_tokens'], 8192)
         self.assertTrue(result['context']['estimated'])
         result = self.message('解释这个错误', model_name='gpt-5.4', reasoning_effort='low', context_limit=272000)
         self.assertEqual(self.answer_calls[-1]['reasoning_effort'], 'low')
-        self.assertEqual(result['context']['limit'], 272000)
+        self.assertEqual(result['context']['limit'], 55808)
+        self.assertEqual(self.answer_calls[-1]['max_completion_tokens'], 8192)
         self.assertGreater(result['context']['input_tokens'], 0)
 
-    def test_unsupported_reasoning_is_visible_without_model_request(self):
+    def test_unknown_model_can_request_explicit_effort_without_test_unlock(self):
         result = self.message('归档办公效率', reasoning_effort='high')
-        self.assertEqual(result['status'], 'failed')
-        self.assertIn('思考档位', result['error'])
-        self.assertEqual(self.calls, [])
+        self.assertEqual(result['status'], 'awaiting_approval')
+        self.assertEqual(self.calls[-1]['reasoning_effort'], 'high')
+        self.assertFalse(library.list_entries()['entries'].get('a', {}).get('archived', False))
 
     def test_readonly_provider_cannot_invent_confirmation_authority(self):
         with self.assertRaisesRegex(ValueError, '没有可执行计划'):
@@ -531,7 +733,7 @@ class OrganizerSessionsTest(unittest.TestCase):
                 proposal = {'explanation': '仅执行指定操作', 'operations': [operation], 'query_note_ids': []}
                 response = types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(
                     content=json.dumps(proposal)))])
-                with patch.object(organizer, 'complete', return_value=(response, {})):
+                with patch.object(organizer, '_complete_stream', return_value=(response, {})):
                     result = self.message(text)
                 self.assertEqual(result['status'], 'awaiting_approval')
                 self.assertEqual(result['plan']['operations'][0]['type'], operation['type'])
@@ -544,7 +746,7 @@ class OrganizerSessionsTest(unittest.TestCase):
             {'type': 'set_tags', 'task_ids': ['a', 'b'], 'tags': ['办公']}], 'query_note_ids': []}
         response = types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(
             content=json.dumps(proposal)))])
-        with patch.object(organizer, 'complete', return_value=(response, {})):
+        with patch.object(organizer, '_complete_stream', return_value=(response, {})):
             result = self.message('整理办公效率')
         self.assertEqual(result['status'], 'awaiting_approval')
         self.assertEqual([op['type'] for op in result['plan']['operations']],
@@ -560,7 +762,7 @@ class OrganizerSessionsTest(unittest.TestCase):
             {'type': 'rename_folder', 'folder_id': 'other', 'name': '工作'}], 'query_note_ids': []}
         response = types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(
             content=json.dumps(proposal)))])
-        with patch.object(organizer, 'complete', return_value=(response, {})):
+        with patch.object(organizer, '_complete_stream', return_value=(response, {})):
             result = self.message('把办公效率文件夹重命名为工作')
         self.assertEqual(result['status'], 'failed')
         self.assertIn('重命名对象', result['error'])
@@ -615,7 +817,7 @@ class OrganizerSessionsTest(unittest.TestCase):
             {'type': 'set_tags', 'task_ids': ['a'], 'tags': ['UV']}], 'query_note_ids': []}
         response = types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(
             content=json.dumps(proposal)))])
-        with patch.object(organizer, 'complete', return_value=(response, {})):
+        with patch.object(organizer, '_complete_stream', return_value=(response, {})):
             result = self.message('给办公效率里的所有笔记设置UV标签')
         self.assertEqual(result['status'], 'failed')
         self.assertIsNone(result['plan'])
@@ -702,7 +904,7 @@ class OrganizerSessionsTest(unittest.TestCase):
             details = {'kind': 'upstream_http', 'http_status': status, 'upstream_code': 'unavailable',
                        'request_id': 'request-example', 'occurred_at': '2026-10-10T00:00:00+00:00',
                        'protocol': 'openai-responses', 'detail': f'供应商拒绝请求（HTTP {status}）'}
-            with patch.object(organizer, 'complete', side_effect=SafeAIError(details)) as completion:
+            with patch.object(organizer, '_complete_stream', side_effect=SafeAIError(details)) as completion:
                 result = self.message('解释错误', protocol='openai-responses')
             self.assertEqual(result['status'], 'failed')
             self.assertEqual(result['error'], details['detail'])
@@ -752,7 +954,7 @@ class OrganizerSessionsTest(unittest.TestCase):
         result = {'results': [actual], 'offset': 0, 'has_more': True, 'next_offset': 8}
         with patch.object(library_search, 'search_library', return_value=result) as search, \
                 patch.object(library_search, 'read_note_sections', return_value={'results': []}), \
-                patch.object(organizer, 'complete', side_effect=[(tool_response, {}), (bad_tool_response, {}), (final_response, {})]) as completion:
+                patch.object(organizer, '_complete_stream', side_effect=[(tool_response, {}), (bad_tool_response, {}), (final_response, {})]) as completion:
             organizer.answer('UV', 'fake', 'fake', [], '', {}, sources_sink=sources)
         self.assertEqual(search.call_args_list[-1].kwargs['offset'], 8)
         self.assertEqual(completion.call_count, 3)
@@ -774,7 +976,7 @@ class OrganizerSessionsTest(unittest.TestCase):
             content=None, tool_calls=[types.SimpleNamespace(id='call', function=types.SimpleNamespace(
                 name='search_library', arguments='{"query":"UV"}'))]))])
         with patch.object(library_search, 'search_library', return_value={'results': []}), \
-                patch.object(organizer, 'complete', return_value=(repeating, {})) as completion:
+                patch.object(organizer, '_complete_stream', return_value=(repeating, {})) as completion:
             with self.assertRaisesRegex(ValueError, '预算'):
                 organizer.answer('UV', 'fake', 'fake', [], '', {})
         self.assertEqual(completion.call_count, organizer.LIBRARY_MODEL_ROUNDS + 1)
@@ -784,7 +986,7 @@ class OrganizerSessionsTest(unittest.TestCase):
         from app.models.organizer_requests import PlanRequest, SessionCompactRequest
         request = PlanRequest(instruction='查询', provider_id='fake', model_name='fake', reasoning_effort='max')
         self.assertEqual(request.protocol, 'openai-chat')
-        self.assertFalse(request.web_search)
+        self.assertTrue(request.web_search)
         self.assertEqual(request.web_search_mode, 'native')
         with sessions.LOCK, sessions._db() as db:
             old = sessions._load(db, self.session['session_id'])
@@ -805,7 +1007,7 @@ class OrganizerSessionsTest(unittest.TestCase):
         first = types.SimpleNamespace(choices=[types.SimpleNamespace(message=native)], web_sources=[source], web_search_used=True)
         second = types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(content='基于来源回答。'))])
         with patch.object(library_search, 'search_library', return_value={'results': []}), \
-                patch.object(organizer, 'complete', side_effect=[(first, {}), (second, {})]) as completion:
+                patch.object(organizer, '_complete_stream', side_effect=[(first, {}), (second, {})]) as completion:
             result = self.message('查询UV', protocol='openai-responses', web_search=True)
         self.assertEqual(result['status'], 'completed')
         self.assertIn(native, completion.call_args.args[2])
@@ -822,7 +1024,7 @@ class OrganizerSessionsTest(unittest.TestCase):
                   'text': '参考内容', 'archived': False}
         with patch.object(library_search, 'search_library', return_value={'results': [actual]}), \
                 patch.object(library_search, 'read_note_sections', return_value={'results': []}), \
-                patch.object(organizer, 'complete', side_effect=SafeAIError({'detail': '上游失败', 'http_status': 503})):
+                patch.object(organizer, '_complete_stream', side_effect=SafeAIError({'detail': '上游失败', 'http_status': 503})):
             result = self.message('查找UV')
         self.assertEqual(result['status'], 'failed')
         self.assertEqual(result['history'][-1]['sources'][0]['source_id'], actual['source_id'])
@@ -847,19 +1049,21 @@ class OrganizerSessionsTest(unittest.TestCase):
         self.assertEqual(result['status'], 'completed')
         self.assertEqual({s['note_id'] for s in result['history'][-1]['sources']}, {'a'})
 
-    def test_real_unverified_tool_model_uses_presearch_without_function_parameters(self):
+    def test_real_unverified_tool_model_gets_tools_without_capability_precheck(self):
         from app.services import model_capabilities
         original = self.client
-        def real_identity(provider, model, protocol='openai-chat'):
-            client = original(provider, model, protocol)
+        def real_identity(provider, model, protocol='openai-chat', *, native_search=False):
+            client = original(provider, model, protocol, native_search=native_search)
             client.client.bilinote_provider_id = provider
             return client
-        for features in ({}, {'tools': {'status': 'unsupported'}}):
+        for features in ({}, {'tools': {'status': 'unsupported'}}, {'tools': {'status': 'failed'}},
+                         {'tools': {'status': 'inconclusive'}}):
             with patch.object(organizer, 'get_client', side_effect=real_identity), \
-                    patch.object(model_capabilities, 'get_capabilities', return_value={'features': features}):
+                    patch.object(model_capabilities, 'get_capabilities', return_value={'features': features}) as precheck:
                 result = self.message('查找UV')
             self.assertEqual(result['status'], 'completed')
-            self.assertNotIn('tools', self.answer_calls[-1])
+            self.assertIn('tools', self.answer_calls[-1])
+            precheck.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -20,3 +20,23 @@
 .capability-result summary { cursor: pointer; color: var(--muted-foreground); }
 .capability-result pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; margin-top: 8px; font-size: 11px; }
 .capability-empty { color: var(--muted-foreground); font-size: 13px; }
+.capability-help { margin-top:8px; font-size:11px; color:var(--muted-foreground); }
+.capability-help summary { cursor:pointer; }
+.capability-help p { margin-top:6px; }
+.capability-checks { display:block; margin:14px 0 6px; }
+.capability-table { width:100%; border-collapse:collapse; font-size:13px; }
+.capability-table th { padding:0 8px 8px; text-align:left; font-weight:400; font-size:12px; color:var(--muted-foreground); border-bottom:1px solid var(--border); }
+.capability-table td { padding:9px 8px; border-bottom:1px solid var(--border); vertical-align:middle; }
+.capability-table tr:last-child td { border-bottom:0; }
+.capability-table td:first-child { width:46%; }
+.capability-table label { display:inline-flex; align-items:center; gap:8px; cursor:pointer; }
+.capability-candidates { display:block; margin:3px 0 0 24px; font-size:11px; }
+.capability-status.is-none { color:var(--muted-foreground); opacity:.7; }
+.capability-status.is-unsupported { color:var(--destructive); }
+.capability-status.is-inconclusive { color:#c58a1a; }
+.capability-actions { align-items:center; }
+.capability-link { padding:4px 6px; font-size:12px; color:var(--muted-foreground); text-decoration:underline; text-underline-offset:3px; }
+.capability-link:hover:not(:disabled) { color:var(--foreground); }
+.capability-estimate { margin-left:auto; cursor:help; font-size:12px; }
+.capability-stale { margin:10px 0 0; font-size:12px; color:#c58a1a; }
+.capability-transport { margin-top:4px; font-size:13px; }

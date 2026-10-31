@@ -1,12 +1,16 @@
 'use client'
 
-import { BrainCircuit, MessageSquare } from 'lucide-react'
+import { BrainCircuit, FileText, MessageSquare, ScrollText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
 import { noteStyleLabel } from '@/utils/noteGeneration'
+import { formatNoteTime, formatVersionLabel } from '@/utils/versionLabel'
 import { useInterfaceStore } from '@/store/interfaceStore'
+import { lazy, Suspense, useState } from 'react'
+import { useTaskStore } from '@/store/taskStore'
+import toast from 'react-hot-toast'
+const GenerationDetailsDialog = lazy(() => import('./GenerationDetailsDialog'))
 
 interface VersionNote {
   ver_id: string
@@ -57,94 +61,55 @@ export function MarkdownHeader({
   setViewMode,
 }: NoteHeaderProps) {
   const reducedMotion = useInterfaceStore(state => state.reducedMotion)
+  const task = useTaskStore(state => state.tasks.find(item => item.id === currentTask?.id))
+  const [diagnosticsId, setDiagnosticsId] = useState<string | null>(null)
+  const failed = task?.status === 'FAILED'
+  const collapsed = compact && !failed
   const styleName = noteStyles.find(v => v.value === style)?.label || noteStyleLabel(style)
 
   const versions: VersionNote[] = Array.isArray(currentTask?.markdown)
     ? currentTask.markdown
     : []
-
-  const formatDate = (date: string | Date | undefined) => {
-    if (!date) return ''
-    const d = typeof date === 'string' ? new Date(date) : date
-    if (isNaN(d.getTime())) return ''
-    return d
-      .toLocaleString('zh-CN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-      .replace(/\//g, '-')
-  }
+  const versionIndex = Math.max(0, versions.findIndex(v => v.ver_id === currentVerId))
+  const meta = [modelName, styleName, formatNoteTime(createAt)].filter(Boolean).join(' · ')
 
   return (
-    <div className="workspace-note-header-motion" data-collapsed={compact} data-reduced-motion={reducedMotion} aria-hidden={compact} inert={compact}>
+    <div className="workspace-note-header-motion" data-collapsed={collapsed} data-reduced-motion={reducedMotion} aria-hidden={collapsed} inert={collapsed}>
     <div className="workspace-note-header-clip">
-    <div className="workspace-note-header flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b bg-background px-5 py-2">
-      {/* 左侧区域：版本 + 标签 + 创建时间 */}
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
+    <div className="workspace-note-header note-header-row border-b bg-background">
+      <div className="note-header-meta">
         {currentTask?.archived_at && <Badge variant="outline">已归档</Badge>}
-        {isMultiVersion && (
+        {isMultiVersion && versions.length > 1 && (
           <Select value={currentVerId} onValueChange={setCurrentVerId}>
-            <SelectTrigger className="h-8 w-[160px] text-sm">
-              <div className="flex items-center">
-                {(() => {
-                  const idx = versions.findIndex(v => v.ver_id === currentVerId)
-                  return idx !== -1 ? `版本（${currentVerId.slice(-6)}）` : ''
-                })()}
-              </div>
+            <SelectTrigger className="note-version-trigger" aria-label="笔记版本">
+              <span className="truncate">{formatVersionLabel(versions[versionIndex], versionIndex, versions.length)}</span>
             </SelectTrigger>
-
             <SelectContent>
-              {versions.map(v => {
-                const shortId = v.ver_id.slice(-6)
-                return (
-                  <SelectItem key={v.ver_id} value={v.ver_id}>
-                    {`版本（${shortId}）`}
-                  </SelectItem>
-                )
-              })}
+              {versions.map((v, index) => (
+                <SelectItem key={v.ver_id} value={v.ver_id}>
+                  <span className="flex flex-col gap-0.5">
+                    <span>{formatVersionLabel(v, index, versions.length)}</span>
+                    {v.model_name && <span className="text-[11px] text-muted-foreground">{v.model_name}</span>}
+                  </span>
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         )}
-
-        <Badge variant="secondary" className="max-w-48 truncate text-muted-foreground font-normal">
-          {modelName}
-        </Badge>
-        <Badge variant="secondary" className="text-muted-foreground font-normal">
-          {styleName}
-        </Badge>
-
-        {createAt && (
-          <div className="text-muted-foreground text-[11px]">{formatDate(createAt)}</div>
-        )}
+        <span className="note-header-info" title={meta}>{meta}</span>
       </div>
 
-      {/* 右侧操作按钮 */}
-      <div className="flex flex-wrap items-center gap-1">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={() => {
-                  setViewMode(viewMode == 'preview' ? 'map' : 'preview')
-                }}
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2"
-              >
-                <BrainCircuit className="mr-1.5 h-4 w-4" />
-                <span className="text-sm">{viewMode == 'preview' ? '思维导图' : 'markdown'}</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>思维导图</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-        {setShowChat && <Button onClick={() => setShowChat(showChat ? false : 'half')} variant="ghost" size="sm" className="h-8 px-2" aria-pressed={Boolean(showChat)} title="基于笔记内容的 AI 问答"><MessageSquare className="mr-1.5 h-4 w-4" /><span className="text-sm">AI 问答</span></Button>}
-        <Button onClick={() => setShowTranscribe(!showTranscribe)} variant="ghost" size="sm" className="h-8 px-2" aria-pressed={showTranscribe} title="原文参照"><span className="text-sm">原文参照</span></Button>
+      <div className="note-header-actions">
+        {failed && <><span className="text-xs text-destructive">{task.cancelled ? '已取消生成' : '本次生成未完成'}</span><Button variant="outline" size="sm" className="h-8 px-2" onClick={() => setDiagnosticsId(task.id)}>诊断与恢复</Button><Button variant="ghost" size="sm" className="h-8 px-2" title="重新调用模型生成笔记，可能产生费用" disabled={Boolean(task.archived_at) || task.submissionInFlight} onClick={() => { void useTaskStore.getState().retryTask(task.id).catch((error: unknown) => { const failure = error as { msg?: string; message?: string }; toast.error(failure?.msg || failure?.message || '提交失败，请检查任务状态') }) }}>重新生成（调用模型）</Button></>}
+        <Button onClick={() => setViewMode(viewMode == 'preview' ? 'map' : 'preview')} variant="ghost" size="sm" className="note-header-action" aria-pressed={viewMode === 'map'} title={viewMode == 'preview' ? '思维导图' : '返回正文'}>
+          {viewMode == 'preview' ? <BrainCircuit className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+          <span>{viewMode == 'preview' ? '思维导图' : '正文'}</span>
+        </Button>
+        {setShowChat && <Button onClick={() => setShowChat(showChat ? false : 'half')} variant="ghost" size="sm" className="note-header-action" aria-pressed={Boolean(showChat)} title="AI 问答"><MessageSquare className="h-4 w-4" /><span>AI 问答</span></Button>}
+        <Button onClick={() => setShowTranscribe(!showTranscribe)} variant="ghost" size="sm" className="note-header-action" aria-pressed={showTranscribe} title="原文参照"><ScrollText className="h-4 w-4" /><span>原文参照</span></Button>
       </div>
     </div>
+    {task && diagnosticsId === task.id && <Suspense fallback={<p role="status">读取诊断…</p>}><GenerationDetailsDialog key={task.id} taskId={task.id} versionId={currentVerId} modelName={task.formData?.model_name || modelName} initialTab="diagnostics" allowComparison={false} onClose={() => setDiagnosticsId(null)} /></Suspense>}
     </div>
     </div>
   )

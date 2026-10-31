@@ -2,7 +2,7 @@ import { Switch } from '@/components/ui/switch'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProviderStore } from '@/store/providerStore'
-import { classifyProvider } from '@/utils/providerProfiles'
+import { ChevronRight } from 'lucide-react'
 
 export interface IProviderCardProps {
   id: string
@@ -21,7 +21,6 @@ const ProviderCard = ({
 
   const isChecked = enabled === 1
   const [busy, setBusy] = useState(false)
-  const profile = classifyProvider(id, endpoint)
 
   const handleToggle = async (checked: boolean) => {
     const allProviders = useProviderStore.getState().provider
@@ -36,12 +35,8 @@ const ProviderCard = ({
   }
 
   return (
-    <div className="settings-row">
-      <div className="min-w-0">
-        <h2>{providerName}</h2>
-        <p>{profile.label}{profile.hostname ? ` · 实际域名：${profile.hostname}` : ''}</p>
-        <p className="break-all">{endpoint || '尚未配置 API 地址'}</p>
-      </div>
+    <div className="api-provider-row">
+      <button type="button" className="api-provider-info" onClick={() => navigate(`/settings/model/${id}`)} aria-label={`配置 ${providerName}`}><strong>{providerName}</strong><span title={endpoint}>{endpoint || '未配置地址'}</span></button>
 
       <div className="settings-row-controls">
         <Switch
@@ -50,7 +45,7 @@ const ProviderCard = ({
           disabled={busy}
           onCheckedChange={checked => void handleToggle(checked)}
         />
-        <button type="button" className="settings-button" aria-label={`编辑 ${providerName}`} onClick={() => navigate(`/settings/model/${id}`)}>编辑</button>
+        <button type="button" className="api-icon-button" title="配置" aria-label={`编辑 ${providerName}`} onClick={() => navigate(`/settings/model/${id}`)}><ChevronRight size={16} /></button>
       </div>
     </div>
   )

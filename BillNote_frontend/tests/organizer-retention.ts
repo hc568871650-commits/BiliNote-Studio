@@ -3,7 +3,7 @@ import { webcrypto } from 'node:crypto'
 
 const storage = new Map<string, string>()
 Object.defineProperty(globalThis, 'localStorage', { value: { getItem: (key: string) => storage.get(key) || null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) }, configurable: true })
-Object.defineProperty(globalThis, 'location', { value: { search: '', hash: '', reload: () => {} }, configurable: true })
+Object.defineProperty(globalThis, 'location', { value: { origin: 'http://synthetic.invalid', search: '', hash: '', reload: () => {} }, configurable: true })
 if (!globalThis.crypto) Object.defineProperty(globalThis, 'crypto', { value: webcrypto })
 const seed = Array.from({ length: 10 }, (_, index) => {
   const id = `old-${index + 1}`

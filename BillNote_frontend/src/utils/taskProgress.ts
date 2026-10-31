@@ -1,17 +1,24 @@
 import type { Task } from '@/store/taskStore'
 
-export const generationStages = ['接收任务', '获取视频', '转写字幕', '整理笔记', '保存结果']
+export const generationStages = ['准备任务', '获取视频', '转写字幕', '整理笔记', '保存结果']
 const phases: Record<string, { index: number; title: string; detail: string }> = {
   PENDING: { index: 0, title: '任务已排队', detail: '等待后台开始处理。' },
-  PARSING: { index: 0, title: '正在准备视频', detail: '初始化处理器并解析来源。' },
+  PARSING: { index: 0, title: '正在准备任务', detail: '初始化处理器并解析来源。' },
   DOWNLOADING: { index: 1, title: '正在获取视频', detail: '正在读取来源、下载媒体或复用缓存。' },
-  TRANSCRIBING: { index: 2, title: '正在整理原始字幕', detail: '正在提取字幕或转写音频，耗时取决于视频长度。' },
+  TRANSCRIBING: { index: 2, title: '正在转写字幕', detail: '正在提取字幕或转写音频，耗时取决于视频长度。' },
   FORMATTING: { index: 3, title: '正在处理画面与排版', detail: '正在选择截图或整理笔记中的来源与图片。' },
-  SUMMARIZING: { index: 3, title: '正在蒸馏笔记', detail: '模型正在根据字幕与所选画面整理内容。' },
+  SUMMARIZING: { index: 3, title: '正在整理笔记', detail: '模型正在根据字幕与所选画面整理内容。' },
   SAVING: { index: 4, title: '正在保存结果', detail: '正在保存笔记、图片及来源信息。' },
   SUCCESS: { index: 4, title: '生成完成', detail: '正在载入完整笔记。' },
 }
 export const isKnownActivePhase = (status?: string) => Boolean(status && status !== 'SUCCESS' && phases[status])
+export function generationStatusLabel(task: Pick<Task, 'status' | 'cancelled'>) {
+  if (task.cancelled && task.status === 'FAILED') return '已取消'
+  if (task.status === 'SUCCESS') return '生成完成'
+  if (task.status === 'FAILED') return '失败'
+  if (task.status === 'SUBMISSION_UNKNOWN') return '提交待确认'
+  return ({ PENDING: '等待中', PARSING: '准备中', DOWNLOADING: '获取视频', TRANSCRIBING: '转写中', SUMMARIZING: '生成中', FORMATTING: '整理中', SAVING: '保存中' } as Record<string, string>)[task.status] || '阶段未知'
+}
 export function generationPhase(task: Pick<Task, 'status' | 'last_active_status'>) {
   const status = task.status === 'FAILED' ? task.last_active_status : task.status
   return (status && phases[status]) || { index: -1, title: '正在同步生成进度', detail: '正在向后台读取当前处理阶段。' }

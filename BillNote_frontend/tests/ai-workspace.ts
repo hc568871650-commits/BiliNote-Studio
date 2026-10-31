@@ -113,12 +113,15 @@ async function run() {
   assert.deepEqual(wireAttachment(local), { type: 'quote', name: '教程片段', text: '引用 local' }, 'Wire payload excludes source metadata and local paths')
   assert.deepEqual(wireAttachment({ id: 'image', type: 'image', name: 'screenshot.png', data_url: 'data:image/png;base64,AA==', taskId: 'secret' }), { type: 'image', name: 'screenshot.png', data_url: 'data:image/png;base64,AA==' })
 
-  const { settingsForModel, defaultAISettings, reasoningChoices, estimateLocalContext } = await import('@/utils/aiSettings')
+  const { settingsForModel, defaultAISettings, defaultReadingSettings, requestEffortChoices, reasoningChoices, estimateLocalContext } = await import('@/utils/aiSettings')
   assert.equal(defaultAISettings.context_limit, 272000)
-  assert.deepEqual(settingsForModel({ reasoning_effort: 'xhigh', context_limit: 64000 } as never, 'gemini-3.8-flash'), { reasoning_effort: 'auto', context_limit: 272000 })
+  assert.deepEqual(settingsForModel({ reasoning_effort: 'xhigh', context_limit: 64000 } as never, 'gemini-3.8-flash', requestEffortChoices('gemini-3.8-flash', 'gemini')), { reasoning_effort: 'auto', context_limit: 64000 })
+  assert.equal(defaultReadingSettings.web_search, true)
+  assert.equal(defaultReadingSettings.web_search_mode, 'native')
+  assert.equal(({ ...defaultReadingSettings, web_search: false }).web_search, false)
   assert.ok(reasoningChoices('gpt-5.4').includes('xhigh'))
   assert.ok(!reasoningChoices('gpt-6-astra').includes('none'))
-  assert.equal(settingsForModel({ reasoning_effort: 'high', context_limit: 272000 }, 'unknown-model').reasoning_effort, 'auto')
+  assert.equal(settingsForModel({ reasoning_effort: 'high', context_limit: 272000 }, 'unknown-model').reasoning_effort, 'high')
   assert.ok(estimateLocalContext([{ data_url: 'data:image/png;base64,' + 'x'.repeat(100000) }]) < 20000, 'Image estimates do not count base64 as text tokens')
 
   const { activeReadingMessages, compactedMemory, compressionPrefix } = await import('@/utils/readingContext')

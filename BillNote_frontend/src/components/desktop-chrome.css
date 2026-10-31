@@ -1,4 +1,6 @@
 .studio-chrome { min-height:100dvh; }
+.studio-titlebar[data-image-viewing=true] { visibility:hidden; pointer-events:none; }
+.studio-titlebar[data-window-controls-locked=true]::after { content:''; position:absolute; inset:0; }
 .studio-chrome--enabled { --studio-titlebar-height:32px; padding-top:var(--studio-titlebar-height); }
 .studio-titlebar { position:fixed; top:0; left:0; right:0; z-index:60; height:var(--studio-titlebar-height); display:flex; align-items:center; background:var(--surface-shell); color:var(--surface-description); user-select:none; border-bottom:1px solid color-mix(in srgb,var(--surface-border) 60%,transparent); font-size:12px; }
 .studio-titlebar-drag { flex:1; min-width:32px; height:100%; display:flex; align-items:center; gap:8px; padding-left:14px; }

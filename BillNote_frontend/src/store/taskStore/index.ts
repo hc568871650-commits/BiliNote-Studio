@@ -39,7 +39,7 @@ export interface Markdown {
   style: string
   model_name: string
   provider_id?: string
-  protocol?: 'openai-chat' | 'openai-responses' | 'anthropic'
+  protocol?: 'openai-chat' | 'openai-responses' | 'anthropic' | 'gemini'
   created_at: string
   resource_base?: string
 }
@@ -50,6 +50,7 @@ export interface Task {
   transcript: Transcript
   status: TaskStatus
   statusMessage?: string
+  cancelled?: boolean
   last_active_status?: string
   started_at?: string | null
   finished_at?: string | null

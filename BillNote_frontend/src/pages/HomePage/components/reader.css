@@ -1,4 +1,9 @@
 .reader-body .markdown-body { font-size: inherit; line-height: 1.85; }
+[data-reader-opening=true] { visibility:hidden; }
+/* Explicit visible descendants (rail, outline groups) must not escape the gate. */
+[data-reader-opening=true] > :not(.reader-opening),
+[data-reader-opening=true] > :not(.reader-opening) * { visibility:hidden !important; }
+.reader-opening { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; visibility:visible; color:var(--muted-foreground); }
 .reader-body .markdown-body p { line-height: inherit; }
 .reader-body .markdown-body h1 { font-size: 2em; }
 .reader-body .markdown-body h2 { font-size: 1.5em; }
@@ -17,18 +22,18 @@
 .reading-outline-shell.is-open { opacity:1; visibility:visible; pointer-events:auto; transform:translateX(0); transition:opacity 150ms ease 90ms,transform 180ms var(--outline-ease) 70ms,visibility 0s 70ms; }
 .reader-tools .reader-outline-button[aria-pressed=true] { background:var(--muted); color:var(--foreground); box-shadow:inset 0 0 0 1px var(--border); }
 .reading-outline-rail { position:relative; flex:0 0 50px; width:50px; min-height:0; display:flex; align-items:center; z-index:21; }
-.reading-outline-rail-markers { width:100%; max-height:100%; overflow-y:auto; scrollbar-width:none; padding:12px 0; }
+.reading-outline-rail-markers { width:100%; max-height:100%; overflow-y:auto; scrollbar-width:none; padding:8px 0; }
 .reading-outline-rail-markers::-webkit-scrollbar { display:none; }
-.reading-outline-rail-marker { width:100%; height:20px; display:flex; gap:3px; align-items:center; justify-content:flex-start; padding:0 6px; border-radius:4px; }
-.reading-outline-rail-marker > span { display:block; width:12px; height:3px; border-radius:1px; background:var(--muted-foreground); opacity:.4; transition:width .15s,opacity .15s; }
+.reading-outline-rail-marker { width:max-content; max-width:100%; height:10px; margin:4px 0; display:flex; gap:3px; align-items:center; justify-content:flex-start; padding:0 6px; border-radius:3px; }
+.reading-outline-rail-marker > span { display:block; width:12px; height:2px; border-radius:1px; background:var(--muted-foreground); opacity:.4; transition:width .15s,opacity .15s; }
 .reading-outline-rail-marker > span.is-emphasized { opacity:1; background:var(--foreground); }
 .reading-outline-rail-marker[aria-current=location] > span { opacity:1; }
 .reading-outline-bookmark-dot { display:block; width:4px; height:4px; flex:0 0 4px; border-radius:50%; background:var(--foreground); }
 .reading-outline-rail-marker:focus-visible { outline:2px solid var(--primary); outline-offset:-2px; }
-.reading-outline-rail-preview { position:absolute; left:46px; width:260px; max-width:calc(100vw - 70px); padding:11px 13px; border:1px solid var(--border); border-radius:12px; background:var(--popover,var(--background)); color:var(--foreground); box-shadow:0 6px 24px #0002; }
-.reading-outline-rail-preview::before { content:''; position:absolute; right:100%; top:0; width:12px; height:100%; }
+.reading-outline-rail-preview { position:absolute; left:54px; width:260px; max-width:calc(100vw - 70px); padding:11px 13px; border:1px solid var(--border); border-radius:12px; background:var(--popover,var(--background)); color:var(--foreground); box-shadow:0 6px 24px #0002; }
+.reading-outline-rail-preview::before { content:''; position:absolute; right:100%; top:0; width:5px; height:100%; }
 .reading-outline-rail-preview { animation:outline-card-in .14s ease-out; }
-@keyframes outline-card-in { from { opacity:0; transform:translateX(-4px); } to { opacity:1; transform:translateX(0); } }
+@keyframes outline-card-in { from { opacity:0; } to { opacity:1; } }
 .reading-outline-preview-heading { display:flex; align-items:flex-start; gap:8px; }
 .reading-outline-preview-heading strong { flex:1; min-width:0; }
 .reading-outline-bookmark { display:flex; flex:0 0 26px; width:26px; height:26px; align-items:center; justify-content:center; color:var(--muted-foreground); border-radius:5px; }
@@ -61,7 +66,8 @@ html[data-reduced-motion=true] .reading-outline-mode-indicator { transition:none
 .reading-outline-group { margin-bottom:3px; }
 .reading-outline-group-title { display:flex; align-items:center; border-radius:6px; }
 .reading-outline-group-title.is-current { background:transparent; }
-.reading-outline-group.is-expanded > .reading-outline-group-title { position:sticky; top:0; z-index:2; background:var(--background); box-shadow:0 1px 0 var(--border); }
+.reading-outline-group.has-children > .reading-outline-group-title { position:sticky; top:0; z-index:2; background:var(--background); }
+.reading-outline-group.has-children.is-expanded > .reading-outline-group-title { box-shadow:0 1px 0 var(--border); }
 .reading-outline-group.is-expanded > .reading-outline-group-title.is-current { background:var(--background); }
 .reading-outline-toggle,.reading-outline-spacer { flex:0 0 24px; width:24px; }
 .reading-outline-toggle { display:flex; justify-content:center; padding:9px 0; }
@@ -151,3 +157,42 @@ html[data-reduced-motion=true] :is(.workspace-note-header-motion,.reader-tools-e
 .mindmap-context-menu button { display: block; width: 100%; padding: 8px; text-align: left; border-radius: 4px; }
 .mindmap-context-menu button:hover { background: var(--accent); }
 .mindmap-context-menu button:disabled { opacity: .4; }
+/* Note header: one non-wrapping row; labels drop to icons when the column is narrow. */
+.workspace-note-header-clip { container-type: inline-size; }
+.note-header-row { display:flex; align-items:center; gap:12px; min-height:44px; padding:6px 12px 6px 16px; }
+.note-header-meta { display:flex; flex:1; min-width:0; align-items:center; gap:8px; }
+.note-version-trigger { height:30px; width:auto; min-width:0; max-width:200px; flex-shrink:0; gap:6px; padding:3px 8px; font-size:12px; }
+.note-header-info { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:var(--muted-foreground); }
+.note-header-actions { display:flex; flex-shrink:0; align-items:center; gap:2px; }
+.note-header-action { height:30px; gap:6px; padding:0 8px; font-size:13px; }
+@container (max-width: 640px) {
+  .note-header-action > span { display:none; }
+  .note-header-action { width:32px; padding:0; }
+}
+@container (max-width: 420px) { .note-header-info { display:none; } }
+.reader-tools .reader-progress { margin-left:auto; padding-left:8px; }
+.reader-tools .reader-status-choice { width:auto; min-width:84px; }
+.reader-display-menu { position:fixed; z-index:60; width:240px; padding:10px; border:1px solid var(--border); border-radius:10px; background:var(--popover); color:var(--popover-foreground); box-shadow:0 8px 28px #0000003d; font-size:12px; animation:outline-card-in .12s ease-out; }
+.reader-display-group { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:4px 0 8px; }
+.reader-display-group > span { color:var(--muted-foreground); flex-shrink:0; }
+.reader-display-segment { display:flex; padding:2px; border:1px solid var(--border); border-radius:7px; background:color-mix(in srgb,var(--foreground) 4%,transparent); }
+.reader-display-segment button { min-width:30px; height:24px; padding:0 7px; border-radius:5px; color:var(--muted-foreground); font-variant-numeric:tabular-nums; }
+.reader-display-segment button:hover { color:var(--foreground); }
+.reader-display-segment button[aria-pressed=true] { background:var(--background); color:var(--foreground); font-weight:600; box-shadow:0 0 0 1px var(--border); }
+.reader-display-focus { display:flex; width:100%; align-items:center; gap:7px; margin-top:2px; padding:7px 6px; border-top:1px solid var(--border); border-radius:0 0 6px 6px; text-align:left; }
+.reader-display-focus:hover { background:var(--accent); }
+.reader-display-focus kbd { margin-left:auto; font-family:inherit; font-size:11px; color:var(--muted-foreground); }
+.reader-display-menu :is(button):focus-visible { outline:2px solid var(--primary); outline-offset:1px; }
+html[data-reduced-motion=true] .reader-display-menu { animation:none; }
+.video-source-row { display:flex; align-items:center; gap:10px; margin:4px 0 20px; padding:0 0 10px; border-bottom:1px solid var(--border); font-size:12px; color:var(--muted-foreground); }
+.video-source-link { display:flex; flex-shrink:0; align-items:center; gap:5px; margin-left:auto; padding:4px 8px; border-radius:6px; }
+.video-source-link:hover { background:var(--accent); color:var(--foreground); }
+/* github-markdown-css draws hr as a 0.25em filled bar; keep it a hairline. */
+.markdown-body hr { height:1px; margin:2.5em 0; padding:0; border:0; background:var(--border); }
+.reader-body .markdown-body h2.note-source-segment { display:flex; align-items:center; gap:10px; margin:2.5em 0 1em; padding:0; border:0; font-size:12px; font-weight:500; letter-spacing:.04em; color:var(--muted-foreground); }
+.reader-body .markdown-body h2.note-source-segment::after { content:''; flex:1; height:1px; background:var(--border); }
+.reader-body .markdown-body h2.note-source-segment:first-child { margin-top:0; }
+.markdown-body hr:has(+ h2.note-source-segment) { display:none; }
+/* Larger hit targets for the outline rail; hover still shows the chapter preview card. */
+.reading-outline-rail-marker { height:14px; margin:2px 0; padding:0 8px; cursor:pointer; }
+.reading-outline-rail-marker:hover > span { opacity:.9; width:16px; }

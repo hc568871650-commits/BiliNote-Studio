@@ -20,7 +20,7 @@ class Preview(Selection):
     instruction: str = Field(default='', max_length=1500)
     provider_id: str = Field(min_length=1, max_length=100)
     model_name: str = Field(min_length=1, max_length=200)
-    protocol: Literal['openai-chat', 'openai-responses', 'anthropic'] = 'openai-chat'
+    protocol: Literal['openai-chat', 'openai-responses', 'anthropic', 'gemini'] = 'openai-chat'
     use_video: bool = False
 
 

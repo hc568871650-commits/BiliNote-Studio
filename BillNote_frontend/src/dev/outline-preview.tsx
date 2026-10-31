@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import ReaderPane from '@/pages/HomePage/components/ReaderPane'
 import { rehypeNoteOutline } from '@/utils/noteOutline'
 import { defaultLibraryEntry, useLibraryStore } from '@/store/libraryStore'
+import { runOutlineJumpChecks } from '../../tests/outline-jump.browser'
 import '@/index.css'
 import 'github-markdown-css/github-markdown.css'
 
@@ -18,10 +19,14 @@ const short = '# 简短教程\n\n## 准备 *Content-[00:00]\n\n准备素材。\n
 function Preview() {
   const [kind, setKind] = useState('long')
   const [dark, setDark] = useState(false)
-  const content = kind === 'long' ? long : kind === 'short' ? short : '这篇示例没有标题。正文仍然正常显示。'
+  const [checks, setChecks] = useState<string[]>([])
+  const [running, setRunning] = useState(false)
+  const legacy = ['元数据与版本兼容性说明', '布料网格准备与修改器添加', '固定组设置与基础解算', '实时交互与位移关键帧录制', '物理属性与求解器参数调优', '碰撞体配置与集合关联', '撕裂效果与阈值控制', '复现所缺资料清单', '最终检查'].map((title, index) => `## ${title}\n\n${'用于验证旧视频平铺目录的合成正文。'.repeat(25)}\n\n步骤 ${index + 1}。`).join('\n\n')
+  const content = kind === 'long' ? long : kind === 'short' ? short : kind === 'legacy' ? legacy : '这篇示例没有标题。正文仍然正常显示。'
   return <main className={dark ? 'outline-fixture dark h-screen flex flex-col bg-background text-foreground' : 'outline-fixture h-screen flex flex-col bg-background text-foreground'} data-color-mode={dark ? 'dark' : 'light'}>
     <style>{`.outline-fixture .markdown-body { background:transparent; color:inherit; } .outline-fixture .markdown-body :is(h1,h2,h3,h4,h5,h6) { color:inherit; }`}</style>
-    <header className="flex flex-wrap gap-3 items-center border-b px-5 py-3 text-sm"><strong>目录重做预览</strong><span className="text-muted-foreground">示例数据 · 不连接正式版</span><select aria-label="示例笔记" value={kind} onChange={e => setKind(e.target.value)}><option value="long">长教程 · 105 个操作标题</option><option value="short">短教程 · 层级目录</option><option value="empty">无标题笔记</option></select><button onClick={() => setDark(!dark)}>切换明暗</button></header>
+    <header className="flex flex-wrap gap-3 items-center border-b px-5 py-3 text-sm"><strong>目录重做预览</strong><span className="text-muted-foreground">示例数据 · 不连接正式版</span><select aria-label="示例笔记" value={kind} onChange={e => setKind(e.target.value)}><option value="long">长教程 · 105 个操作标题</option><option value="short">短教程 · 层级目录</option><option value="legacy">旧教程 · 9 条独立章节</option><option value="empty">无标题笔记</option></select><button onClick={() => setDark(!dark)}>切换明暗</button></header>
+    <div className="shrink-0 border-b px-5 py-2 text-xs"><button disabled={running || kind !== 'long'} onClick={async () => { setRunning(true); setChecks([]); try { setChecks(await runOutlineJumpChecks()) } finally { setRunning(false) } }}>{running ? '正在采样目录跳转…' : '检查目录跳转稳定性'}</button>{checks.length > 0 && <pre role="status" className="max-h-32 overflow-auto whitespace-pre-wrap">{checks.join('\n')}</pre>}</div>
     <ReaderPane taskId="outline-fixture" versionId={kind} content={content} title="目录交互示例"><ReactMarkdown className="markdown-body" rehypePlugins={[rehypeNoteOutline]}>{content}</ReactMarkdown></ReaderPane>
   </main>
 }

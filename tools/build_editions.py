@@ -16,7 +16,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "BillNote_frontend"
-VERSION = "0.1.0-preview.8"
+VERSION = "0.1.0-preview.31"
 PORTS = {"quick": 38483, "full": 38484}
 
 
@@ -56,10 +56,12 @@ def backend(args, work):
         excludes = ["app.transcriber.whisper", "app.transcriber.mlx_whisper_transcriber", "faster_whisper", "ctranslate2", "torch",
                     "app.routers.organizer", "app.services.organizer", "app.services.organizer_sessions",
                     "langgraph", "langchain_core", "langsmith", "sqlite_vec"]
+    build_info = work / "build-info.json"
+    build_info.write_text(json.dumps({"version": VERSION}), encoding="utf-8")
     spec = work / "BiliNoteBackend.spec"
     spec.write_text(f'''
 from PyInstaller.utils.hooks import collect_all, copy_metadata
-datas = [({str(ROOT / 'backend/app/db/builtin_providers.json')!r}, '.'), ({str(ROOT / 'backend/app/db/builtin_providers.json')!r}, 'app/db')]
+datas = [({str(ROOT / 'backend/app/db/builtin_providers.json')!r}, '.'), ({str(ROOT / 'backend/app/db/builtin_providers.json')!r}, 'app/db'), ({str(build_info)!r}, '.')]
 binaries = []
 hiddenimports = {hidden!r}
 for package in {packages!r}:

@@ -11,7 +11,7 @@ export async function readEventStream(response: Response, onEvent: (event: ChatS
     const data = frame.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n')
     if (!data) return false
     const event = JSON.parse(data) as ChatStreamEvent
-    if (!['start', 'status', 'delta', 'done', 'error'].includes(event.type)) throw new Error('流式事件格式异常')
+    if (!['start', 'status', 'tool_event', 'work_log', 'delta', 'done', 'error'].includes(event.type)) throw new Error('流式事件格式异常')
     return Boolean(onEvent(event))
   }
   try {

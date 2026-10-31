@@ -1,0 +1,12 @@
+.assistant-work-progress { margin:8px 0 12px; color:var(--muted-foreground); font-size:12px; }
+.work-progress-toggle { display:flex; align-items:center; gap:6px; border:0; padding:3px 0; background:transparent; color:inherit; font:inherit; cursor:pointer; }
+.work-progress-toggle:focus-visible { outline:2px solid var(--ring); outline-offset:3px; border-radius:3px; }
+.work-progress-toggle > svg { flex-shrink:0; }
+.work-progress-chevron--open { transform:rotate(90deg); }
+.work-progress-elapsed { opacity:.8; margin-left:4px; }
+.work-progress-body { margin:7px 0 0 6px; padding-left:14px; border-left:1px solid var(--border); overflow-wrap:anywhere; }
+.work-progress-body > p { margin:8px 0; white-space:pre-wrap; line-height:1.7; }
+.work-progress-body .assistant-tool-trace { margin:8px 0; }
+.work-progress-spinner { animation:work-progress-spin 1s linear infinite; }
+@keyframes work-progress-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { .work-progress-spinner { animation:none; } }

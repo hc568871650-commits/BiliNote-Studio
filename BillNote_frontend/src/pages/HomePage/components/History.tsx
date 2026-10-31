@@ -2,6 +2,7 @@ import NoteHistory from '@/pages/HomePage/components/NoteHistory.tsx'
 import FolderSidebar from '@/pages/HomePage/components/FolderSidebar.tsx'
 import { useTaskStore } from '@/store/taskStore'
 import { useFolderStore } from '@/store/folderStore'
+import { useLibraryViewStore } from '@/store/libraryViewStore'
 import { PanelLeftClose } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
@@ -11,7 +12,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 interface HistoryProps { onSelectNote?: (taskId: string) => void; onCollapse?: () => void }
 
 const History = ({ onSelectNote, onCollapse }: HistoryProps) => {
-  const [archived, setArchived] = useState(false)
+  const archived = useLibraryViewStore(state => state.archived)
+  const setArchived = useLibraryViewStore(state => state.setArchived)
   const [folderDialog, setFolderDialog] = useState<{ mode: 'create' | 'rename' | 'delete', id?: string } | null>(null)
   const [folderName, setFolderName] = useState('')
   const [busy, setBusy] = useState(false)

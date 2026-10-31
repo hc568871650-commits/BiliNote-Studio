@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import request from '@/utils/request'
 import { askQuestion, compactChat } from '@/services/chat'
+import { useProviderStore } from '@/store/providerStore'
 
 const payload = { task_id: 'fixture', provider_id: 'fixture', model_name: 'fixture', question: 'test', history: [], protocol: 'anthropic' as const }
 async function main() {
+  useProviderStore.setState({ provider: [{ id: 'fixture', name: 'Fixture', baseUrl: 'https://synthetic.invalid/v1', apiKey: '', type: 'custom', enabled: 1, logo: 'custom' }] })
   const details = { http_status: 502, upstream_code: 'timeout', request_id: 'fixture-req', occurred_at: '2026-10-06T00:00:00Z', kind: 'upstream_http', protocol: 'anthropic', detail: 'Upstream timeout' }
   request.defaults.adapter = async config => {
     assert.equal(JSON.parse(config.data).protocol, 'anthropic')

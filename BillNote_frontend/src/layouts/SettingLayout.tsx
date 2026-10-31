@@ -37,7 +37,7 @@ export default function SettingLayout({ Menu }: { Menu: ReactNode }) {
     <div className="settings-frame">
       <aside className="settings-categories" aria-label="设置分类">{Menu}</aside>
       <div className={`settings-detail${providerDetail ? ' settings-detail--with-back' : ''}`}>
-        {providerDetail && <nav className="settings-detail-navigation" aria-label="返回导航"><button type="button" className="settings-back-arrow" aria-label="返回服务商列表" title="返回服务商列表" onClick={() => navigate('/settings/model')}><ArrowLeft size={20} aria-hidden="true" /></button></nav>}
+        {providerDetail && <nav className="settings-detail-navigation" aria-label="返回导航"><button type="button" className="settings-back-arrow" aria-label="返回服务商列表" title="返回服务商列表" onClick={() => navigate('/settings/model')}><ArrowLeft size={16} aria-hidden="true" /><span>模型服务商</span></button></nav>}
         <main ref={content} className="settings-content" onScroll={event => positions.set(location.pathname, event.currentTarget.scrollTop)}><Outlet /></main>
       </div>
     </div>

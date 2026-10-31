@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import toast from 'react-hot-toast'
 import { isTranscriptionModel } from '@/utils/modelCapabilities'
+import { modelDisplayName } from '@/utils/modelDisplay'
 
 interface ModelSelectorProps {
   providerId: string
@@ -20,6 +21,7 @@ export function ModelSelector({ providerId }: ModelSelectorProps) {
   const { models, loading, selectedModel, loadModels, setSelectedModel, addNewModel } =
     useModelStore()
   const [search, setSearch] = useState('')
+  const [displayName, setDisplayName] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const filteredModels = models.filter(model => {
@@ -33,7 +35,7 @@ export function ModelSelector({ providerId }: ModelSelectorProps) {
     if (providerId) {
       loadModels(providerId)
     }
-  }, [providerId])
+  }, [providerId, loadModels])
 
   const handleSubmit = async () => {
     if (!selectedModel) {
@@ -43,9 +45,9 @@ export function ModelSelector({ providerId }: ModelSelectorProps) {
     if (isTranscriptionModel(selectedModel)) { toast.error('语音模型请在音频转写设置中管理'); return }
     try {
       setSubmitting(true)
-      await addNewModel(providerId, selectedModel)
+      await addNewModel(providerId, selectedModel, displayName)
       toast.success('保存模型成功 🎉')
-    } catch (error) {
+    } catch {
       toast.error('保存失败')
     } finally {
       setSubmitting(false)
@@ -81,11 +83,13 @@ export function ModelSelector({ providerId }: ModelSelectorProps) {
           </div>
           {filteredModels.map((model, index) => (
             <SelectItem key={`${model.id}-${index}`} value={model.id}>
-              {model.id}
+              {modelDisplayName({ model_name: model.id })}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
+
+      <Input aria-label="模型展示名" placeholder="展示名（可选；留空使用 API 名称）" value={displayName} onChange={event => setDisplayName(event.target.value)} />
 
       <Button onClick={handleSubmit} disabled={submitting || !selectedModel}>
         {submitting ? '保存中...' : '保存模型'}

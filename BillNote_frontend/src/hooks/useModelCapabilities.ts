@@ -20,14 +20,14 @@ if (typeof window !== 'undefined') {
 }
 
 export function useModelCapabilities(providerId?: string, modelName?: string, protocol: ProviderProtocol = 'openai-chat') {
-  const [capabilities, setCapabilities] = useState<ModelCapabilityRecord | null>(null)
+  const [record, setCapabilities] = useState<ModelCapabilityRecord | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const revision = useRef(0)
   const refresh = useCallback(async () => {
     const current = ++revision.current
     if (!providerId || !modelName) { setCapabilities(null); setLoading(false); setError(null); return }
-    setLoading(true); setError(null)
+    setCapabilities(null); setLoading(true); setError(null)
     try {
       const result = await load(providerId, modelName, protocol)
       if (current === revision.current) setCapabilities(result)
@@ -47,5 +47,7 @@ export function useModelCapabilities(providerId?: string, modelName?: string, pr
       window.removeEventListener('bilinote-capabilities-updated', update)
     }
   }, [refresh])
+  // Effects run after render: never lend the previous identity's permissions to a new model.
+  const capabilities = record?.provider_id === providerId && record?.model_name === modelName && record?.protocol === protocol ? record : null
   return { capabilities, loading, error, refresh }
 }

@@ -1,7 +1,21 @@
 export type ReasoningEffort = 'auto' | 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-export interface AISettings { reasoning_effort: ReasoningEffort; context_limit: 272000; web_search?: boolean; web_search_mode?: 'native' | 'external' }
-export interface ContextUsage { input_tokens: number; estimated: boolean; limit: number; warning?: boolean; compacted?: boolean; compacted_messages?: number; web_search_used?: boolean }
-export const defaultAISettings: AISettings = { reasoning_effort: 'auto', context_limit: 272000 }
+export interface AISettings { reasoning_effort: ReasoningEffort; context_limit: number; web_search?: boolean; web_search_mode?: 'native' | 'external' }
+export interface ContextUsage { input_tokens: number; estimated: boolean; limit: number; warning?: boolean; compacted?: boolean; compacted_messages?: number; web_search_used?: boolean; trace_id?: string; request_id?: string | null; protocol?: string; model_context?: import('@/services/modelContext').ModelContextBudget }
+export const defaultAISettings: AISettings = { reasoning_effort: 'auto', context_limit: 272000, web_search: true, web_search_mode: 'native' }
+export const defaultReadingSettings: AISettings = { ...defaultAISettings, web_search: true, web_search_mode: 'native' }
+export function automaticSearchSettings(settings?: AISettings): AISettings {
+  // Old session switches no longer control tool access; retain the chosen route.
+  return { ...defaultAISettings, ...settings, web_search: true, web_search_mode: settings?.web_search_mode || 'native' }
+}
+export function requestEffortChoices(model = '', protocol = 'openai-chat'): ReasoningEffort[] {
+  if (protocol === 'gemini') {
+    const name = model.toLowerCase().replace(/^models\//, '')
+    if (!/^gemini-3(?:[.-]|$)/.test(name)) return ['auto']
+    if (name.includes('image')) return ['auto', 'high']
+    return /^gemini-3-pro(?:-|$)/.test(name) ? ['auto', 'low', 'high'] : ['auto', 'low', 'medium', 'high']
+  }
+  return ['auto', 'none', 'low', 'medium', 'high', 'xhigh', 'max']
+}
 export function reasoningChoices(model = ''): ReasoningEffort[] {
   const name = model.toLowerCase().split('/').pop() || ''
   if (/^gpt-6\.1-sol(?:-|$)/.test(name)) return ['auto', 'low', 'medium', 'high', 'xhigh', 'max']
@@ -12,7 +26,8 @@ export function reasoningChoices(model = ''): ReasoningEffort[] {
   return ['auto']
 }
 export function settingsForModel(settings: AISettings, model = '', allowed?: readonly string[]): AISettings {
-  return { ...settings, context_limit: 272000, reasoning_effort: (allowed || reasoningChoices(model)).includes(settings.reasoning_effort) ? settings.reasoning_effort : 'auto' }
+  const limit = Number.isInteger(settings.context_limit) && settings.context_limit >= 8192 && settings.context_limit <= 272000 ? settings.context_limit : 272000
+  return { ...settings, context_limit: limit, reasoning_effort: (allowed || requestEffortChoices(model)).includes(settings.reasoning_effort) ? settings.reasoning_effort : 'auto' }
 }
 export const estimateTextContext = (text: string) => new TextEncoder().encode(text).length
 export function estimateLocalContext(value: unknown): number {

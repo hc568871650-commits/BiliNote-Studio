@@ -13,6 +13,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from difflib import SequenceMatcher
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import TypedDict
@@ -25,6 +26,7 @@ from langsmith import tracing_context
 from app.services import organizer as service
 from app.services.ai_runtime import estimate_context
 from app.services.context_compaction import compact_history, CONTEXT_LIMIT, AUTO_COMPACT_THRESHOLD
+from app.services.model_context import resolve as resolve_context
 from app.utils.model_errors import model_error
 from app.utils.ai_errors import SafeAIError
 
@@ -32,6 +34,7 @@ SESSION_ROOT = Path('data') / 'organizer_sessions'
 LOCK = threading.RLock()
 ACTIVE = {}
 COMPACTING = {}
+STREAMS = {}
 RUNTIME_ID = uuid.uuid4().hex
 RETENTION_DEFAULT = 10
 RETENTION_MIN = 1
@@ -77,6 +80,8 @@ class GraphState(TypedDict, total=False):
     context_limit: int
     context: dict
     sources: list
+    tool_events: list
+    work_log: list
     query_filters: dict
 
 
@@ -126,21 +131,41 @@ def _event(session, kind, text):
     session['events'] = events[-200:]
 
 
-def _history(session, role, text, phase='message', sources=None):
+def _history(session, role, text, phase='message', sources=None, tool_events=None, work_log=None):
     entry = {'id': uuid.uuid4().hex, 'role': role,
              'content': text, 'phase': phase, 'created_at': time.time()}
     if sources:
         entry['sources'] = copy.deepcopy(sources)
+    if tool_events:
+        entry['tool_events'] = copy.deepcopy(tool_events)
+    if work_log:
+        entry['work_log'] = copy.deepcopy(work_log)
     session['history'].append(entry)
+
+
+def _pending_work_log(session):
+    records = copy.deepcopy(session.get('streaming_work_log') or [])
+    active = STREAMS.get((session['session_id'], session['revision'])) or {}
+    partial = str(active.get('partial_text', session.get('streaming_reply')) or '').strip()
+    if partial:
+        records.append(partial)
+    return records
+
+
+def _clear_streaming(session):
+    session.update(streaming_reply='', streaming_work_log=[], streaming_phase='', streaming_tool_events=[])
 
 
 def _public(session):
     result = {k: copy.deepcopy(v) for k, v in session.items()
-              if k not in ('requests', 'graph_thread', 'action', 'owner', 'last_message')}
+              if k not in ('requests', 'graph_thread', 'action', 'owner', 'last_message', 'pending_clarification')}
     result['messages'] = [{**m, 'text': m['content']} for m in result['history']]
     result.setdefault('memory', {'summary': '', 'through_id': None, 'compacted_messages': 0})
     result.setdefault('protocol', 'openai-chat')
     result.setdefault('error_details', None)
+    result.setdefault('streaming_work_log', [])
+    result.setdefault('streaming_phase', '')
+    result['folder_candidates'] = copy.deepcopy((session.get('pending_clarification') or {}).get('candidates', []))
     result['pending_plan_id'] = ((result.get('plan') or {}).get('plan_id')
                                  if result['status'] == 'awaiting_approval' else None)
     if result['status'] in ('planning', 'executing', 'undoing') and session['session_id'] not in ACTIVE:
@@ -317,7 +342,7 @@ def create(scope, provider_id=None, model_name=None, confirmation_token=None, re
                                   'authorized': False, 'exclude_favorites': False},
                'history': [], 'memory': {'summary': '', 'through_id': None, 'compacted_messages': 0},
                'events': [], 'plan': None, 'result': None, 'error': None, 'error_details': None,
-               'protocol': protocol, 'web_search': False, 'web_search_mode': 'native',
+               'protocol': protocol, 'web_search': True, 'web_search_mode': 'native',
                'requests': {}, 'action': '', 'provider_id': provider_id, 'model_name': model_name}
     with LOCK, _db() as db:
         signature = _signature('create', {'scope': scope, 'provider_id': provider_id,
@@ -382,19 +407,21 @@ def _active_history(session):
         if index is None:
             raise ValueError('上下文摘要边界无效，请检查会话记录')
         history = history[index + 1:]
-    return [copy.deepcopy(item) for item in history if item['role'] in ('user', 'assistant')]
+    return [{key: copy.deepcopy(item[key]) for key in ('id', 'role', 'content')}
+            for item in history if item['role'] in ('user', 'assistant')]
 
 
 def _prepare_context(session, provider_id, model_name, force=False, extra_context=None, compaction_token=None,
                      protocol='openai-chat'):
     """Only memory changes; authorization, approval and full audit history never do."""
+    budget = resolve_context(provider_id, model_name, session.get('context_limit', CONTEXT_LIMIT))
     active = _active_history(session)
     memory = copy.deepcopy(session.get('memory') or {'summary': '', 'through_id': None, 'compacted_messages': 0})
     context = None
     rounds = 0
     while rounds < 3 and (force or len(active) >= 160 or estimate_context([
             {'role': 'user', 'content': json.dumps({'summary': memory['summary'],
-             'metadata': extra_context or {}}, ensure_ascii=False)}, *active]) >= AUTO_COMPACT_THRESHOLD):
+             'metadata': extra_context or {}}, ensure_ascii=False)}, *active]) >= budget['compact_threshold']):
         rounds += 1
         if compaction_token is not None:
             with LOCK:
@@ -402,7 +429,9 @@ def _prepare_context(session, provider_id, model_name, force=False, extra_contex
                     raise ValueError('压缩已停止，晚到压缩结果已丢弃')
         client = service.get_client(provider_id, model_name, protocol=protocol)
         try:
-            outcome = compact_history(client.client, model_name, active, summary=memory['summary'], keep_recent=4)
+            outcome = compact_history(client.client, model_name, active, summary=memory['summary'], keep_recent=4,
+                                      context_limit=budget['input_limit'], threshold=budget['compact_threshold'],
+                                      output_reserve=budget['output_reserve'])
         finally:
             service.close_client(client.client)
         if not outcome['compacted']:
@@ -527,7 +556,7 @@ def _intent(text, previous_action):
     # "设置标签，不要归档" still authorizes tags and forbids archive proposals.
     discussing = discussing or (negated_operations.get(operation, False) if operation
                                 else any(negated_operations.values()))
-    explicit = bool(re.search(r'文件夹|[“「"].+?[”」"]|(?:归档|恢复|整理).{1,60}(?:下面|里的|中的)|(?:改为|改成|换成|改整理).{1,60}', text))
+    explicit = bool(re.search(r'文件夹|[“「"].+?[”」"]|(?:归档|恢复|整理).{1,60}(?:下面|下的|里的|中的)|(?:改为|改成|换成|改整理).{1,60}', text))
     return {'operation': operation, 'mode': 'refuse' if blocked else 'discuss' if discussing else 'apply',
             'explicit_target': explicit and not creating}
 
@@ -540,9 +569,19 @@ def _folder_mentions(text, public_folders):
     """Prefer complete folder names and recognize the built-in default alias."""
     result = []
     remaining = text
+    quoted = re.findall(r'[“「\"](.+?)[”」\"]', text)
+    for name in quoted:
+        result.extend(folder for folder in public_folders if folder['name'] == name)
+    remaining = re.sub(r'[“「\"].+?[”」\"]', '', remaining)
+    named = re.search(r'(?:恢复归档|归档|恢复|整理)\s*(?:一下)?\s*(.+?)(?:文件夹|下面|下的|里的|中的|内的)', remaining)
+    if named:
+        name = named[1].strip(' 的，,')
+        result.extend(folder for folder in public_folders if folder['name'] == name and folder not in result)
+        remaining = remaining[:named.start(1)] + remaining[named.end(1):]
     for folder in sorted(public_folders, key=lambda item: len(item['name']), reverse=True):
         if folder['name'] in remaining:
-            result.append(folder)
+            if folder not in result:
+                result.append(folder)
             remaining = remaining.replace(folder['name'], '')
     if re.search(r'默认', remaining):
         default = next(folder for folder in public_folders if folder['id'] == service.folders.DEFAULT_ID)
@@ -551,10 +590,63 @@ def _folder_mentions(text, public_folders):
     return result
 
 
+def _folder_candidates(text, public_folders):
+    # Approximate names suggest choices; they never authorize a folder ID.
+    quoted = re.search(r'[“「\"](.+?)[”」\"]', text)
+    named = re.search(r'(?:恢复归档|归档|恢复|整理)\s*(?:一下)?\s*(.+?)(?:文件夹|下面|下的|里的|中的|内的)', text)
+    name = (quoted[1] if quoted else named[1] if named else '').strip(' 的，,')
+    normalized = lambda value: re.sub(r'(?:笔记|视频|文件夹)$', '', re.sub(r'[\s_\-—·、，,。]', '', value)).casefold()
+    query = normalized(name)
+    scored = []
+    for folder in public_folders:
+        core = normalized(folder['name'])
+        match = SequenceMatcher(None, normalized(text), core).find_longest_match()
+        score = match.size if match.size >= 2 else 0
+        if query and (query in core or core in query or SequenceMatcher(None, query, core).ratio() >= .65):
+            score += max(len(query), len(core))
+        if score:
+            scored.append((score, folder))
+    return [item for _, item in sorted(scored, key=lambda item: (-item[0], item[1]['name']))][:5]
+
+
+def _clarification_reply(text, pending, public_folders):
+    if not pending or not pending.get('action'):
+        return None
+    # Only a bounded scope answer may continue an unfinished instruction.
+    if re.search(r'不要|别|不用|取消|算了|停止|先不|解释|查询|查找|为什么|怎么|如何|搜索|总结|新建|创建|改为|换成', text):
+        return None
+    matching = _folder_mentions(text, public_folders)
+    exact_answer = len(matching) == 1 and bool(re.fullmatch(
+        r'\s*(?:是|就是|文件夹是|名字是|名称是)?[“「\"]?' + re.escape(matching[0]['name']) +
+        r'[”」\"]?(?:文件夹)?(?:[，,\s]*(?:是)?(?:全部|所有)(?:的)?笔记)?[。！!\s]*', text))
+    scope_answer = bool(re.fullmatch(
+        r'\s*(?:(?:名字|名称)就是这个[，,。\s]*)?(?:是|对[，,\s]*)?'
+        r'(?:全部(?:的)?笔记|所有(?:的)?笔记|全部|这个文件夹(?:里的|内的)?全部笔记)[。！!\s]*', text))
+    candidate_confirmation = bool(re.fullmatch(
+        r'\s*(?:是的[，,\s]*)?(?:(?:名字|名称)就是这个|就是这个文件夹)'
+        r'(?:[，,\s]*(?:是)?(?:全部|所有)(?:的)?笔记)?[。！!\s]*', text))
+    if not (exact_answer or scope_answer or candidate_confirmation):
+        return None
+    candidates = pending.get('candidates', [])
+    selected = matching[0] if exact_answer else None
+    if not selected and len(candidates) == 1 and (candidate_confirmation or re.search(r'(?:名字|名称)就是这个', text)):
+        selected = next((folder for folder in public_folders if folder['id'] == candidates[0]['id']), None)
+    if selected and pending['action'] in ('archive', 'restore'):
+        original = pending['instruction']
+        target = re.search(r'[“「\"](.+?)[”」\"]', original) or re.search(
+            r'(?:恢复归档|归档|恢复|整理)\s*(?:一下)?\s*(.+?)(?:文件夹|下面|下的|里的|中的|内的)', original)
+        if target:
+            original = original[:target.start(1)] + selected['name'] + original[target.end(1):]
+        else:
+            original += '，指定文件夹：' + selected['name']
+        return original + '，补充：' + text
+    # Keep an unresolved named target attached even when the answer says "全部".
+    return pending['instruction'] + '，补充：' + text
+
+
 def _scope_node(state):
     session = _live(state)
     instruction = state['instruction']
-    intent = _intent(instruction, session.get('action', ''))
     upper = state['scope']
     previous = session['scope']
     chosen = copy.deepcopy(previous) if previous.get('authorized') else {
@@ -562,6 +654,13 @@ def _scope_node(state):
         'exclude_favorites': False}
     with service.folders.LOCK:
         public_folders = service.folders._public(service.folders._read())['folders']
+    pending = session.get('pending_clarification')
+    continued = _clarification_reply(instruction, pending, public_folders)
+    if continued:
+        instruction = continued
+        if pending.get('scope', {}).get('authorized'):
+            chosen = copy.deepcopy(pending['scope'])
+    intent = _intent(instruction, session.get('action', ''))
     matching = _folder_mentions(instruction, public_folders)
     if intent['mode'] == 'discuss':
         # Read authorization is independent of the old UI/query/write scope.
@@ -573,6 +672,12 @@ def _scope_node(state):
             filters['archived'] = False
         elif re.search(r'已归档|已经归档|归档的笔记', instruction):
             filters['archived'] = True
+        with LOCK, _db() as db:
+            live = _load(db, state['session_id'])
+            if live['revision'] != state['revision']:
+                raise ValueError('任务已停止或替代')
+            live['pending_clarification'] = None
+            _save(db, live)
         return {'route': 'discussion', 'text': '本轮只读查询，可检索全库相关正文与转录，不生成或执行修改。',
                 'scope': copy.deepcopy(previous), 'action': '', 'read_notes': [], 'query_filters': filters or None}
     with service.LOCK, service.folders.LOCK, service.library.LOCK, service.notes.LOCK:
@@ -598,15 +703,17 @@ def _scope_node(state):
     elif matching:
         chosen.update(kind='folder', folder_id=matching[0]['id'], folder_name=matching[0]['name'],
                       task_ids=[], authorized=True)
-    elif re.search(r'全部|所有|全库|整个资料库', instruction):
+    elif re.search(r'全库|整个资料库', instruction) and not intent['explicit_target']:
+        chosen.update(kind='all', folder_id=None, folder_name=None, task_ids=[], authorized=True)
+    elif re.search(r'全部|所有', instruction) and not intent['explicit_target'] and not chosen.get('authorized'):
         chosen.update(kind='all', folder_id=None, folder_name=None, task_ids=[], authorized=True)
     elif not chosen.get('authorized') and upper['kind'] != 'all':
         chosen.update(upper, authorized=True)
     if upper['kind'] != 'all' and re.search(r'选中|勾选|这些笔记|当前文件夹', instruction):
         chosen.update(upper, authorized=True, folder_name=None)
     if intent['explicit_target'] and not matching and intent['operation'] != 'move_notes' and not re.search(
-            r'全部|所有|全库|整个资料库|当前文件夹|这个文件夹|该文件夹|选中|这些', instruction):
-        route, text = 'clarification', '没有识别到你明确指定的新目标，请使用现有文件夹名称或选中笔记；不会沿用之前的目标执行。'
+            r'当前文件夹|这个文件夹|该文件夹|选中|这些', instruction):
+        route, text = 'clarification', '没有找到这个文件夹，请确认名称。'
         chosen.update(kind='all', folder_id=None, folder_name=None, task_ids=[], authorized=False)
     exclude = bool(re.search(r'(排除|不[要含]|不包括|跳过).{0,8}收藏', instruction))
     include = bool(re.search(r'(包含|包括|保留|也要).{0,8}收藏', instruction)) and not exclude
@@ -616,7 +723,9 @@ def _scope_node(state):
         return (scope['kind'] == 'all' or
                 scope['kind'] == 'folder' and note['folder_id'] == scope.get('folder_id') or
                 scope['kind'] == 'selected' and note['id'] in scope.get('task_ids', []))
+    prior_upper = pending.get('upper', {'kind': 'all'}) if continued else {'kind': 'all'}
     targets = [n for n in all_notes if chosen.get('authorized') and matches(n, chosen) and matches(n, upper)
+               and matches(n, prior_upper)
                and not (chosen['exclude_favorites'] and n['favorite'])]
     count_match = re.search(r'([一二两三四五六七八九十]|\d+)\s*(?:篇|个|条)\s*笔记', instruction)
     if count_match:
@@ -626,9 +735,9 @@ def _scope_node(state):
         if requested_count != len(targets):
             route, text = 'clarification', f'当前范围有 {len(targets)} 篇笔记，与你指定的 {requested_count} 篇不一致。请选中具体笔记或明确范围；不会擅自扩大或任意挑选。'
     # Materialize the upper-bound intersection so a later UI expansion cannot widen it.
-    if chosen.get('authorized') and upper['kind'] != 'all' and (
+    if chosen.get('authorized') and (prior_upper['kind'] != 'all' or upper['kind'] != 'all' and (
             upper['kind'] == 'selected' or chosen['kind'] != upper['kind'] or
-            chosen.get('folder_id') != upper.get('folder_id')):
+            chosen.get('folder_id') != upper.get('folder_id'))):
         chosen.update(kind='selected', folder_id=None, folder_name=None, task_ids=[n['id'] for n in targets])
     if chosen.get('kind') == 'folder':
         known = {f['id']: f['name'] for f in service.folders._public(catalog['folders'])['folders']}
@@ -650,7 +759,7 @@ def _scope_node(state):
         action = ''
     elif not chosen.get('authorized') and action != 'create_folder':
         if route != 'clarification':
-            route, text = 'clarification', '请明确整理对象：指定文件夹、选中笔记，或明确说“全部笔记”。当前全库选项仅是允许上限。'
+            route, text = 'clarification', '请选择要整理的文件夹或笔记，也可以明确指定“全部笔记”。'
     elif re.search(r'(排除|包含|包括|保留).{0,8}收藏', instruction) and not action:
         route, text = 'clarification', '收藏筛选条件已保留，请明确接下来要查询、归档还是进行其他整理。'
     elif route == 'propose' and not targets and action != 'create_folder':
@@ -669,12 +778,19 @@ def _scope_node(state):
         live = _load(db, state['session_id'])
         if live['revision'] != state['revision']:
             raise ValueError('任务已停止或替代')
-        live.update(scope=chosen, target_summary=summary, action=action)
+        candidates = _folder_candidates(instruction, public_folders) if not matching and route == 'clarification' else []
+        if route == 'clarification' and candidates:
+            text = '你指的是' + '、'.join('“' + item['name'] + '”' for item in candidates) + '吗？'
+        live.update(scope=chosen, target_summary=summary, action=action,
+                    pending_clarification={'action': action, 'instruction': instruction,
+                                           'scope': copy.deepcopy(chosen), 'candidates': candidates,
+                                           'upper': copy.deepcopy(prior_upper if continued else upper)}
+                    if route == 'clarification' and intent['mode'] == 'apply' and action else None)
         _event(live, 'scope', '范围已确定：' + str(len(targets)) + ' 篇笔记')
         _save(db, live)
     read_notes = [{key: value for key, value in note.items() if key != 'archived_at'} |
                   {'archived': bool(note.get('archived_at'))} for note in all_notes if matches(note, upper)][:1000]
-    return {'route': route, 'text': text, 'scope': {**chosen, 'resolved_ids': summary['note_ids']},
+    return {'instruction': instruction, 'route': route, 'text': text, 'scope': {**chosen, 'resolved_ids': summary['note_ids']},
             'action': action, 'read_notes': read_notes}
 
 
@@ -692,12 +808,14 @@ def _propose_node(state):
         instruction += '\n唯一允许的移动目标：' + json.dumps({'folder_id': state['scope']['destination_folder_id'],
                                                          'name': state['scope']['destination_folder_name']}, ensure_ascii=False)
     owner = {'session_id': state['session_id'], 'revision': state['revision']}
+    cancelled, _, stream_state = _stream_callbacks(state)
     plan = service.plan(instruction, {'kind': 'selected', 'task_ids': state['scope']['resolved_ids']},
                         state['provider_id'], state['model_name'], owner=owner,
                         allow_empty=state['action'] == 'create_folder',
                         reasoning_effort=state.get('reasoning_effort', 'auto'),
-                        context_limit=CONTEXT_LIMIT, history=history,
-                        memory_summary=session['memory']['summary'], protocol=state.get('protocol', 'openai-chat'))
+                        context_limit=state.get('context_limit', CONTEXT_LIMIT), history=history,
+                        memory_summary=session['memory']['summary'], protocol=state.get('protocol', 'openai-chat'),
+                        cancellation=cancelled, stream_state=stream_state)
     try:
         _live(state)
     except ValueError:
@@ -736,6 +854,76 @@ def _propose_node(state):
     return {'plan': plan, 'text': plan['explanation'], 'context': context}
 
 
+def _stream_callbacks(state):
+    key = (state['session_id'], state['revision'])
+    stream_state = {'cancelled': False}
+    with LOCK:
+        _live(state)
+        STREAMS[key] = stream_state
+    text, last_save = '', 0.0
+
+    def cancelled():
+        try:
+            _live(state)
+            return stream_state['cancelled']
+        except ValueError:
+            return True
+
+    def event_sink(event):
+        nonlocal text, last_save
+        if event.get('type') in ('work_log', 'status'):
+            with LOCK, _db() as db:
+                session = _load(db, state['session_id'])
+                if session['revision'] != state['revision'] or session['status'] != 'planning':
+                    raise ValueError('此任务已停止，未展示晚到工作过程')
+                if event['type'] == 'work_log':
+                    progress = str(event.get('text') or '').strip()
+                    if progress:
+                        session.setdefault('streaming_work_log', []).append(progress)
+                    text, last_save = '', 0.0
+                    stream_state['partial_text'] = ''
+                    session['streaming_reply'] = ''
+                else:
+                    session['streaming_phase'] = str(event.get('phase') or '')
+                _save(db, session)
+            return
+        if event.get('type') == 'tool_event':
+            with LOCK, _db() as db:
+                session = _load(db, state['session_id'])
+                if session['revision'] != state['revision'] or session['status'] != 'planning':
+                    raise ValueError('此任务已停止，未展示晚到工具记录')
+                records = session.setdefault('streaming_tool_events', [])
+                record = event['event']
+                if not any(old.get('id') == record.get('id') for old in records):
+                    records.append(copy.deepcopy(record))
+                session['streaming_tool_events'] = records[-32:]
+                _save(db, session)
+            return
+        if event.get('type') == 'reset':
+            text = ''
+        elif event.get('type') == 'delta':
+            text += event.get('text') or ''
+            if len(text) > 100000:
+                raise ValueError('模型返回内容过长')
+        else:
+            return
+        stream_state['partial_text'] = text
+        now = time.monotonic()
+        if text and now - last_save < .15:
+            return
+        with LOCK, _db() as db:
+            session = _load(db, state['session_id'])
+            if session['revision'] != state['revision'] or session['status'] != 'planning':
+                raise ValueError('此任务已停止，未展示晚到内容')
+            session['streaming_reply'] = text
+            if event.get('type') == 'delta' and text:
+                session['streaming_phase'] = 'generating'
+            _save(db, session)
+        last_save = now if text else 0.0
+
+    return cancelled, event_sink, stream_state
+
+
 def _answer_node(state):
     session = _live(state)
     if state['route'] in ('clarification', 'empty'):
@@ -744,31 +932,30 @@ def _answer_node(state):
                                         extra_context={'instruction': state['instruction'],
                                                        'notes': state.get('read_notes', []), 'constraint': state['text']},
                                         protocol=state.get('protocol', 'openai-chat'))
-    context, sources = {}, []
-    def cancelled():
-        try:
-            _live(state)
-            return False
-        except ValueError:
-            return True
+    context, sources, tool_events, work_log = {}, [], [], []
+    cancelled, event_sink, stream_state = _stream_callbacks(state)
     try:
         text = service.answer(state['instruction'], state['provider_id'], state['model_name'],
                               history, state['text'], session['target_summary'], state.get('read_notes', []),
                               reasoning_effort=state.get('reasoning_effort', 'auto'),
-                              context_limit=CONTEXT_LIMIT, context_sink=context,
+                              context_limit=state.get('context_limit', CONTEXT_LIMIT), context_sink=context,
                               memory_summary=session['memory']['summary'], protocol=state.get('protocol', 'openai-chat'),
-                              sources_sink=sources, web_search=state.get('web_search', False),
+                              sources_sink=sources, web_search=state.get('web_search', True),
                               web_search_mode=state.get('web_search_mode', 'native'),
-                              query_filters=state.get('query_filters'), cancellation=cancelled)
+                              query_filters=state.get('query_filters'), cancellation=cancelled,
+                              event_sink=event_sink, stream_state=stream_state, tool_events_sink=tool_events,
+                              work_log_sink=work_log)
     except Exception as exc:
         # Successfully read sources remain useful evidence when a later provider
         # round fails. Revision fencing below still discards cancelled results.
         exc.sources = sources
+        exc.tool_events = tool_events
+        exc.work_log = work_log
         raise
     _live(state)
     context.update(compacted=bool(session['memory']['compacted_messages']),
                    compacted_messages=session['memory']['compacted_messages'])
-    return {'text': text, 'context': context, 'sources': sources}
+    return {'text': text, 'context': context, 'sources': sources, 'tool_events': tool_events, 'work_log': work_log}
 
 
 def _approval_node(state):
@@ -843,11 +1030,25 @@ def message(session_id, data):
             return _public(session)
         if session.get('plan') and session['status'] == 'awaiting_approval':
             _history(session, 'assistant', '上一版计划已失效；需要重新确认新计划。', 'superseded')
+        # Legacy sessions migrate only an explicitly unresolved user request.
+        # Completed chat/model text can never become write authorization.
+        if 'pending_clarification' not in session and session['status'] == 'clarification':
+            last_user = next((m['content'] for m in reversed(session['history']) if m['role'] == 'user'), '')
+            prior_intent = _intent(last_user, '')
+            if prior_intent['mode'] == 'apply' and prior_intent['operation']:
+                with service.folders.LOCK:
+                    known = service.folders._public(service.folders._read())['folders']
+                session['pending_clarification'] = {'action': prior_intent['operation'],
+                    'instruction': last_user, 'scope': copy.deepcopy(session['scope']),
+                    'upper': copy.deepcopy(session.get('query_scope') or {'kind': 'all'}),
+                    'candidates': _folder_candidates(last_user, known)}
         session['revision'] += 1
         revision = session['revision']
-        session.update(status='planning', plan=None, error=None, error_details=None, result=None, context=None,
-                       reasoning_effort=data.get('reasoning_effort', 'auto'), context_limit=CONTEXT_LIMIT,
-                       protocol=data.get('protocol', 'openai-chat'), web_search=data.get('web_search', False),
+        session.update(status='planning', plan=None, error=None, error_details=None, result=None, context=None, streaming_reply='',
+                       streaming_tool_events=[], streaming_work_log=[], streaming_phase='preparing',
+                       reasoning_effort=data.get('reasoning_effort', 'auto'),
+                       context_limit=data.get('context_limit', CONTEXT_LIMIT),
+                       protocol=data.get('protocol', 'openai-chat'), web_search=data.get('web_search', True),
                        web_search_mode=data.get('web_search_mode', 'native'),
                        query_scope=copy.deepcopy(data['scope']), provider_id=data['provider_id'], model_name=data['model_name'],
                        graph_thread=session_id + ':' + str(revision), last_message=copy.deepcopy(data))
@@ -861,20 +1062,23 @@ def message(session_id, data):
                                    'instruction': data['instruction'], 'scope': data['scope'],
                                    'provider_id': data['provider_id'], 'model_name': data['model_name'],
                                    'protocol': data.get('protocol', 'openai-chat'),
-                                   'web_search': data.get('web_search', False),
+                                   'web_search': data.get('web_search', True),
                                    'web_search_mode': data.get('web_search_mode', 'native'),
                                    'reasoning_effort': data.get('reasoning_effort', 'auto'),
-                                   'context_limit': CONTEXT_LIMIT}, _config(session))
+                                   'context_limit': data.get('context_limit', CONTEXT_LIMIT)}, _config(session))
         with LOCK, _db() as db:
             session = _load(db, session_id)
             if session['revision'] != revision:
                 return _public(session)
             status = ('awaiting_approval' if output.get('__interrupt__') else
                       output['route'] if output['route'] in ('refused', 'clarification') else 'completed')
-            session.update(status=status, plan=output.get('plan'), error=None, context=output.get('context'))
+            session.update(status=status, plan=output.get('plan'), error=None, context=output.get('context'), streaming_reply='')
             if session.get('plan'):
                 session['owner'] = {'session_id': session_id, 'revision': revision}
-            _history(session, 'assistant', output['text'], status, sources=output.get('sources'))
+            _history(session, 'assistant', output['text'], status, sources=output.get('sources'),
+                     tool_events=output.get('tool_events'),
+                     work_log=output.get('work_log') or session.get('streaming_work_log'))
+            _clear_streaming(session)
             _event(session, status, output['text'])
             _save(db, session)
             return _public(session)
@@ -883,14 +1087,19 @@ def message(session_id, data):
         with LOCK, _db() as db:
             session = _load(db, session_id)
             if session['revision'] == revision:
-                session.update(status='failed', error=detail, plan=None,
+                work_log = _pending_work_log(session)
+                session.update(status='failed', error=detail, plan=None, streaming_reply='',
                                error_details=copy.deepcopy(exc.details) if isinstance(exc, SafeAIError) else None)
-                _history(session, 'assistant', '模型请求未完成：' + detail, 'failed', sources=getattr(exc, 'sources', None))
+                _history(session, 'assistant', '模型请求未完成：' + detail, 'failed', sources=getattr(exc, 'sources', None),
+                         tool_events=getattr(exc, 'tool_events', None) or session.get('streaming_tool_events'),
+                         work_log=work_log or getattr(exc, 'work_log', None))
+                _clear_streaming(session)
                 _event(session, 'failed', '任务失败，没有执行修改')
                 _save(db, session)
             return _public(session)
     finally:
         with LOCK:
+            STREAMS.pop((session_id, revision), None)
             _finish_active(session_id, token)
 
 
@@ -916,9 +1125,19 @@ def action(session_id, kind, data):
             if kind == 'cancel':
                 if session['status'] in ('executing', 'undoing'):
                     raise ValueError('执行阶段已提交，请完成后使用撤销')
+                work_log = _pending_work_log(session)
+                stream_state = STREAMS.get((session_id, session['revision']))
+                if stream_state is not None:
+                    stream_state['cancelled'] = True
+                    close_stream = stream_state.get('stream_close')
+                    if close_stream:
+                        close_stream()
                 session['revision'] += 1
-                session.update(status='cancelled', plan=None, error=None, error_details=None)
-                _history(session, 'assistant', '当前任务已停止，待执行计划已作废。', 'cancelled')
+                session.update(status='cancelled', plan=None, error=None, error_details=None, streaming_reply='',
+                               pending_clarification=None)
+                _history(session, 'assistant', '当前任务已停止，待执行计划已作废。', 'cancelled',
+                         tool_events=session.get('streaming_tool_events'), work_log=work_log)
+                _clear_streaming(session)
                 _event(session, 'cancelled', '已停止；晚到结果不会恢复计划')
                 _save(db, session)
                 return _public(session)

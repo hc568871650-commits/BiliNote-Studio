@@ -1,8 +1,9 @@
 import request from '@/utils/request'
-import type { AskPayload, AskResponse, ChatErrorDetails } from './chat'
+import { withProviderProtocol } from './providerProtocol'
+import type { AskPayload, AskResponse, ChatErrorDetails, ToolEvent } from './chat'
 import { readEventStream } from '@/utils/eventStream'
 
-export interface ChatStreamEvent { type: 'start' | 'status' | 'delta' | 'done' | 'error'; text?: string; phase?: string; reset_text?: boolean; result?: AskResponse; msg?: string; data?: { error_details?: ChatErrorDetails } }
+export interface ChatStreamEvent { type: 'start' | 'status' | 'tool_event' | 'work_log' | 'delta' | 'done' | 'error'; event?: ToolEvent; text?: string; phase?: string; reset_text?: boolean; result?: AskResponse; msg?: string; data?: { error_details?: ChatErrorDetails; tool_events?: ToolEvent[] } }
 type StreamTransport = (payload: AskPayload, signal: AbortSignal) => Promise<Response>
 let previewTransport: StreamTransport | undefined
 // Installed only by the isolated preview entry; production never imports fixtures.
@@ -19,6 +20,7 @@ export async function askQuestionStream(payload: AskPayload, onEvent: (event: Ch
   armTimeout()
   let result: AskResponse | undefined
   try {
+    payload = await withProviderProtocol(payload)
     const base = String(request.defaults.baseURL || '/api').replace(/\/$/, '')
     const response = await (previewTransport ? previewTransport(payload, abort.signal) : fetch(`${base}/chat/ask/stream`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify(payload), signal: abort.signal,

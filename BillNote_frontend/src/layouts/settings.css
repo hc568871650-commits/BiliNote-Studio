@@ -62,6 +62,16 @@
 .settings-model-add { display:flex; gap:8px; padding-bottom:18px; }
 .settings-model-list { border-top:1px solid var(--border); padding:8px 0; }
 .settings-model-list > div { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 0; }
+.settings-model-add input[aria-label="模型展示名"] { max-width:220px; }
+.settings-model-add input[aria-label="模型 API 调用名"] { flex:1 1 220px; min-width:160px; }
+.settings-model-add input[aria-label="模型展示名"] { flex:1 1 160px; }
+.settings-model-list > .settings-model-row { align-items:center; }
+.settings-model-row > label { display:grid; grid-template-columns:minmax(120px,1fr) minmax(120px,1fr) minmax(160px,1fr); align-items:center; gap:8px; flex:1; min-width:0; }
+.settings-model-row > label span,.settings-model-row > label small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.settings-model-row > label small { color:var(--muted-foreground); font-size:11px; }
+.settings-model-row > label input { width:100%; min-width:0; border:1px solid var(--border); background:var(--background); border-radius:6px; padding:6px 8px; font-size:12px; }
+.settings-model-row > div { display:flex; align-items:center; gap:8px; }
+@media(max-width:760px) { .settings-model-add { flex-wrap:wrap; }.settings-model-add input { flex:1 1 180px; }.settings-model-row > label { grid-template-columns:1fr; }.settings-model-row > label small { order:2; }.settings-model-row > label input { order:3; } }
 .settings-content [data-slot=card] { background:var(--card); box-shadow:none; border-radius:14px; }
 .settings-accent-colors { display:grid; grid-template-columns:repeat(4,28px); gap:8px; }
 .settings-accent-colors button { display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; color:white; cursor:pointer; }
@@ -149,6 +159,9 @@ body:has(.settings-shell) .global-theme-toggle { display:none; }
 .settings-content .settings-field .settings-key-input { flex:1.4; }
 .settings-content .purpose-model-picker .choice-trigger { margin:0; color:var(--foreground); font-size:var(--ui-font-size); }
 .settings-transcriber-notice { margin:0 0 16px; }
+.settings-search-advanced { margin-top:18px; border-top:1px solid var(--border); padding-top:14px; }
+.settings-search-advanced > summary { cursor:pointer; color:var(--muted-foreground); font-size:var(--ui-font-size); }
+.settings-search-advanced[open] > summary { margin-bottom:12px; }
 .settings-transcriber-model + .settings-transcriber-model { border-top:1px solid var(--border); }
 .settings-transcriber-model { padding-bottom:12px; }
 .settings-shell { --runtime-ok:#247245; --runtime-warning:#925200; --runtime-error:#bd3038; --runtime-info:#42699c; }
@@ -161,3 +174,9 @@ body:has(.settings-shell) .global-theme-toggle { display:none; }
 .runtime-state--info { color:var(--runtime-info); }
 .runtime-error { padding:14px 0; font-weight:500; }
 @media(max-width:1000px) { .settings-provider-form { padding:22px 20px 28px; } }
+/* Back link sits above the centered detail page instead of floating in a separate left column. */
+.settings-detail--with-back { flex-direction:column; }
+.settings-detail--with-back .settings-detail-navigation { flex:0 0 auto; width:100%; max-width:920px; margin:0 auto; padding:12px 24px 0; }
+.settings-detail--with-back .settings-back-arrow { width:auto; height:28px; gap:6px; padding:0 8px 0 4px; font-size:13px; color:var(--muted-foreground); }
+.settings-detail--with-back .settings-back-arrow:hover { color:var(--foreground); }
+.settings-detail--with-back .settings-page { padding-left:24px; padding-top:8px; }

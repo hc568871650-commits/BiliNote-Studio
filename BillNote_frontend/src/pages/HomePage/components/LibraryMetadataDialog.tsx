@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import type { LearningStatus, NoteLibraryEntry } from '@/services/noteLibrary'
 import { readingLabels } from '@/utils/readingStatus'
+import ChoiceSelect from '@/components/ChoiceSelect'
 
 interface Props {
   open: boolean
@@ -46,9 +47,7 @@ const LibraryMetadataDialog = ({ open, title, entry, busy, showReadingStatus = t
       <DialogHeader><DialogTitle>编辑笔记信息</DialogTitle><DialogDescription className="truncate">{title}</DialogDescription></DialogHeader>
       <div className="space-y-4 py-1">
         {showReadingStatus && <label className="block text-sm font-medium">阅读状态
-          <select disabled={busy} className="mt-1 block w-full rounded border border-input bg-background px-3 py-2" value={learningStatus} onChange={event => setLearningStatus(event.target.value as LearningStatus)}>
-            {statuses.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}
-          </select>
+          <ChoiceSelect label="阅读状态" disabled={busy} className="metadata-choice mt-1" value={learningStatus} onChange={value => setLearningStatus(value as LearningStatus)} options={statuses.map(status => ({ value: status.value, label: status.label }))} />
         </label>}
         <label className="block text-sm font-medium">标签（最多 10 个，每个 24 字）
           <input disabled={busy} className="mt-1 block w-full rounded border border-input bg-background px-3 py-2" value={tagsText} onChange={event => { setTagsText(event.target.value); setValidationError(null) }} placeholder="例如：教程, 待复习" />

@@ -1,23 +1,33 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { addProvider, addModel, testConnection, getProviderList, updateProviderById } from '@/services/model'
 import { getTranscriberConfig, updateTranscriberConfig } from '@/services/transcriber'
-import { BookOpen } from 'lucide-react'
+import { hasLocalWhisper } from '@/utils/edition'
+import studioMark from '@/assets/studio-mark.svg?raw'
 import '@/components/startup.css'
+
+const studioMarkMarkup = studioMark.replaceAll('#fff', 'currentColor')
+const transcribers = [
+  { value: 'groq', title: 'Groq', desc: '在线转写，需在转写设置中配置 API Key。' },
+  { value: 'bcut', title: '必剪', desc: '在线转写，无需登录。' },
+  { value: 'kuaishou', title: '快手', desc: '在线转写，无需登录。' },
+  ...(hasLocalWhisper ? [{ value: 'fast-whisper', title: 'Faster Whisper', desc: '本地转写，首次使用需要下载模型。' }] : []),
+]
 
 // 后端 R.error / ProviderError 的形状是 { code, msg, data }，没有 .message。
 // 直接 ${e} 会渲染成 [object Object]，这里统一抽取可读文案。
-function errText(e: any): string {
+function errText(e: unknown): string {
   if (!e) return '未知错误'
   if (typeof e === 'string') return e
-  return e.msg || e.message || JSON.stringify(e)
+  const error = e as { msg?: string; message?: string }
+  return error.msg || error.message || JSON.stringify(e)
 }
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
 // 后端连通性自检不走共享 axios（会弹 toast），用裸 fetch 避免启动期 toast 叠堆
 function getBackendBase(): string {
-  const fromEnv = (import.meta as any).env?.VITE_API_BASE_URL as string | undefined
+  const fromEnv = import.meta.env.VITE_API_BASE_URL as string | undefined
   return ((fromEnv && fromEnv.length > 0) ? fromEnv : '/api').replace(/\/$/, '')
 }
 async function pingBackend(): Promise<boolean> {
@@ -63,12 +73,22 @@ const Onboarding = ({ checkBackend = pingBackend }: { checkBackend?: () => Promi
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1')
   const [modelName, setModelName] = useState('gpt-4o-mini')
-  const [providerId, setProviderId] = useState<string | null>(null)
   const [savingProvider, setSavingProvider] = useState(false)
 
   // step 3
   const [transcriberType, setTranscriberType] = useState<string>('groq')
+  const transcriberTouched = useRef(false)
   const [savingTranscriber, setSavingTranscriber] = useState(false)
+
+  useEffect(() => {
+    if (step !== 3) return
+    let live = true
+    transcriberTouched.current = false
+    void getTranscriberConfig().then(config => {
+      if (live && !transcriberTouched.current) setTranscriberType(transcribers.some(option => option.value === config.transcriber_type) ? config.transcriber_type : 'groq')
+    }).catch(() => { /* Keep the supported default when configuration cannot be read. */ })
+    return () => { live = false }
+  }, [step])
 
   function next() {
     setError('')
@@ -143,21 +163,21 @@ const Onboarding = ({ checkBackend = pingBackend }: { checkBackend?: () => Promi
       // 「找到那个已存在的同名供应商 → 更新它的 key / base_url」而不是新建。
       // 这些调用都带 silent:true —— 撞名是预期内的，不弹全局红 toast。
       try {
-        const res: any = await addProvider({
+        const res = await addProvider({
           name,
           api_key: apiKey.trim(),
           base_url: baseUrl.trim(),
           type: 'custom',
           logo: 'custom',
-        }, { silent: true })
-        pid = (res?.data ?? res) as string | undefined
+        }, { silent: true }) as unknown as string | { data?: string }
+        pid = typeof res === 'string' ? res : res?.data
         if (!pid) throw new Error('后端未返回 provider id')
       }
-      catch (addErr: any) {
+      catch (addErr) {
         const msg = errText(addErr)
         if (!msg.includes('已存在')) throw addErr
         // 撞名：复用已存在的同名供应商
-        const list: any[] = (await getProviderList({ silent: true })) || []
+        const list = (await getProviderList({ silent: true })) as unknown as { id: string; name: string }[] || []
         const existing = list.find(p => p?.name === name)
         if (!existing?.id) throw new Error(`供应商「${name}」已存在但无法定位，请换个名字`)
         pid = existing.id
@@ -169,13 +189,11 @@ const Onboarding = ({ checkBackend = pingBackend }: { checkBackend?: () => Promi
         }, { silent: true })
       }
 
-      setProviderId(pid!)
-
       // 加一个默认 model（同名 model 已存在时后端会报错，这里也容错）
       try {
         await addModel({ provider_id: pid!, model_name: modelName.trim() }, { silent: true })
       }
-      catch (modelErr: any) {
+      catch (modelErr) {
         const msg = errText(modelErr)
         if (!msg.includes('已存在')) throw modelErr
         // 模型已存在，直接继续
@@ -183,12 +201,12 @@ const Onboarding = ({ checkBackend = pingBackend }: { checkBackend?: () => Promi
 
       // 测试连通（失败不阻断流程，让用户自己决定继续）
       try { await testConnection({ id: pid!, model: modelName.trim() }, { silent: true }) }
-      catch (e: any) {
+      catch (e) {
         console.warn('测试连接失败：', errText(e))
       }
       next()
     }
-    catch (e: any) {
+    catch (e) {
       setError(`保存失败：${errText(e)}`)
     }
     finally {
@@ -200,15 +218,15 @@ const Onboarding = ({ checkBackend = pingBackend }: { checkBackend?: () => Promi
     setError('')
     setSavingTranscriber(true)
     try {
-      // fast-whisper / mlx-whisper 需指定 model size；在线 (groq/bcut/kuaishou) 不用
-      const needsSize = transcriberType === 'fast-whisper' || transcriberType === 'mlx-whisper'
+      const supportedType = transcribers.some(option => option.value === transcriberType) ? transcriberType : 'groq'
+      const needsSize = supportedType === 'fast-whisper'
       await updateTranscriberConfig({
-        transcriber_type: transcriberType,
+        transcriber_type: supportedType,
         ...(needsSize ? { whisper_model_size: 'tiny' } : {}),
-      } as any)
+      })
       next()
     }
-    catch (e: any) {
+    catch (e) {
       setError(`保存失败：${errText(e)}`)
     }
     finally {
@@ -225,27 +243,23 @@ const Onboarding = ({ checkBackend = pingBackend }: { checkBackend?: () => Promi
     <div className="onboarding-screen">
       <div className="onboarding-card">
         <div className="flex items-center gap-3 mb-4">
-          <div className="onboarding-symbol"><BookOpen size={24} strokeWidth={1.5} /></div>
+          <div className="onboarding-symbol" aria-hidden="true" dangerouslySetInnerHTML={{ __html: studioMarkMarkup }} />
           <div>
-            <h1 className="text-xl font-bold">欢迎使用 BiliNote Studio</h1>
-            <p className="text-xs text-muted-foreground">几步配置后就可以开始把视频转笔记。</p>
+            <h1 className="onboarding-title">欢迎使用 BiliNote Studio</h1>
+            <p className="text-xs text-muted-foreground">配置工作台，开始视频学习。</p>
           </div>
         </div>
 
-        {/* Stepper */}
-        <div className="mb-5 flex items-center gap-2 text-xs text-muted-foreground">
-          {[1, 2, 3, 4].map(s => (
-            <div key={s} className="flex items-center gap-2">
-              <div
-                className={`flex h-6 w-6 items-center justify-center rounded-full border ${step >= s ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background text-muted-foreground'}`}
-              >{s}</div>
-              {s < 4 && <div className={`h-px w-8 ${step > s ? 'bg-primary' : 'bg-border'}`} />}
-            </div>
+        <ol className="onboarding-steps" aria-label="首次配置进度">
+          {['连接', '模型', '转写', '登录'].map((label, index) => (
+            <li key={label} data-complete={step > index + 1} aria-current={step === index + 1 ? 'step' : undefined}>
+              <span>{index + 1}</span>{label}
+            </li>
           ))}
-        </div>
+        </ol>
 
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded border border-border bg-muted p-3 text-sm text-foreground">
-          <span>阅读和整理已有笔记无需配置模型，生成新笔记时再配置。</span>
+          <span>模型可以稍后在设置中配置。</span>
           <button type="button" className="shrink-0 font-medium underline underline-offset-4 disabled:opacity-50" disabled={!backendOk || savingProvider || savingTranscriber} onClick={finish}>先进入笔记库</button>
         </div>
         {step === 1 && (
@@ -280,7 +294,7 @@ const Onboarding = ({ checkBackend = pingBackend }: { checkBackend?: () => Promi
         {step === 2 && (
           <section className="flex flex-col gap-3">
             <h2 className="font-semibold">第 2 步 · 模型供应商</h2>
-            <p className="text-sm text-muted-foreground">填一个 OpenAI 兼容供应商：DeepSeek / Qwen / Claude / 自托管 / OpenAI 都行。</p>
+            <p className="text-sm text-muted-foreground">使用 OpenAI 兼容接口；其他协议可在设置中配置。</p>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-muted-foreground">供应商名（自取）</span>
               <input className="input border rounded px-2 py-1" value={providerName} onChange={e => setProviderName(e.target.value)} />
@@ -299,10 +313,13 @@ const Onboarding = ({ checkBackend = pingBackend }: { checkBackend?: () => Promi
             </label>
             {error && <div className="text-xs text-destructive">{error}</div>}
             <div className="flex gap-2 justify-between">
-              <button className="text-sm text-muted-foreground hover:text-foreground" onClick={prev}>上一步</button>
+              <button className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-50" disabled={savingProvider} onClick={prev}>上一步</button>
+              <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50" disabled={savingProvider} onClick={next}>稍后配置，下一步</button>
               <button className="px-4 py-1.5 text-sm rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50" disabled={savingProvider} onClick={saveProvider}>
                 {savingProvider ? '保存中…' : '保存并下一步'}
               </button>
+              </div>
             </div>
           </section>
         )}
@@ -310,16 +327,11 @@ const Onboarding = ({ checkBackend = pingBackend }: { checkBackend?: () => Promi
         {step === 3 && (
           <section className="flex flex-col gap-3">
             <h2 className="font-semibold">第 3 步 · 音频转写引擎</h2>
-            <p className="text-sm text-muted-foreground">把视频音频转成文字。<strong>推荐在线引擎</strong>，避免本地下载 ~600MB 的模型。</p>
+            <p className="text-sm text-muted-foreground">{hasLocalWhisper ? '选择在线或本地转写。' : '当前版本使用在线转写。'}</p>
             <div className="grid gap-2">
-              {[
-                { value: 'groq', title: 'Groq（在线，推荐）', desc: '注册 https://groq.com/ 拿免费 key；速度快、英文语料佳。无需本地模型。' },
-                { value: 'bcut', title: '必剪（在线，免登）', desc: '免登，中文表现好；偶尔限流。' },
-                { value: 'kuaishou', title: '快手（在线，免登）', desc: '与必剪类似，备选。' },
-                { value: 'fast-whisper', title: 'Faster Whisper（本地）', desc: '完全离线但首次需下载 ~75MB（tiny）至 ~3GB（large-v3）的模型。CPU 慢。' },
-              ].map(opt => (
-                <label key={opt.value} className={`flex gap-3 p-3 rounded border cursor-pointer ${transcriberType === opt.value ? 'border-primary bg-primary-light' : 'border-border hover:border-border'}`}>
-                  <input type="radio" name="transcriber" value={opt.value} checked={transcriberType === opt.value} onChange={e => setTranscriberType(e.target.value)} />
+              {transcribers.map(opt => (
+                <label key={opt.value} className={`onboarding-transcriber flex gap-3 p-3 rounded border cursor-pointer ${transcriberType === opt.value ? 'border-primary bg-primary-light' : 'border-border hover:border-border'}`}>
+                  <input type="radio" name="transcriber" value={opt.value} checked={transcriberType === opt.value} onChange={e => { transcriberTouched.current = true; setTranscriberType(e.target.value) }} />
                   <div>
                     <div className="text-sm font-medium">{opt.title}</div>
                     <div className="text-xs text-muted-foreground mt-0.5">{opt.desc}</div>
@@ -346,7 +358,7 @@ const Onboarding = ({ checkBackend = pingBackend }: { checkBackend?: () => Promi
               YouTube 一般不需要 cookie。先跳过也没问题，到时再去配。
             </p>
             <div className="rounded bg-muted p-3 text-xs text-muted-foreground">
-              提示：插件版（<a className="text-primary underline" href="https://github.com/JefferyHcool/BiliNote/tree/develop/BillNote_extension" target="_blank" rel="noreferrer">BillNote_extension</a>）支持一键 cookie 同步；桌面版需手动复制。
+              <a className="text-primary underline" href="https://github.com/JefferyHcool/BiliNote/tree/develop/BillNote_extension" target="_blank" rel="noreferrer">上游浏览器扩展</a>支持 Cookie 同步；桌面版可在下载设置中手动配置。
             </div>
             <div className="flex gap-2 justify-between">
               <button className="text-sm text-muted-foreground hover:text-foreground" onClick={prev}>上一步</button>

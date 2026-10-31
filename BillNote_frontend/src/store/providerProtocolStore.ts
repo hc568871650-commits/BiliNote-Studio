@@ -1,12 +1,13 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-export type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic'
+export type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic' | 'gemini'
 export type Protocol = ProviderProtocol
 export const providerProtocolOptions: { value: ProviderProtocol; label: string }[] = [
   { value: 'openai-chat', label: 'OpenAI Chat Completions（默认）' },
   { value: 'openai-responses', label: 'OpenAI Responses' },
   { value: 'anthropic', label: 'Anthropic Messages' },
+  { value: 'gemini', label: 'Gemini 原生' },
 ]
 interface ProviderProtocolStore {
   protocols: Record<string, ProviderProtocol>

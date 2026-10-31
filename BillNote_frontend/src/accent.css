@@ -2,6 +2,7 @@
 :root[data-accent="blue"] { --accent-light-value:#45679e; --accent-dark-value:#9ab6e4; }
 :root[data-accent="slate"] { --accent-light-value:#333333; --accent-dark-value:#ffffff; }
 :root[data-accent="indigo"] { --accent-light-value:#5058b8; --accent-dark-value:#acb2ff; }
+:root[data-accent="custom"] { --accent-light-value:var(--custom-accent-light,#45679e); --accent-dark-value:var(--custom-accent-dark,#9ab6e4); }
 :root[data-accent="violet"] { --accent-light-value:#7950b0; --accent-dark-value:#c6a5ed; }
 :root[data-accent="green"] { --accent-light-value:#34734a; --accent-dark-value:#99cca7; }
 :root[data-accent="teal"] { --accent-light-value:#247477; --accent-dark-value:#8fced0; }

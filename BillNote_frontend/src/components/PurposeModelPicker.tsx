@@ -7,11 +7,11 @@ import { useProviderStore } from '@/store/providerStore'
 import type { PurposeModelSelection } from '@/store/purposeModelStore'
 import './purpose-model.css'
 import { isTranscriptionModel } from '@/utils/modelCapabilities'
-import { settingsForModel, type AISettings, type ReasoningEffort } from '@/utils/aiSettings'
-import { useModelCapabilities } from '@/hooks/useModelCapabilities'
-import { useProviderProtocolStore } from '@/store/providerProtocolStore'
+import { settingsForModel, requestEffortChoices, type AISettings, type ReasoningEffort } from '@/utils/aiSettings'
+import { useEffectiveProviderProtocol } from '@/hooks/useEffectiveProviderProtocol'
+import { modelDisplayName } from '@/utils/modelDisplay'
 
-interface EnabledModel extends PurposeModelSelection { id: string }
+interface EnabledModel extends PurposeModelSelection { id: string; display_name?: string | null }
 interface Props {
   value: PurposeModelSelection | null
   onChange: (selection: PurposeModelSelection | null) => void
@@ -26,6 +26,7 @@ interface Props {
 const identity = (model: PurposeModelSelection) => JSON.stringify([String(model.provider_id), model.model_name])
 let modelCache: { at: number; models: EnabledModel[] } | undefined
 let pendingModels: Promise<EnabledModel[]> | undefined
+if (typeof window !== 'undefined') window.addEventListener('model-list-updated', () => { modelCache = undefined })
 const loadModels = () => {
   if (modelCache && Date.now() - modelCache.at < 15000) return Promise.resolve(modelCache.models)
   if (!pendingModels) pendingModels = fetchEnableModels().then(models => {
@@ -38,9 +39,8 @@ const loadModels = () => {
 const effortLabels: Record<ReasoningEffort, string> = { auto: '自动', none: '关闭', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最高' }
 
 export default function PurposeModelPicker({ value, onChange, label = '模型', compact = false, inline = false, disabled = false, controls, onControlsChange, reasoningModel }: Props) {
-  const protocol = useProviderProtocolStore(state => state.protocols[value?.provider_id || ''] || 'openai-chat')
-  const { capabilities } = useModelCapabilities(controls ? value?.provider_id : undefined, controls ? value?.model_name : undefined, protocol)
-  const efforts = (capabilities?.available_efforts || ['auto']).filter((item): item is ReasoningEffort => item in effortLabels)
+  const protocol = useEffectiveProviderProtocol(value?.provider_id)
+  const efforts = requestEffortChoices(reasoningModel || value?.model_name, protocol)
   const providers = useProviderStore(state => state.provider)
   const fetchProviders = useProviderStore(state => state.fetchProviderList)
   const [models, setModels] = useState<EnabledModel[]>([])
@@ -59,7 +59,12 @@ export default function PurposeModelPicker({ value, onChange, label = '模型', 
     } catch { setError(true) }
     finally { setLoading(false) }
   }, [])
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    void load()
+    const refresh = () => { void load() }
+    window.addEventListener('model-list-updated', refresh)
+    return () => window.removeEventListener('model-list-updated', refresh)
+  }, [load])
   useEffect(() => { if (!providers.length) void fetchProviders().catch(() => { /* Request layer reports the error. */ }) }, [fetchProviders, providers.length])
   const options = models.filter(model => {
     if (isTranscriptionModel(model.model_name)) return false
@@ -89,7 +94,7 @@ export default function PurposeModelPicker({ value, onChange, label = '模型', 
       const rect = trigger.current!.getBoundingClientRect()
       setPosition({ right: Math.max(12, Math.min(window.innerWidth - rect.right, window.innerWidth - 292)), bottom: Math.max(12, window.innerHeight - rect.top + 6) })
       setOpen(true); void load()
-    }}><span>{value?.model_name || (loading ? '加载中…' : '选择模型')}</span><ChevronDown size={12} /></button>
+    }}><span>{value ? modelDisplayName(options.find(item => identity(item) === selected) || value) : (loading ? '加载中…' : '选择模型')}</span><ChevronDown size={12} /></button>
     {open && createPortal(<div ref={menu} id={menuId} className="purpose-model-menu" role="dialog" aria-label={`${label}与思考等级`} style={position} onKeyDown={event => {
       if (event.key === 'Escape') { event.preventDefault(); close() }
       if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'Tab'].includes(event.key)) {
@@ -102,11 +107,11 @@ export default function PurposeModelPicker({ value, onChange, label = '模型', 
     }}>
       <div className="purpose-model-menu-list" role="radiogroup" aria-label={label}>
         {options.map(option => <button type="button" role="radio" aria-checked={identity(option) === selected} key={identity(option)} onClick={() => { onChange({ provider_id: String(option.provider_id), model_name: option.model_name }); close() }}>
-          <span><strong>{option.model_name}</strong><small>{providers.find(provider => String(provider.id) === String(option.provider_id))?.name || '服务商'}</small></span>{identity(option) === selected && <Check size={14} />}
+          <span><strong>{modelDisplayName(option)}</strong><small>{providers.find(provider => String(provider.id) === String(option.provider_id))?.name || '服务商'}</small></span>{identity(option) === selected && <Check size={14} />}
         </button>)}
       </div>
       {status && <div className="purpose-model-menu-status">{status}{error && <button onClick={() => void load()}>重试</button>}</div>}
-      {effort && onControlsChange && <div className="purpose-model-effort"><span>思考等级</span><div role="radiogroup" aria-label="思考等级">{efforts.map(item => <button type="button" role="radio" aria-checked={effort.reasoning_effort === item} key={item} onClick={() => onControlsChange({ ...effort, reasoning_effort: item })}>{effortLabels[item]}</button>)}</div>{efforts.length === 1 && <small>请在服务商设置中测试该模型的思考能力。</small>}</div>}
+      {effort && onControlsChange && <div className="purpose-model-effort"><span>思考等级</span><div role="radiogroup" aria-label="思考等级">{efforts.map(item => <button type="button" role="radio" aria-checked={effort.reasoning_effort === item} key={item} onClick={() => onControlsChange({ ...effort, reasoning_effort: item })}>{effortLabels[item]}</button>)}</div>{efforts.length === 1 && <small>当前协议使用自动思考。</small>}</div>}
     </div>, document.body)}
   </div>
   return <div className={`purpose-model-picker ${compact ? 'is-compact' : ''} ${inline ? 'is-inline' : ''}`}>
@@ -114,8 +119,8 @@ export default function PurposeModelPicker({ value, onChange, label = '模型', 
       const model = options.find(option => identity(option) === value)
       onChange(model ? { provider_id: String(model.provider_id), model_name: model.model_name } : null)
     }} options={[
-      ...(notListed ? [{ value: selected, label: `${value!.model_name}${missing ? '（配置已不可用）' : ''}`, disabled: true }] : []),
-      ...options.map(model => ({ value: identity(model), label: `${model.model_name} · ${providers.find(provider => String(provider.id) === String(model.provider_id))?.name || '服务商'}` })),
+      ...(notListed ? [{ value: selected, label: `${modelDisplayName(value!)}${missing ? '（配置已不可用）' : ''}`, disabled: true }] : []),
+      ...options.map(model => ({ value: identity(model), label: `${modelDisplayName(model)} · ${providers.find(provider => String(provider.id) === String(model.provider_id))?.name || '服务商'}` })),
     ]} /></div>
     {error ? <button type="button" onClick={() => void load()}>加载失败，重试</button> : !loading && !options.length ? <small>请先在模型服务商中添加并启用模型。</small> : missing ? <small>请重新选择可用模型，不会自动切换其他模型。</small> : null}
   </div>

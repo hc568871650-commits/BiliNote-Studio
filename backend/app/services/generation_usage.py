@@ -12,6 +12,7 @@ from pathlib import Path
 
 from app.models.generation_options import GenerationOptions
 from app.services import note_storage
+from app.services import note_diagnostics
 
 
 TOKEN_FIELDS = ('input_tokens', 'output_tokens', 'reasoning_tokens', 'cached_input_tokens',
@@ -94,6 +95,7 @@ class GenerationUsageRecorder:
         self.options = options if isinstance(options, GenerationOptions) else GenerationOptions.model_validate(options or {})
         self.lock = threading.RLock()
         self.started = time.monotonic()
+        self.diagnostic_trace_id = note_diagnostics.current_trace_id(task_id)
         self.attempt_started = {}
         self.directory = Path(directory) if directory is not None else None
         run_id = note_storage.valid_id(run_id or uuid.uuid4().hex)
@@ -129,6 +131,11 @@ class GenerationUsageRecorder:
             self.data['attempts'].append(attempt)
             self.attempt_started[index] = time.monotonic()
             self.persist()
+            note_diagnostics.record_event(self.data['task_id'], 'model_attempt_started',
+                                          trace_id=self.diagnostic_trace_id,
+                                          index=index, phase=phase, retry_index=retry_index,
+                                          reason=reason, request_bytes=request_bytes,
+                                          text_chars=text_chars, image_count=image_count)
             return index
 
     def complete_attempt(self, index, *, response=None, error=None):
@@ -147,7 +154,13 @@ class GenerationUsageRecorder:
                                ('succeeded' if reason == 'stop' and valid_body else 'invalid_response')),
                            http_status=status_code if error else 200, finish_reason=reason,
                            error_type=type(error).__name__ if error else None, usage=extract_usage(response))
+            attempt['request_id'] = note_diagnostics.response_request_id(error if error else response)
             self.persist()
+            note_diagnostics.record_event(self.data['task_id'], 'model_attempt_completed',
+                                          trace_id=self.diagnostic_trace_id,
+                                          index=index, phase=attempt['phase'], status=attempt['status'],
+                                          elapsed_ms=attempt['elapsed_ms'], http_status=attempt['http_status'],
+                                          request_id=attempt['request_id'], error_type=attempt['error_type'])
 
     def finish(self, status, error=None):
         with self.lock:

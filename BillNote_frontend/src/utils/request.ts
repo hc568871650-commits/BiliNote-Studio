@@ -29,7 +29,12 @@ const baseURL = import.meta.env.VITE_API_BASE_URL;
 
 // 响应拦截器
 request.interceptors.response.use(
-  (response: AxiosResponse<IResponse>) => {
+  async (response: AxiosResponse<IResponse>) => {
+    if (response.config.responseType === 'blob' && response.data instanceof Blob) {
+      if (!response.data.type.includes('json')) return response;
+      try { response.data = JSON.parse(await response.data.text()) }
+      catch { return Promise.reject({ code: -1, msg: '下载响应无效，请稍后重试', data: null }) }
+    }
     const res = response.data;
     if (res.code === 0) {
       // 业务成功，可以根据需要显示成功消息，或者不显示（如果操作本身就是可见的）
@@ -43,7 +48,11 @@ request.interceptors.response.use(
       return Promise.reject(res); // 拒绝Promise，让业务代码可以捕获并处理
     }
   },
-  (error) => {
+  async (error) => {
+    if (error?.response?.data instanceof Blob) {
+      try { error.response.data = JSON.parse(await error.response.data.text()) }
+      catch { error.response.data = { code: error.response.status, msg: '诊断包下载失败，请稍后重试', data: null } }
+    }
     const suppress = error?.config?.suppressToast === true
     // 网络/服务器错误
     const res = error?.response?.data as IResponse | undefined;

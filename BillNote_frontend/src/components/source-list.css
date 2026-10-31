@@ -3,3 +3,4 @@
 .assistant-sources :is(a,button,strong) { color:var(--surface-text);text-align:left;font-weight:500;overflow-wrap:anywhere; }
 .assistant-sources :is(a,button):hover { text-decoration:underline; }
 .assistant-sources :is(p,small) { display:block;margin:4px 0 0;color:var(--surface-description);white-space:pre-wrap;overflow-wrap:anywhere; }
+.assistant-source-evidence { display:block; margin-top:4px; color:var(--muted-foreground); font-size:11px; }

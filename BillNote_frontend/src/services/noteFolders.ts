@@ -10,7 +10,7 @@ export interface NoteFolderState {
   assignments: Record<string, string>
 }
 
-export const getNoteFolders = () => request.get('/note_folders') as unknown as Promise<NoteFolderState>
+export const getNoteFolders = (options: { suppressToast?: boolean } = {}) => request.get('/note_folders', options) as unknown as Promise<NoteFolderState>
 export const createNoteFolder = (name: string) => request.post('/note_folders', { name }) as unknown as Promise<NoteFolderState>
 export const renameNoteFolder = (id: string, name: string) => request.patch(`/note_folders/${encodeURIComponent(id)}`, { name }) as unknown as Promise<NoteFolderState>
 export const deleteNoteFolder = (id: string) => request.delete(`/note_folders/${encodeURIComponent(id)}`) as unknown as Promise<NoteFolderState>

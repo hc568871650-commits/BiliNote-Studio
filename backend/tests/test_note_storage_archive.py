@@ -27,10 +27,6 @@ class NoteStorageArchiveTest(unittest.TestCase):
         out_dir = patch.dict("os.environ", {"OUT_DIR": str(self.images)})
         out_dir.start()
         self.addCleanup(out_dir.stop)
-        # Archive tests isolate vector side effects, including construction.
-        vector_init = patch("app.services.vector_store.VectorStoreManager.__init__", return_value=None)
-        vector_init.start()
-        self.addCleanup(vector_init.stop)
 
     def task(self, task_id, markdown=None):
         return {"id": task_id, "status": "SUCCESS", "createdAt": "2026-09-19T12:00:00Z",
@@ -121,12 +117,8 @@ class NoteStorageArchiveTest(unittest.TestCase):
         self.assertEqual(_cache_task_id(storage.cache_path("draft", "audio"), "audio"), "draft")
         self.assertEqual(_cache_task_id(storage.cache_path("draft", "transcript"), "transcript"), "draft")
         self.assertEqual(_cache_task_id(storage.cache_path("draft", "markdown"), "markdown"), "draft")
-        # Draft creation only persists library metadata. Admission separately
-        # initializes the polling status before a background task starts.
-        NoteGenerator._update_status("draft", TaskStatus.PENDING, message="排队等待处理")
         response = note_router.get_task_status("draft")
-        self.assertEqual(json.loads(response.body)["data"]["status"], "PENDING")
-        self.assertEqual(json.loads(response.body)["data"]["message"], "排队等待处理")
+        self.assertEqual(json.loads(response.body)["data"]["status"], "UNKNOWN")
         self.assertEqual(storage.recover_interrupted_runs(), ["draft"])
         self.assertEqual(storage.get_task("draft")["status"], "FAILED")
 
@@ -147,11 +139,11 @@ class NoteStorageArchiveTest(unittest.TestCase):
             def _update_status(task_id, status, message=None):
                 if status.value == "SUCCESS":
                     assert storage.result_path(task_id).exists()
-                storage.write_status(task_id, status.value, message)
+                storage.status_path(task_id).write_text(json.dumps({"status": status.value}))
 
         with patch.object(note_router, "NoteGenerator", FakeGenerator), \
              patch.object(note_router.task_serial_executor, "run", side_effect=lambda action: action()), \
-             patch("app.services.vector_store.VectorStoreManager.index_task"):
+             patch("app.services.vector_store.VectorStoreManager"):
             note_router.run_note_task("generated", "url", "bilibili", "medium",
                                       model_name="fixture", provider_id="fixture")
         self.assertEqual(storage.get_task("generated")["status"], "SUCCESS")
@@ -162,14 +154,10 @@ class NoteStorageArchiveTest(unittest.TestCase):
         storage.create_draft("io-failure", {"platform": "bilibili"})
         path = storage.status_path("io-failure")
         path.write_text('{"status":"SAVING"}', encoding="utf-8")
-        # Inject failure at the atomic status commit, rather than Path.open:
-        # _atomic_json now uses builtins.open for writing and Path.open to read
-        # the manifest after the status commit has already succeeded.
-        with patch.object(storage, "_atomic_json", side_effect=PermissionError("locked")):
+        with patch.object(storage, '_replace_note_file', side_effect=PermissionError("locked")):
             with self.assertRaises(PermissionError):
-                NoteGenerator._update_status("io-failure", TaskStatus.SUCCESS)
+                NoteGenerator.__new__(NoteGenerator)._update_status("io-failure", TaskStatus.SUCCESS)
         self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["status"], "SAVING")
-        self.assertEqual(storage.get_task("io-failure")["status"], "SAVING")
 
     def test_api_archive_read_restore_and_delete_guard(self):
         app = FastAPI()

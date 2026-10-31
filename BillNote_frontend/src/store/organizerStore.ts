@@ -1,9 +1,9 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import { defaultAISettings, type AISettings } from '@/utils/aiSettings'
+import { automaticSearchSettings, defaultAISettings, type AISettings } from '@/utils/aiSettings'
 import { actOrganizerSession, compactOrganizerSession, createOrganizerSession, getOrganizerSession, listOrganizerSessions, messageOrganizerSession, previewOrganizerRetention, retentionFailure, type OrganizerRetentionPreview, type OrganizerPlan, type OrganizerPlanRequest, type OrganizerResult, type OrganizerScope, type OrganizerSession } from '@/services/organizer'
 import type { PurposeModelSelection } from '@/store/purposeModelStore'
-import type { ChatErrorDetails, ChatSource } from '@/services/chat'
+import type { ChatErrorDetails, ChatSource, ToolEvent } from '@/services/chat'
 
 export interface OrganizerMessage {
   id: string
@@ -14,6 +14,10 @@ export interface OrganizerMessage {
   result?: OrganizerResult
   phase?: 'pending' | 'executed' | 'undone' | 'cancelled' | 'superseded'
   sources?: ChatSource[]
+  tool_events?: ToolEvent[]
+  work_log?: string[]
+  active?: boolean
+  work_phase?: string
 }
 interface OrganizerStore {
   messages: OrganizerMessage[]
@@ -61,7 +65,7 @@ const supported = ['create_folder', 'rename_folder', 'move_notes', 'set_tags', '
 const snapshotMessages = (session: OrganizerSession): OrganizerMessage[] => {
   if (!session.session_id || !Number.isInteger(session.revision) || !Array.isArray(session.history)) throw new Error('会话返回格式无效，请重新读取。')
   if (session.plan && (!Array.isArray(session.plan.operations) || session.plan.operations.some(operation => !supported.includes(operation.type)) || (session.plan.operations.length && (!session.plan.plan_id || session.plan.metadata_only !== true)))) throw new Error('计划缺少安全确认信息，未执行任何操作。')
-  const messages: OrganizerMessage[] = session.history.filter(item => item.role !== 'system').map(item => ({ id: item.id, role: item.role as 'user' | 'assistant', text: item.content, sources: item.sources?.map(source => ({ ...source })), phase: item.phase === 'pending' ? undefined : item.phase }))
+  const messages: OrganizerMessage[] = session.history.filter(item => item.role !== 'system').map(item => ({ id: item.id, role: item.role as 'user' | 'assistant', text: item.content, sources: item.sources?.map(source => ({ ...source })), tool_events: item.tool_events?.map(event => ({ ...event })), work_log: item.work_log ? [...item.work_log] : undefined, phase: item.phase === 'pending' ? undefined : item.phase }))
   let lastAssistant = -1
   messages.forEach((item, index) => { if (item.role === 'assistant') lastAssistant = index })
   if (session.status === 'awaiting_approval') {
@@ -71,6 +75,7 @@ const snapshotMessages = (session: OrganizerSession): OrganizerMessage[] => {
     messages.forEach((item, index) => { if (proposalIds.has(item.id)) lastAssistant = index })
   }
   if (session.plan && lastAssistant >= 0) messages[lastAssistant] = { ...messages[lastAssistant], plan: session.plan, result: session.result || undefined, phase: session.status === 'awaiting_approval' ? 'pending' : session.result?.status === 'undone' ? 'undone' : session.result?.status === 'executed' ? 'executed' : session.status === 'cancelled' ? 'cancelled' : undefined }
+  if (session.status === 'planning') messages.push({ id: `${session.session_id}:${session.revision}:stream`, role: 'assistant', text: session.streaming_reply || '', tool_events: session.streaming_tool_events, work_log: session.streaming_work_log, active: true, work_phase: session.streaming_phase || 'planning' })
   return messages
 }
 let epoch = 0
@@ -159,7 +164,7 @@ export const useOrganizerStore = create<OrganizerStore>()(persist((set, get) => 
   }
   return {
     messages: [], session: null, sessions: [], initialized: false, draft: '', scope: 'all', folderId: 'default', selectedIds: [], model: null, modelOverridden: false, controls: defaultAISettings, busy: null, error: null, errorDetails: null, retentionPreview: null, compactNotice: null,
-    setControls: controls => set({ controls: { ...controls, context_limit: 272000 } }),
+    setControls: controls => set({ controls: automaticSearchSettings({ ...controls, context_limit: 272000 }) }),
     confirmCreation: () => createNew(true),
     cancelCreation: () => { if (!get().busy) { pendingCreation = null; set({ retentionPreview: null, error: null }) } },
     setDraft: draft => set({ draft }), setScope: scope => set({ scope }), setFolderId: folderId => set({ folderId }),
@@ -244,4 +249,4 @@ export const useOrganizerStore = create<OrganizerStore>()(persist((set, get) => 
       await createNew()
     },
   }
-}, { name: storageKey + '-composer', storage: createJSONStorage(() => localStorage), partialize: state => ({ model: state.model, modelOverridden: state.modelOverridden, controls: state.controls }) }))
+}, { name: storageKey + '-composer', storage: createJSONStorage(() => localStorage), merge: (persisted, current) => { const saved = persisted as Partial<OrganizerStore>; return { ...current, ...saved, controls: automaticSearchSettings(saved?.controls) } }, partialize: state => ({ model: state.model, modelOverridden: state.modelOverridden, controls: state.controls }) }))
