@@ -1,3 +1,5 @@
+import { READER_PAN_START, READER_PAN_END } from './readerPan'
+
 export interface ReadingPosition { progress: number; block?: number; offset?: number }
 const clamp = (value: number) => Math.max(0, Math.min(1, value))
 export function parseReadingPosition(value: unknown): ReadingPosition | null {
@@ -8,15 +10,21 @@ export function parseReadingPosition(value: unknown): ReadingPosition | null {
   return { progress: clamp(record.progress), ...(Number.isInteger(record.block) && record.block! >= 0 && Number.isFinite(record.offset) ? { block: record.block, offset: record.offset } : {}) }
 }
 const blocks = (article: HTMLElement) => Array.from(article.querySelectorAll<HTMLElement>('.markdown-body > *'))
-export function captureReadingPosition(viewport: HTMLElement, article: HTMLElement): ReadingPosition {
+/** Reader blocks/headings follow document order; read live geometry so reflow needs no offset cache. */
+export function findReadingAnchor(nodes: readonly HTMLElement[], top: number): number {
+  let low = 0
+  let high = nodes.length
+  while (low < high) {
+    const middle = (low + high) >>> 1
+    if (nodes[middle].getBoundingClientRect().top <= top) low = middle + 1
+    else high = middle
+  }
+  return low - 1
+}
+export function captureReadingPosition(viewport: HTMLElement, article: HTMLElement, nodes = blocks(article)): ReadingPosition {
   const max = viewport.scrollHeight - viewport.clientHeight
   const top = viewport.getBoundingClientRect().top + viewport.clientTop
-  const nodes = blocks(article)
-  let block = -1
-  for (let index = 0; index < nodes.length; index++) {
-    if (nodes[index].getBoundingClientRect().top > top + 1) break
-    block = index
-  }
+  const block = findReadingAnchor(nodes, top + 1)
   return { progress: max > 0 ? clamp(viewport.scrollTop / max) : 0, ...(block >= 0 ? { block, offset: top - nodes[block].getBoundingClientRect().top } : {}) }
 }
 export function readingPositionTop(viewport: HTMLElement, article: HTMLElement, position: ReadingPosition) {
@@ -35,10 +43,17 @@ export function trackReadingPosition(viewport: HTMLElement, article: HTMLElement
   let intentUntil = 0
   let dragging = false
   let timer: ReturnType<typeof setTimeout> | undefined
-  const report = () => options.onProgress(Math.round(captureReadingPosition(viewport, article).progress * 100))
+  let nodes = blocks(article)
+  let reported = -1
+  const report = () => {
+    if (dragging) return
+    const max = viewport.scrollHeight - viewport.clientHeight
+    const progress = Math.round((max > 0 ? clamp(viewport.scrollTop / max) : 0) * 100)
+    if (progress !== reported) { reported = progress; options.onProgress(progress) }
+  }
   const save = () => { if (latest) options.onSave(latest) }
   const scheduleSave = () => {
-    latest = captureReadingPosition(viewport, article)
+    latest = captureReadingPosition(viewport, article, nodes)
     clearTimeout(timer); timer = setTimeout(save, 400)
   }
   const restore = () => {
@@ -47,6 +62,7 @@ export function trackReadingPosition(viewport: HTMLElement, article: HTMLElement
     report()
   }
   const geometryChanged = () => {
+    nodes = blocks(article)
     // ResizeObserver runs before paint. Deferring again exposes the top of a
     // reader mounted while hidden, or its old position after images reflow.
     restore()
@@ -62,8 +78,17 @@ export function trackReadingPosition(viewport: HTMLElement, article: HTMLElement
     const rect = viewport.getBoundingClientRect()
     if (pointerEvent.button === 0 && pointerEvent.target === viewport && pointerEvent.clientX >= rect.right - Math.max(8, viewport.offsetWidth - viewport.clientWidth)) { dragging = true; intent() }
   }
-  const pointerEnd = () => { if (dragging) intent(); dragging = false }
-  const blur = () => { dragging = false; intentUntil = 0 }
+  const endDrag = () => {
+    if (!dragging) return
+    intent(); dragging = false; report()
+  }
+  const pointerEnd = (event: Event) => { if ((event as PointerEvent).pointerType === 'mouse') endDrag() }
+  const panStart = () => { dragging = true; intent() }
+  const panEnd = (event: Event) => {
+    if ((event as CustomEvent<{ moved: boolean }>).detail.moved) scheduleSave()
+    endDrag()
+  }
+  const blur = () => { dragging = false; intentUntil = 0; report() }
   const scrolled = () => {
     if (!viewport.clientHeight) return
     report()
@@ -75,6 +100,8 @@ export function trackReadingPosition(viewport: HTMLElement, article: HTMLElement
   if (!restoring) viewport.scrollTop = 0
   restore()
   viewport.addEventListener('scroll', scrolled, { passive: true })
+  viewport.addEventListener(READER_PAN_START, panStart)
+  viewport.addEventListener(READER_PAN_END, panEnd)
   viewport.addEventListener('wheel', wheel, { passive: true })
   viewport.addEventListener('touchmove', intent, { passive: true })
   viewport.addEventListener('keydown', key)
@@ -92,6 +119,7 @@ export function trackReadingPosition(viewport: HTMLElement, article: HTMLElement
     dispose: () => {
       clearTimeout(timer); save(); observer.disconnect()
       viewport.removeEventListener('scroll', scrolled); viewport.removeEventListener('wheel', wheel)
+      viewport.removeEventListener(READER_PAN_START, panStart); viewport.removeEventListener(READER_PAN_END, panEnd)
       viewport.removeEventListener('touchmove', intent); viewport.removeEventListener('keydown', key)
       viewport.removeEventListener('pointerdown', pointer); viewport.removeEventListener('note-chapter-jump', jump)
       viewport.removeEventListener('load', geometryChanged, true)

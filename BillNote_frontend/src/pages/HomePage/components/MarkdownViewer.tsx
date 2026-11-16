@@ -299,6 +299,15 @@ function createMarkdownComponents(baseURL: string, resourceBase?: string) {
   }
 }
 
+// Toolbar/reading-state changes must not reparse and highlight the entire note.
+const MarkdownContent = memo(function MarkdownContent({ content, components }: {
+  content: string; components: ReturnType<typeof createMarkdownComponents>
+}) {
+  return <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
+    {renderedNoteMarkdown(content)}
+  </ReactMarkdown>
+})
+
 const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const source = useSourceNavigationStore(state => state.source)
   const [copied, setCopied] = useState(false)
@@ -548,13 +557,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
                 <NoteImageChatContext.Provider value={imageChatTarget}>
                 <ReadingSelection key={`${currentTask?.id}:${activeVersionId}`} taskId={currentTask?.id || ''} versionId={activeVersionId} title={currentTask?.audioMeta?.title || '笔记'} onQuote={addQuotes} onRefine={currentTask && !currentTask.archived_at ? texts => setRefinement({ taskId: currentTask.id, versionId: activeVersionId, texts }) : undefined}>
                 <div className={'markdown-body select-text w-full px-2'}>
-                  <ReactMarkdown
-                    remarkPlugins={remarkPlugins}
-                    rehypePlugins={rehypePlugins}
-                    components={markdownComponents}
-                  >
-                    {renderedNoteMarkdown(selectedContent)}
-                  </ReactMarkdown>
+                  <MarkdownContent content={selectedContent} components={markdownComponents} />
                 </div>
                 </ReadingSelection>
                 </NoteImageChatContext.Provider>

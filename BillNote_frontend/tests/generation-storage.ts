@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createTaskStorage } from '../src/utils/taskStorage'
-import { writes } from './shims/generation-idb'
+import { recordWrites as writes } from './shims/record-storage-driver'
 const storage = createTaskStorage<{ tasks: object[]; currentTaskId: string | null }>()
 const markdown = [{ ver_id: 'saved', content: 'long saved note'.repeat(10000) }]
 const task = { id: 'large', status: 'SUMMARIZING', markdown, attemptStartedAt: 1 }

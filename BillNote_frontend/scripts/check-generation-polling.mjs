@@ -31,13 +31,13 @@ if (!process.exitCode) {
 if (!process.exitCode) {
   const storageFile = path.join(root, '.cache/generation-storage-check.mjs')
   await build({ entryPoints: [path.join(root, 'tests/generation-storage.ts')], outfile: storageFile, bundle: true,
-    platform: 'node', format: 'esm', alias: { 'idb-keyval': path.join(root, 'tests/shims/generation-idb.ts') }, logLevel: 'warning' })
+    platform: 'node', format: 'esm', alias: { '@/utils/recordStorageDriver': path.join(root, 'tests/shims/record-storage-driver.ts'), '@': path.join(root, 'src'), 'idb-keyval': path.join(root, 'tests/shims/generation-idb.ts') }, logLevel: 'warning' })
   process.exitCode = spawnSync(process.execPath, [storageFile], { stdio: 'inherit', cwd: root }).status ?? 1
 }
 if (!process.exitCode) {
   const storeFile = path.join(root, '.cache/generation-store-check.mjs')
   await build({ entryPoints: [path.join(root, 'tests/generation-store.ts')], outfile: storeFile, bundle: true,
-    platform: 'node', format: 'esm', alias: { '@': path.join(root, 'src'), 'idb-keyval': path.join(root, 'tests/shims/generation-idb.ts'), 'react-hot-toast': path.join(root, 'tests/shims/toast.ts') },
+    platform: 'node', format: 'esm', alias: { '@/utils/recordStorageDriver': path.join(root, 'tests/shims/record-storage-driver.ts'), '@': path.join(root, 'src'), 'idb-keyval': path.join(root, 'tests/shims/generation-idb.ts'), 'react-hot-toast': path.join(root, 'tests/shims/toast.ts') },
     banner: { js: "import { createRequire as nodeCreateRequire } from 'node:module'; const require = nodeCreateRequire(import.meta.url);" },
     define: { 'import.meta.env': '{}' }, logLevel: 'warning' })
   process.exitCode = spawnSync(process.execPath, [storeFile], { stdio: 'inherit', cwd: root }).status ?? 1

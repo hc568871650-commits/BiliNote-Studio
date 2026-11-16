@@ -1,7 +1,6 @@
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import { get } from 'idb-keyval'
 import ChatPanel from '@/pages/HomePage/components/ChatPanel'
 import { useReadingAssistantStore as reading, type ReadingAttachment } from '@/store/readingAssistantStore'
 import { useInterfaceStore as ui } from '@/store/interfaceStore'
@@ -28,7 +27,7 @@ const audit = {
   draft: (input: string, items: ReadingAttachment[] = []) => reading.getState().patch('note:fixture', { input, attachments: items }),
   state: (key = 'note:fixture') => reading.getState().sessions[key],
   history: () => wireHistory(activeReadingMessages(reading.getState().sessions['note:fixture'])),
-  saved: async () => JSON.parse(await get('bilinote-reading-assistant-v1')),
+  saved: () => reading.persist.getOptions().storage!.getItem('bilinote-reading-assistant-v1'),
 }
 Object.assign(window, { recoveryAudit: audit })
 request.defaults.adapter = async config => ({ data: { code: 0, data: config.url === '/model_capabilities'

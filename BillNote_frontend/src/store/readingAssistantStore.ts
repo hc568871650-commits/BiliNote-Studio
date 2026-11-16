@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { createJSONStorage, persist } from 'zustand/middleware'
-import { get, set, del } from 'idb-keyval'
+import { persist } from 'zustand/middleware'
+import { createReadingSessionStorage } from '@/utils/readingSessionStorage'
 import type { ChatSource, ToolEvent } from '@/services/chat'
 import type { PurposeModelSelection } from '@/store/purposeModelStore'
 import { automaticSearchSettings, type AISettings, type ContextUsage } from '@/utils/aiSettings'
@@ -54,6 +54,7 @@ interface State {
   remove: (key: string) => void
   transfer: (from: string, to: string) => void
 }
+export const readingSessionStorage = createReadingSessionStorage()
 export const useReadingAssistantStore = create<State>()(persist((set, get) => ({
   sessions: {},
   patch: (key, value) => set(state => ({ sessions: { ...state.sessions, [key]: { ...(state.sessions[key] || emptySession()), ...value } } })),
@@ -94,7 +95,7 @@ export const useReadingAssistantStore = create<State>()(persist((set, get) => ({
     return { ...current, sessions: Object.fromEntries(Object.entries(sessions).map(([key, session]) => [key, { ...interruptPendingReadingTurns(session), controls: automaticSearchSettings(session.controls) }])) }
   },
   partialize: state => ({ sessions: Object.fromEntries(Object.entries(state.sessions).filter(([key]) => key.startsWith('note:'))) }),
-  storage: createJSONStorage(() => ({ getItem: async key => await get(key) ?? null, setItem: async (key, value) => { await set(key, value) }, removeItem: async key => { await del(key) } })),
+  storage: readingSessionStorage,
 }))
 export const permanentSessionKey = (taskId: string) => `note:${taskId}`
 export const temporarySessionKey = (taskId: string) => `temporary:${taskId}`

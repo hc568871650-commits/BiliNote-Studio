@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { get as getPersisted } from './shims/generation-idb'
 const local = new Map<string, string>()
 Object.assign(globalThis, { localStorage: {
   getItem: (name: string) => local.get(name) ?? null,
@@ -70,7 +69,7 @@ let releasePost!: (value: any) => void
 let concurrentPosts = 0
 request.post = (async (_path: string, body: any) => {
   concurrentPosts++
-  const persisted = JSON.parse((await getPersisted('task-storage'))!)
+  const persisted = (await store.persist.getOptions().storage!.getItem('task-storage'))!
   assert.equal(persisted.state.tasks[0].formData.request_id, body.request_id, 'request ID is durable before POST')
   assert.equal(persisted.state.tasks[0].status, 'SUBMISSION_UNKNOWN')
   return new Promise(resolve => { releasePost = resolve })

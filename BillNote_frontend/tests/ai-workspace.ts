@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import './send-shortcut'
 import { webcrypto } from 'node:crypto'
-import { readPersisted } from './shims/idb-keyval'
 import type { ReadingAttachment } from '@/store/readingAssistantStore'
 import type { Task } from '@/store/taskStore'
 import { resolveReadableNote } from '@/utils/recentNote'
@@ -57,7 +56,7 @@ async function run() {
   assert.equal(reading.getState().sessions[permanent].input, '常驻草稿')
   assert.equal(reading.getState().sessions[permanent].model?.provider_id, 'provider-a')
   await settle()
-  const persisted = JSON.parse(String(readPersisted('bilinote-reading-assistant-v1')))
+  const persisted = (await reading.persist.getOptions().storage!.getItem('bilinote-reading-assistant-v1'))!
   assert.deepEqual(Object.keys(persisted.state.sessions), [permanent], 'Only permanent sessions are persisted')
   assert.equal(persisted.state.sessions[permanent].messages[0].content, '常驻答案')
   const transferSnapshots: boolean[] = []
@@ -71,7 +70,7 @@ async function run() {
   assert.equal(reading.getState().sessions[permanent].input, '常驻草稿\n临时草稿')
   assert.equal(reading.getState().sessions[permanent].model?.provider_id, 'provider-a', 'Transfer preserves target model')
   await settle()
-  const transferred = JSON.parse(String(readPersisted('bilinote-reading-assistant-v1')))
+  const transferred = (await reading.persist.getOptions().storage!.getItem('bilinote-reading-assistant-v1'))!
   assert.equal(transferred.state.sessions[permanent].messages.length, 2, 'Transferred messages are retained in persisted permanent chat')
   reading.getState().patch(permanent, { attachments: Array.from({ length: 8 }, (_, index) => attachment(`full-${index}`)) })
   const beforeFull = structuredClone(reading.getState().sessions[permanent])

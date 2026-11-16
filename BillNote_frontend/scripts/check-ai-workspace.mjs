@@ -10,7 +10,7 @@ const outfile = path.join(root, '.cache/ai-workspace-check.cjs')
 await build({
   entryPoints: [path.join(root, 'tests/ai-workspace.ts')], outfile,
   bundle: true, platform: 'node', format: 'cjs',
-  alias: { '@': path.join(root, 'src'), 'idb-keyval': path.join(root, 'tests/shims/idb-keyval.ts'), 'react-hot-toast': path.join(root, 'tests/shims/toast.ts') },
+  alias: { '@/utils/recordStorageDriver': path.join(root, 'tests/shims/record-storage-driver.ts'), '@': path.join(root, 'src'), 'idb-keyval': path.join(root, 'tests/shims/idb-keyval.ts'), 'react-hot-toast': path.join(root, 'tests/shims/toast.ts') },
   define: { 'import.meta.env': '{}' }, logLevel: 'warning',
 })
 const result = spawnSync(process.execPath, [outfile], { stdio: 'inherit', cwd: root })

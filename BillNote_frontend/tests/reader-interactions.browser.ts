@@ -14,7 +14,7 @@ export async function runReaderInteractionChecks() {
   const scroll = async () => { viewport.scrollTop += 160; await paint() }
   const reset = async () => {
     window.getSelection()?.removeAllRanges()
-    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, pointerType: 'mouse' }))
     if (compact()) toggle.click()
     viewport.dispatchEvent(new Event('note-chapter-jump'))
     viewport.scrollTop = 300
@@ -28,13 +28,14 @@ export async function runReaderInteractionChecks() {
   }
   await check('普通向下滚动收起', async () => { await pause(2050); wheel(); await scroll(); return compact() })
   await check('目录跳转后立即手动滚动', async () => { wheel(); await scroll(); return compact() })
-  await check('拖动滚动条超过1.5秒', async () => {
+  await check('拖动滚动条时固定布局，松手后收起', async () => {
     const rect = viewport.getBoundingClientRect()
     viewport.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, clientX: rect.right - 2, clientY: rect.top + 60, bubbles: true }))
     await pause(1700); await scroll()
-    const passed = compact()
-    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
-    return passed
+    const heldExpanded = !compact()
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, pointerType: 'mouse' }))
+    await paint()
+    return heldExpanded && compact()
   })
   await check('保留文字选区后滚动', async () => {
     await pause(2050)
@@ -47,7 +48,7 @@ export async function runReaderInteractionChecks() {
     await pause(2050)
     paragraph().dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, bubbles: true }))
     await scroll()
-    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, pointerType: 'mouse' }))
     return !compact()
   })
   await check('程序目录滚动保持展开', async () => { await scroll(); return !compact() })

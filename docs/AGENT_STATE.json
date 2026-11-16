@@ -1,0 +1,45 @@
+{
+  "schema_version": 2,
+  "updated_at": "2026-11-15",
+  "timezone": "America/Los_Angeles",
+  "product": "BiliNote Studio",
+  "consolidated_version": "0.1.0-preview.33",
+  "source": {
+    "branch": "main",
+    "base_release_commit": "9eabee072e88e29fc290bda50b546d073a5b6f3c",
+    "desktop_code_level": "0.1.0-preview.33",
+    "backend_code_level": "0.1.0-preview.31",
+    "version_fields_aligned": true,
+    "workspaces": [
+      "E:/codex/bilinote",
+      "e:/agy work/bilinote studio"
+    ]
+  },
+  "backup": {
+    "path": "E:/codex/bilinote-backup-20261115",
+    "contains_workspace_snapshot": true,
+    "contains_dev_secrets": true,
+    "manifest": "E:/codex/bilinote-backup-20261115/BACKUP_MANIFEST.json"
+  },
+  "protected_paths": [
+    "E:/AI-Tools/BiliNote",
+    "E:/AI-Tools/BiliNote-Learning-Preview",
+    "E:/AI-Tools/_Launchers",
+    "E:/AI-Tools/BiliNote-build",
+    "E:/codex/github仓库管理和发布",
+    "E:/codex/bilinote-backup-20261115"
+  ],
+  "preview": {
+    "active_dev_preview": null,
+    "active_dev_ports": []
+  },
+  "entrypoints": {
+    "instructions": "AGENTS.md",
+    "development": "DEVELOPMENT.md",
+    "handoff": "docs/AGENT_HANDOFF.md",
+    "code_map": "docs/AGENT_MAP.md",
+    "preview_status": "docs/PREVIEW_STATUS.md",
+    "real_flow_validation": "docs/REAL_FLOW_VALIDATION.md",
+    "preview33_notes": "docs/releases/0.1.0-preview.33.md"
+  }
+}

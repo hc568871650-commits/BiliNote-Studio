@@ -25,7 +25,13 @@ struct SidecarHandle(Mutex<Option<CommandChild>>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let context = tauri::generate_context!();
+    let mut context = tauri::generate_context!();
+    let storage_maintenance = env::args().any(|arg| arg == "--storage-maintenance");
+    if storage_maintenance {
+        for window in &mut context.config_mut().app.windows {
+            window.url = tauri::WebviewUrl::App("storage-maintenance.html".into());
+        }
+    }
     if let Err(error) = edition::configure(&context.config().identifier) {
         edition::show_error(&error);
         return;
@@ -67,7 +73,12 @@ pub fn run() {
     };
     let app = builder
         .plugin(tauri_plugin_shell::init())
-        .setup(|app| {
+        .setup(move |app| {
+            // Storage rollback must run without application writers or a backend.
+            if storage_maintenance {
+                app.manage(SidecarHandle(Mutex::new(None)));
+                return Ok(());
+            }
             if app.config().identifier == "com.bilinote.studio" && env::args().any(|arg| arg == "--quit") {
                 app.handle().exit(0);
                 return Ok(());

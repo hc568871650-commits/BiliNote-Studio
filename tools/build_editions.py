@@ -16,7 +16,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "BillNote_frontend"
-VERSION = "0.1.0-preview.31"
+VERSION = "0.1.0-preview.33"
 PORTS = {"quick": 38483, "full": 38484}
 
 

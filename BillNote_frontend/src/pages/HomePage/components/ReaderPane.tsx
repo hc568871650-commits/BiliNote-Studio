@@ -1,4 +1,4 @@
-import { ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ReactNode, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, ChevronUp, LoaderCircle, MessageSquare, Minimize, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import ChoiceSelect from '@/components/ChoiceSelect'
@@ -7,13 +7,17 @@ import { useLibraryStore } from '@/store/libraryStore'
 import { readingLabels } from '@/utils/readingStatus'
 import { scrollToChapter } from '@/utils/noteOutline'
 import { prefersReducedMotion } from '@/utils/motion'
-import { parseReadingPosition, trackReadingPosition, type ReadingPosition } from '@/utils/readingPosition'
+import { findReadingAnchor, parseReadingPosition, trackReadingPosition, type ReadingPosition } from '@/utils/readingPosition'
 import { prepareReadingRestore } from '@/utils/prepareReadingRestore'
 import type { LearningStatus } from '@/services/noteLibrary'
 import './reader.css'
 import ReadingOutline from './ReadingOutline'
 import ReadingOutlineRail from './ReadingOutlineRail'
+import { attachReaderPan, READER_PAN_START, READER_PAN_END } from '@/utils/readerPan'
 import ReaderDisplayMenu from './ReaderDisplayMenu'
+
+const MemoizedOutline = memo(ReadingOutline)
+const MemoizedOutlineRail = memo(ReadingOutlineRail)
 
 interface Props { taskId: string; versionId: string; content: string; title: string; children: ReactNode; onCompactChange?: (compact: boolean) => void; chatOpen?: boolean; onToggleChat?: () => void }
 const SETTINGS_KEY = 'bilinote-reader-settings-v1'
@@ -28,12 +32,13 @@ function fingerprint(text: string) {
 
 export default function ReaderPane({ taskId, versionId, content, title, children, onCompactChange, chatOpen, onToggleChat }: Props) {
   const reducedMotion = useInterfaceStore(state => state.reducedMotion)
-  const scrollBehavior = (): ScrollBehavior => reducedMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+  const scrollBehavior = useCallback((): ScrollBehavior => reducedMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', [reducedMotion])
   const [compact, setCompact] = useState(false)
   const compactRef = useRef(false)
   const layoutAnchor = useRef<{ top: number } | null>(null)
   const layoutScrollTop = useRef<number | null>(null)
   const ignoreScrollUntil = useRef(0)
+  const scrollbarPointer = useRef<number | null>(null)
   const readingStatus = useLibraryStore(state => state.entries[taskId]?.learning_status || 'unread')
   const libraryReady = useLibraryStore(state => state.loadState === 'ready')
   const libraryMutating = useLibraryStore(state => state.isMutating)
@@ -71,6 +76,7 @@ export default function ReaderPane({ taskId, versionId, content, title, children
     layoutAnchor.current = null
     if (!element || !anchor) return
     let previousTop = anchor.top
+    let remainder = 0
     let frame = 0
     const started = performance.now()
     const adjust = () => {
@@ -78,7 +84,10 @@ export default function ReaderPane({ taskId, versionId, content, title, children
       const delta = top - previousTop
       previousTop = top
       if (Math.abs(delta) > 0.01) {
-        element.scrollTop = Math.max(0, element.scrollTop + delta)
+        // WebViews can round scrollTop; carry the fraction across animation frames.
+        const requested = Math.max(0, Math.min(element.scrollHeight - element.clientHeight, element.scrollTop + delta + remainder))
+        element.scrollTop = requested
+        remainder = requested - element.scrollTop
         layoutScrollTop.current = element.scrollTop
       }
     }
@@ -105,20 +114,26 @@ export default function ReaderPane({ taskId, versionId, content, title, children
   const positionTracker = useRef<ReturnType<typeof trackReadingPosition> | null>(null)
   const [storageError, setStorageError] = useState(false)
   const [headings, setHeadings] = useState<{ id: string; text: string; level: number; time?: number; element: HTMLElement }[]>([])
+  const headingNodes = useRef<HTMLElement[]>([])
   const [outlineOpen, setOutlineOpen] = useState(false)
   const [outlineAnimate, setOutlineAnimate] = useState(false)
-  const toggleOutline = (open: boolean) => { setOutlineAnimate(true); setOutlineOpen(open) }
+  const toggleOutline = useCallback((open: boolean) => { setOutlineAnimate(true); setOutlineOpen(open) }, [])
+  const closeOutline = useCallback(() => toggleOutline(false), [toggleOutline])
+  const jumpToHeading = useCallback((id: string) => {
+    const target = headingNodes.current.find(element => element.id === id)
+    if (target) scrollToChapter(target, scrollBehavior())
+  }, [scrollBehavior])
+  const jumpFromOutline = useCallback((id: string) => {
+    jumpToHeading(id)
+    if (window.matchMedia('(max-width: 760px)').matches) toggleOutline(false)
+  }, [jumpToHeading, toggleOutline])
   const [activeHeading, setActiveHeading] = useState('')
   const refreshActiveHeading = useCallback(() => {
     const element = viewport.current
     if (!element?.clientHeight) return
-    const nodes = Array.from(article.current?.querySelectorAll<HTMLElement>('.markdown-body [data-note-heading]') || [])
+    const nodes = headingNodes.current
     const top = element.getBoundingClientRect().top + 36
-    let current = nodes[0]?.id || ''
-    for (const node of nodes) {
-      if (node.getBoundingClientRect().top > top) break
-      current = node.id
-    }
+    const current = nodes[Math.max(0, findReadingAnchor(nodes, top))]?.id || ''
     setActiveHeading(current)
   }, [])
   const readingKey = useMemo(() => `bilinote-reader-v1:${taskId}:${versionId}:${fingerprint(content)}`, [taskId, versionId, content])
@@ -152,6 +167,10 @@ export default function ReaderPane({ taskId, versionId, content, title, children
     return () => { stopPreparing?.(); tracker.dispose(); positionTracker.current = null }
   }, [readingKey, openingPosition, refreshActiveHeading])
 
+  useLayoutEffect(() => {
+    if (viewport.current) return attachReaderPan(viewport.current)
+  }, [readingKey])
+
   useEffect(() => {
     const element = viewport.current
     if (!element) return
@@ -164,7 +183,12 @@ export default function ReaderPane({ taskId, versionId, content, title, children
     setStatusError(false)
     let active = true
     let intentUntil = 0
-    let scrollbarPointer: number | null = null
+    let deferredCompact: boolean | undefined
+    let deferredEnd = false
+    const updateCompact = (next: boolean) => {
+      if (scrollbarPointer.current !== null) deferredCompact = next
+      else setToolsCompact(next)
+    }
     let selectingText = false
     let previousTop = element.scrollTop
     const intent = () => {
@@ -177,7 +201,7 @@ export default function ReaderPane({ taskId, versionId, content, title, children
       intent()
       // At scrollTop=0 an upward wheel may produce no scroll event at all.
       if (event.deltaY < 0 && element.scrollTop <= 16 && Date.now() >= ignoreScrollUntil.current) {
-        setToolsCompact(false)
+        updateCompact(false)
       }
     }
     const pointer = (event: PointerEvent) => {
@@ -185,16 +209,30 @@ export default function ReaderPane({ taskId, versionId, content, title, children
       const rect = element.getBoundingClientRect()
       const trackWidth = Math.max(8, element.offsetWidth - element.clientWidth)
       if (event.target === element && event.clientX >= rect.right - trackWidth) {
-        scrollbarPointer = event.pointerId
+        scrollbarPointer.current = event.pointerId
         selectingText = false
         intent()
       } else selectingText = true
     }
+    const finishScrollbar = () => {
+      if (scrollbarPointer.current === null) return
+      scrollbarPointer.current = null
+      intentUntil = Date.now() + 1500
+      if (deferredCompact !== undefined) setToolsCompact(deferredCompact)
+      if (deferredEnd) setReachedEnd(true)
+      deferredCompact = undefined; deferredEnd = false
+      refreshActiveHeading()
+    }
     const pointerEnd = (event: PointerEvent) => {
-      if (scrollbarPointer === event.pointerId) { scrollbarPointer = null; intentUntil = Date.now() + 1500 }
+      if (event.pointerType === 'mouse' && scrollbarPointer.current === event.pointerId) finishScrollbar()
       selectingText = false
     }
-    const blurred = () => { scrollbarPointer = null; selectingText = false; intentUntil = 0 }
+    const panStart = (event: Event) => {
+      scrollbarPointer.current = (event as CustomEvent<{ pointerId: number }>).detail.pointerId
+      selectingText = false; intent()
+    }
+    const panEnd = () => finishScrollbar()
+    const blurred = () => { finishScrollbar(); selectingText = false; intentUntil = 0 }
     const clearIntent = () => { intentUntil = 0 }
     const chapterJump = () => { clearIntent(); ignoreScrollUntil.current = Date.now() + 2000 }
     const keyboard = (event: KeyboardEvent) => {
@@ -207,21 +245,26 @@ export default function ReaderPane({ taskId, versionId, content, title, children
       const adjustedTop = layoutScrollTop.current
       layoutScrollTop.current = null
       if (adjustedTop !== null && Math.abs(adjustedTop - element.scrollTop) < 1) return
-      if (element.clientHeight === 0 || max <= 0 || (scrollbarPointer === null && Date.now() > intentUntil) || Date.now() < ignoreScrollUntil.current || selectingText) return
+      if (element.clientHeight === 0 || max <= 0 || (scrollbarPointer.current === null && Date.now() > intentUntil) || Date.now() < ignoreScrollUntil.current || selectingText) return
       if (!downward && element.scrollTop <= 16) {
-        setToolsCompact(false)
+        updateCompact(false)
       } else if (downward && element.scrollTop > 40 && max > 80) {
         // A manual expansion lasts until the next deliberate downward scroll.
-        setToolsCompact(true)
+        updateCompact(true)
       }
+      // A moving viewport/scroll thumb changes the browser's drag mapping.
+      // Defer layout and visual feedback until the native gesture releases it.
+      if (scrollbarPointer.current !== null) deferredEnd = element.scrollTop > 0 && max - element.scrollTop <= 8
+      else if (max - element.scrollTop <= 8) setReachedEnd(true)
       if (element.scrollTop <= 0) return
-      if (max - element.scrollTop <= 8) setReachedEnd(true)
       const state = useLibraryStore.getState()
       if (autoAttempted.current || state.loadState !== 'ready' || (state.entries[taskId]?.learning_status || 'unread') !== 'unread') return
       autoAttempted.current = true
       void startReading(taskId).catch(() => { if (active) setStatusError(true) })
     }
     element.addEventListener('wheel', wheel, { passive: true })
+    element.addEventListener(READER_PAN_START, panStart)
+    element.addEventListener(READER_PAN_END, panEnd)
     element.addEventListener('touchmove', intent, { passive: true })
     element.addEventListener('pointerdown', pointer, { passive: true })
     window.addEventListener('pointerup', pointerEnd)
@@ -233,7 +276,10 @@ export default function ReaderPane({ taskId, versionId, content, title, children
     element.addEventListener('scroll', scrolled, { passive: true })
     return () => {
       active = false
+      scrollbarPointer.current = null
       element.removeEventListener('wheel', wheel)
+      element.removeEventListener(READER_PAN_START, panStart)
+      element.removeEventListener(READER_PAN_END, panEnd)
       element.removeEventListener('touchmove', intent)
       element.removeEventListener('pointerdown', pointer)
       window.removeEventListener('pointerup', pointerEnd)
@@ -244,7 +290,7 @@ export default function ReaderPane({ taskId, versionId, content, title, children
       element.removeEventListener('keydown', keyboard)
       element.removeEventListener('scroll', scrolled)
     }
-  }, [readingKey, taskId, startReading, onCompactChange, setToolsCompact])
+  }, [readingKey, taskId, startReading, onCompactChange, setToolsCompact, refreshActiveHeading])
 
   // Keep the last line visible when the confirmation strip takes up space.
   useLayoutEffect(() => {
@@ -254,7 +300,8 @@ export default function ReaderPane({ taskId, versionId, content, title, children
   useLayoutEffect(() => {
     // Reserve the final rail space before paint; content changes do not animate it.
     setOutlineAnimate(false)
-    setHeadings(Array.from(article.current?.querySelectorAll<HTMLElement>('.markdown-body [data-note-heading]') || []).map(element => ({
+    headingNodes.current = Array.from(article.current?.querySelectorAll<HTMLElement>('.markdown-body [data-note-heading]') || [])
+    setHeadings(headingNodes.current.map(element => ({
       id: element.id, text: element.dataset.noteLabel || element.textContent || '未命名章节', level: Number(element.tagName.slice(1)),
       time: element.dataset.noteTime ? Number(element.dataset.noteTime) : undefined, element,
     })))
@@ -267,11 +314,12 @@ export default function ReaderPane({ taskId, versionId, content, title, children
     let settleTimer: ReturnType<typeof setTimeout> | undefined
     const update = () => {
       frame = 0
-      if (jumping) return
+      if (jumping || scrollbarPointer.current !== null) return
       refreshActiveHeading()
     }
     const finishJump = () => { jumping = false; clearTimeout(settleTimer) }
     const schedule = () => {
+      if (scrollbarPointer.current !== null) return
       if (jumping) {
         // scrollend is not available in all supported WebViews.
         clearTimeout(settleTimer)
@@ -369,15 +417,8 @@ export default function ReaderPane({ taskId, versionId, content, title, children
     <div className="reader-content-layout" data-reduced-motion={reducedMotion} aria-hidden={opening} inert={opening}>
     <div className={`reading-navigation ${outlineOpen ? 'is-open' : ''} ${headings.length ? '' : 'is-empty'}`} data-animate={outlineAnimate}>
     <div className="reading-navigation-rail" aria-hidden={outlineOpen} inert={outlineOpen}>
-    <ReadingOutlineRail key={readingKey} active={!outlineOpen && !opening} storageKey={readingKey} headings={headings} activeId={activeHeading} onJump={id => {
-      const target = article.current?.querySelector<HTMLElement>(`[id="${id}"]`)
-      if (target) scrollToChapter(target, scrollBehavior())
-    }} /></div>
-    <div className={`reading-outline-shell ${outlineOpen ? 'is-open' : ''}`} aria-hidden={!outlineOpen} inert={!outlineOpen}><ReadingOutline key={readingKey} headings={headings} activeId={activeHeading} onClose={() => toggleOutline(false)} onJump={id => {
-      const target = article.current?.querySelector<HTMLElement>(`[id="${id}"]`)
-      if (target) scrollToChapter(target, scrollBehavior())
-      if (window.matchMedia('(max-width: 760px)').matches) toggleOutline(false)
-    }} /></div>
+    <MemoizedOutlineRail key={readingKey} active={!outlineOpen && !opening} storageKey={readingKey} headings={headings} activeId={outlineOpen ? '' : activeHeading} onJump={jumpToHeading} /></div>
+    <div className={`reading-outline-shell ${outlineOpen ? 'is-open' : ''}`} aria-hidden={!outlineOpen} inert={!outlineOpen}><MemoizedOutline key={readingKey} headings={headings} activeId={outlineOpen ? activeHeading : ''} onClose={closeOutline} onJump={jumpFromOutline} /></div>
     </div>
     <div ref={viewport} data-testid="reader-viewport" tabIndex={0} aria-label="笔记正文" className="reader-viewport min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
       <div ref={article} className={`reader-body mx-auto w-full px-4 py-3 ${wide ? '' : 'max-w-[860px]'}`} style={{ fontSize }}>{children}</div>
