@@ -18,4 +18,5 @@ class GPTSource:
     checkpoint_key: Optional[str] = None
     frame_evidence: Optional[list[dict]] = None
     video_image_ranges: Optional[list[dict]] = None
+    structured: bool = False
 

@@ -29,8 +29,15 @@ export const ReadingAttachmentCard = memo(function ReadingAttachmentCard({ attac
 export const ReadingMessageItem = memo(function ReadingMessageItem({ message, recovery = 'unavailable', questionStatus, busy = false, onRestore, onQuote, onImage, onPreview }: AttachmentActions & {
   message: ReadingMessage; recovery?: ReadingRecoveryState; questionStatus?: ReadingMessage['delivery_status']; busy?: boolean; onRestore?: (id: string) => void
 }) {
-  return <article className={`reading-message reading-message--${message.role}`}>
-        {message.role === 'assistant' && (message.elapsed_seconds != null || !!message.sources?.length || message.incomplete) && <details className="reading-reply-details">
+  if (message.role === 'user') {
+    const compactQuotes = Boolean(message.attachments && message.attachments.length >= 2 && message.attachments.every(item => item.type === 'quote'))
+    return <article className="reading-message reading-message--user">
+      {!!message.attachments?.length && <div className="reading-message-attachments" data-compact-grid={compactQuotes ? 'true' : undefined}>{message.attachments.map(a => <ReadingAttachmentCard key={a.id} attachment={a} onQuote={onQuote} onImage={onImage} onPreview={onPreview} />)}</div>}
+      {message.content.trim() && <div className="reading-user-bubble"><ReactMarkdown remarkPlugins={remarkPlugins}>{message.content}</ReactMarkdown></div>}
+    </article>
+  }
+  return <article className="reading-message reading-message--assistant">
+        {(message.elapsed_seconds != null || !!message.sources?.length || message.incomplete) && <details className="reading-reply-details">
           <summary aria-label={message.elapsed_seconds != null ? `用时 ${durationLabel(message.elapsed_seconds)}，展开详情` : '展开回复详情'} title="查看本轮详情"><span>{message.elapsed_seconds != null ? `用时 ${durationLabel(message.elapsed_seconds)}` : ''}{message.request?.web_search_used ? ' · 已联网检索' : ''}</span><ChevronRight size={13} /></summary>
           <div className="reading-reply-detail-content">
             {message.incomplete && <p>回复已中断</p>}
@@ -39,10 +46,10 @@ export const ReadingMessageItem = memo(function ReadingMessageItem({ message, re
             {message.sources?.length ? <SourceList sources={message.sources} /> : !message.incomplete && <p>未返回参考来源</p>}
           </div>
         </details>}
-        {message.role === 'assistant' && <WorkProgress entries={message.work_log} events={message.tool_events} />}
+        <WorkProgress entries={message.work_log} events={message.tool_events} />
         {!!message.attachments?.length && <div className="reading-message-attachments">{message.attachments.map(a => <ReadingAttachmentCard key={a.id} attachment={a} onQuote={onQuote} onImage={onImage} onPreview={onPreview} />)}</div>}
         {message.content.trim() ? <ReactMarkdown remarkPlugins={remarkPlugins}>{message.content}</ReactMarkdown> : <p className="reading-chat-error">本轮未收到正文，可恢复原问题后手动重试。</p>}
-        {message.role === 'assistant' && message.incomplete && recovery !== 'unavailable' && <div className="reading-turn-recovery">
+        {message.incomplete && recovery !== 'unavailable' && <div className="reading-turn-recovery">
           <span>{questionStatus === 'cancelled' ? '已停止' : questionStatus === 'interrupted' ? '已中断' : '回复未完成'}</span>
           <button type="button" disabled={busy || recovery !== 'ready'}
             title={recovery === 'draft-conflict' ? '当前草稿已有内容，请先发送或清空草稿' : '恢复本轮问题、引用和图片，等待手动发送'}

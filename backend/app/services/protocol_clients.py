@@ -138,6 +138,7 @@ class ResponsesClient:
             client.close()
             raise ValueError('当前 OpenAI SDK 不支持 Responses，请在开发环境升级依赖后使用此协议')
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+        self.models = getattr(client, 'models', SimpleNamespace(list=lambda: SimpleNamespace(data=[])))
 
     def create(self, *, model, messages, **options):
         kwargs = responses_options(model, messages, options)
@@ -264,6 +265,23 @@ class AnthropicClient:
         self.url = anthropic_messages_url(base_url)
         self.client = http_client or httpx.Client(timeout=120.0, proxy=proxy)
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+        self.models = SimpleNamespace(list=self.list_models)
+
+    def list_models(self):
+        models_url = self.url[:-len('/messages')] + '/models' if self.url.endswith('/messages') else self.url.rstrip('/') + '/models'
+        response = self.client.get(
+            models_url,
+            headers={'x-api-key': self.api_key, 'anthropic-version': '2023-06-01'},
+        )
+        response.raise_for_status()
+        data = json_response(response)
+        items = data.get('data') if isinstance(data, dict) else []
+        normalized = [
+            {'id': item['id'], 'object': 'model', 'owned_by': 'anthropic', 'display_name': item.get('display_name')}
+            for item in (items or [])
+            if isinstance(item, dict) and item.get('id')
+        ]
+        return SimpleNamespace(data=normalized)
 
     def create(self, *, model, messages, **options):
         payload = anthropic_options(model, messages, options,

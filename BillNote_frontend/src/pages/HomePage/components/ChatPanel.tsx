@@ -1,9 +1,9 @@
 import { shouldSendMessage } from '@/utils/sendShortcut'
 import { useInterfaceStore } from '@/store/interfaceStore'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square, Paperclip, X, MessageSquare, Maximize2, Minimize2, ArrowRight, RotateCcw, Settings2 } from 'lucide-react'
+import { ArrowUp, Square, Paperclip, X, Maximize2, Minimize2, ArrowRight, RotateCcw } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useReadingAssistantStore, permanentSessionKey, temporarySessionKey, type ReadingAttachment } from '@/store/readingAssistantStore'
 import { usePurposeModelStore } from '@/store/purposeModelStore'
 import PurposeModelPicker from '@/components/PurposeModelPicker'
@@ -28,7 +28,6 @@ import { useModelCapabilities } from '@/hooks/useModelCapabilities'
 import { webSearchState } from '@/utils/webSearch'
 import { useModelWebSearchSettings } from '@/hooks/useModelWebSearchSettings'
 import WorkProgress from '@/components/WorkProgress'
-import AssistantChatSettings from '@/components/AssistantChatSettings'
 import useModelContext from '@/hooks/useModelContext'
 import { openNoteSource } from '@/utils/openNoteSource'
 import { beginReadingTurn, updateReadingTurn, readingRecoveryState, restoreReadingTurn } from '@/utils/readingRecovery'
@@ -67,7 +66,6 @@ export default function ChatPanel({ taskId, mode, onModeChange, temporary = fals
   const [errorDetails, setErrorDetails] = useState<ChatErrorDetails | null>(null)
   const [preview, setPreview] = useState<ReadingAttachment | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
-  const [chatSettingsOpen, setChatSettingsOpen] = useState(false)
   const streamReading = useInterfaceStore(state => state.streamReading)
   const [streamText, setStreamText] = useState('')
   const [streamPhase, setStreamPhase] = useState('')
@@ -276,7 +274,7 @@ export default function ChatPanel({ taskId, mode, onModeChange, temporary = fals
   const jump = useCallback((a: ReadingAttachment, parts: QuotePart[]) => {
     const noteId = a.taskId || taskId
     if (!useTaskStore.getState().tasks.some(task => task.id === noteId)) {
-      toast.error('原笔记已不可用，可用引用旁的小箭头查看保留的内容'); return
+      toast.error('原笔记已不可用，无法回跳原文'); return
     }
     if (mode === 'full') onModeChange('half')
     useSourceNavigationStore.getState().open({ source_type: 'note', note_id: noteId, version_id: a.versionId,
@@ -301,13 +299,14 @@ export default function ChatPanel({ taskId, mode, onModeChange, temporary = fals
   const hasImages = session.attachments.some(attachment => attachment.type === 'image')
     || historyHasImages
 
+  const compactQuotes = session.attachments.length >= 2 && session.attachments.every(item => item.type === 'quote')
+
   return <section className={`reading-chat ${temporary ? 'reading-chat--temporary' : ''}`} aria-label={temporary ? '临时聊天' : '常驻阅读对话'}>
-    <header className="reading-chat-header"><MessageSquare size={14} /><strong>{temporary ? '临时聊天' : '阅读助手'}</strong><div className="flex-1" />
-      {temporary && onTransfer && <button disabled={busy} onClick={onTransfer} title="转入阅读对话" aria-label="转入阅读对话"><ArrowRight size={14} /></button>}
-      <button className="reading-default-model" title={search.error ? `聊天设置 · ${search.error}` : search.enabled ? "聊天设置 · 联网已开启" : "聊天设置"} aria-label="聊天设置" onClick={() => setChatSettingsOpen(true)}><Settings2 size={14} />{search.enabled && search.available && <i className="reading-web-status" aria-label="联网已开启" />}</button>
-      {!temporary && <button disabled={busy} title={mode === 'half' ? '展开对话' : '返回并排阅读'} aria-label={mode === 'half' ? '展开对话' : '返回并排阅读'} onClick={() => onModeChange(mode === 'half' ? 'full' : 'half')}>{mode === 'half' ? <Maximize2 size={15} /> : <Minimize2 size={15} />}</button>}
-      <button title="清空本次对话" aria-label="清空本次对话" disabled={busy} onClick={() => setConfirmClear(true)}><RotateCcw size={15} /></button>
-      {onClose && <button title="关闭聊天" aria-label="关闭聊天" onClick={onClose}><X size={16} /></button>}
+    <header className="reading-chat-header"><strong>{temporary ? '临时聊天' : '阅读助手'}</strong><div className="flex-1" />
+      {temporary && onTransfer && <button disabled={busy} onClick={onTransfer} title="转入阅读对话" aria-label="转入阅读对话"><ArrowRight size={14} strokeWidth={1.6} /></button>}
+      {!temporary && <button disabled={busy} title={mode === 'half' ? '展开对话' : '返回并排阅读'} aria-label={mode === 'half' ? '展开对话' : '返回并排阅读'} onClick={() => onModeChange(mode === 'half' ? 'full' : 'half')}>{mode === 'half' ? <Maximize2 size={14} strokeWidth={1.6} /> : <Minimize2 size={14} strokeWidth={1.6} />}</button>}
+      <button title="清空本次对话" aria-label="清空本次对话" disabled={busy} onClick={() => setConfirmClear(true)}><RotateCcw size={14} strokeWidth={1.6} /></button>
+      {onClose && <button title="关闭聊天" aria-label="关闭聊天" onClick={onClose}><X size={15} strokeWidth={1.6} /></button>}
     </header>
     <div ref={messages} className="reading-chat-messages" onScroll={() => { const el = messages.current!; follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60 }}>
       {!session.messages.length && <div className="reading-chat-welcome"><h3>{temporary ? '问问这一段' : '问问这篇笔记'}</h3><div className="reading-chat-prompts">{['解释这段', '整理步骤', '找出关键点'].map(text => <button key={text} onClick={() => { patch(sessionKey, { input: text }); textarea.current?.focus() }}>{text}</button>)}</div></div>}
@@ -322,17 +321,15 @@ export default function ChatPanel({ taskId, mode, onModeChange, temporary = fals
       {notice && <p className="reading-thinking" role="status">{notice}</p>}<div ref={end} className="reading-scroll-end" />
     </div>
     {error && <div role="alert" className="reading-chat-error">{error}{errorDetails && <details className="reading-error-details"><summary>错误详情{errorDetails.http_status ? ` · HTTP ${errorDetails.http_status}` : ''}</summary><dl><dt>接口协议</dt><dd>{chatProtocolLabels[errorDetails.protocol as keyof typeof chatProtocolLabels] || errorDetails.protocol}</dd><dt>发生时间</dt><dd>{new Date(errorDetails.occurred_at).toLocaleString()}</dd><dt>HTTP 状态</dt><dd>{errorDetails.http_status ?? '未收到上游 HTTP 错误响应'}</dd><dt>上游错误码</dt><dd>{errorDetails.upstream_code || '未提供'}</dd><dt>请求 ID</dt><dd>{errorDetails.request_id || '未收到'}</dd></dl><pre>{errorDetails.detail}</pre></details>}</div>}
-    {error && model && <Link className="reading-thinking" to={`/settings/model/${encodeURIComponent(model.provider_id)}`}>前往服务商手动检测</Link>}
     <div className="reading-chat-composer" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addFiles(Array.from(event.dataTransfer.files)) }}>
       <SlashCommandMenu open={slash.open} id={slash.id} onSelect={slash.select} />
-      <div className="reading-chat-attachments">{session.attachments.map(a => <ReadingAttachmentCard key={a.id} attachment={a} onQuote={jump} onImage={jumpImage} onPreview={setPreview} onRemove={() => patch(sessionKey, { attachments: session.attachments.filter(item => item.id !== a.id) })} />)}</div>
+      <div className="reading-chat-attachments" data-compact-grid={compactQuotes ? 'true' : undefined}>{session.attachments.map(a => <ReadingAttachmentCard key={a.id} attachment={a} onQuote={jump} onImage={jumpImage} onPreview={setPreview} onRemove={() => patch(sessionKey, { attachments: session.attachments.filter(item => item.id !== a.id) })} />)}</div>
       {hasImages && <ReadingVisionStatus model={model} protocol={protocol} capabilities={capabilities} disabled={busy} onModelChange={value => patch(sessionKey, { model: value })} />}
       <textarea ref={textarea} rows={1} aria-controls={slash.open ? slash.id : undefined} aria-activedescendant={slash.open ? `${slash.id}-compact` : undefined} onBlur={slash.dismiss} readOnly={busy} maxLength={20000} aria-label={temporary ? '临时聊天问题' : '阅读对话问题'} placeholder="输入问题…" value={session.input} onChange={event => patch(sessionKey, { input: event.target.value })}
         onPaste={event => { const files = Array.from(event.clipboardData.files); if (files.length) { event.preventDefault(); void addFiles(files) } }}
         onKeyDown={event => { if (slash.onKeyDown(event)) return; if (shouldSendMessage(event, useInterfaceStore.getState().sendKey)) { event.preventDefault(); void send() } }} />
-      <div className="reading-chat-actions"><input ref={fileInput} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown" hidden onChange={event => { void addFiles(Array.from(event.target.files || [])); event.target.value = '' }} /><button aria-label="添加图片或文本附件" title="添加图片、TXT、Markdown" disabled={readingFiles || busy} onClick={() => fileInput.current?.click()}><Paperclip size={14} /></button>{readingFiles && <span>读取中…</span>}<div className="flex-1" /><AIControls contextBudget={contextBudget} modelPicker={<PurposeModelPicker inline label="本会话模型" value={model} disabled={busy} controls={controls} onControlsChange={value => patch(sessionKey, { controls: value })} reasoningModel={controlModel || ''} onChange={value => patch(sessionKey, { model: value })} />} modelName={controlModel} value={controls} context={session.context} estimate={estimate} draft={session.input} />{busy ? <button className="reading-send" aria-label="停止等待回答" title="停止回复" onClick={() => { cancelWait(); setBusy(false); setCompacting(false); setNotice('已停止') }}><Square size={11} /></button> : <button className="reading-send" aria-label="发送问题" disabled={!session.input.trim() || readingFiles} onClick={() => void send()}><ArrowUp size={15} /></button>}</div>
+      <div className="reading-chat-actions"><input ref={fileInput} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown" hidden onChange={event => { void addFiles(Array.from(event.target.files || [])); event.target.value = '' }} /><button aria-label="添加图片或文本附件" title="添加图片、TXT、Markdown" disabled={readingFiles || busy} onClick={() => fileInput.current?.click()}><Paperclip size={14} strokeWidth={1.6} /></button>{readingFiles && <span>读取中…</span>}<div className="flex-1" /><AIControls contextBudget={contextBudget} modelPicker={<PurposeModelPicker inline label="本会话模型" value={model} disabled={busy} controls={controls} onControlsChange={value => patch(sessionKey, { controls: value })} reasoningModel={controlModel || ''} onChange={value => patch(sessionKey, { model: value })} />} modelName={controlModel} value={controls} context={session.context} estimate={estimate} draft={session.input} />{busy ? <button className="reading-send" aria-label="停止等待回答" title="停止回复" onClick={() => { cancelWait(); setBusy(false); setCompacting(false); setNotice('已停止') }}><Square size={11} /></button> : <button className="reading-send" aria-label="发送问题" disabled={!session.input.trim() || readingFiles} onClick={() => void send()}><ArrowUp size={15} strokeWidth={1.8} /></button>}</div>
     </div>
-    <AssistantChatSettings open={chatSettingsOpen} onOpenChange={setChatSettingsOpen} providerId={model?.provider_id} modelName={model?.model_name} protocol={protocol} value={controls} onChange={value => patch(sessionKey, { controls: value })} disabled={busy} />
     {confirmClear && <div className="reading-confirm" role="dialog" aria-label="确认清空对话"><p>清空这次对话及草稿？笔记内容不受影响。</p><button onClick={() => setConfirmClear(false)}>取消</button><button onClick={() => { useReadingAssistantStore.getState().clear(sessionKey); setConfirmClear(false) }}>清空对话</button></div>}
     {preview && <div className="reading-file-preview" role="dialog" aria-label="附件预览"><header><strong>{preview.name}</strong><button aria-label="关闭附件预览" onClick={() => setPreview(null)}><X size={18} /></button></header>{preview.type === 'image' ? <img src={preview.data_url} alt={preview.name} /> : <pre>{preview.text}</pre>}</div>}
   </section>

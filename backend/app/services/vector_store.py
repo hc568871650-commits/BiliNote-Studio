@@ -14,6 +14,133 @@ NOTE_OUTPUT_DIR = os.getenv("NOTE_OUTPUT_DIR", "note_results")
 VECTOR_DB_DIR = os.getenv("VECTOR_DB_DIR", "vector_db")
 
 
+def _spans_plain(spans) -> str:
+    if not isinstance(spans, list):
+        return ""
+    return "".join(str(s.get("text") or "") for s in spans if isinstance(s, dict)).strip()
+
+
+def _chunk_structured_note(structured: dict) -> list[dict]:
+    """按结构化章节与内容分类拆分语义块，保留真实 section_id、多段 time_ranges 与内容类别。"""
+    if not isinstance(structured, dict) or not isinstance(structured.get("sections"), list):
+        return []
+    chunks: list[dict] = []
+    for idx, sec in enumerate(structured["sections"], 1):
+        if not isinstance(sec, dict):
+            continue
+        sec_id = str(sec.get("id") or f"sec-{idx}")
+        title = str(sec.get("title") or f"章节 {idx}").strip()
+        raw_ranges = [
+            {"start": int(r.get("start", 0)), "end": int(r.get("end", r.get("start", 0))), "label": str(r.get("label") or "")}
+            for r in (sec.get("time_ranges") or [])
+            if isinstance(r, dict)
+        ]
+        base_meta = {
+            "source_type": "markdown",
+            "section_id": sec_id,
+            "section_title": title,
+            "time_ranges_json": json.dumps(raw_ranges, ensure_ascii=False),
+            "start_time": raw_ranges[0]["start"] if raw_ranges else 0,
+            "end_time": raw_ranges[-1]["end"] if raw_ranges else 0,
+        }
+
+        takeaway_lines = [_spans_plain(tk.get("spans")) for tk in (sec.get("core_takeaways") or []) if isinstance(tk, dict)]
+        takeaway_lines = [line for line in takeaway_lines if line]
+        if takeaway_lines:
+            chunks.append({
+                "text": f"## {title}（核心结论）\n" + "\n".join(takeaway_lines),
+                "metadata": {**base_meta, "content_category": "core_takeaways"},
+            })
+
+        body_parts: list[str] = []
+        for blk in sec.get("blocks") or []:
+            if not isinstance(blk, dict):
+                continue
+            btype = blk.get("type")
+            if btype == "paragraph":
+                txt = _spans_plain(blk.get("spans"))
+                if txt:
+                    body_parts.append(txt)
+            elif btype == "flow_chain":
+                steps = [_spans_plain(step) for step in (blk.get("steps") or [])]
+                steps = [s for s in steps if s]
+                if steps:
+                    body_parts.append(" → ".join(steps))
+            elif btype == "list":
+                items = [_spans_plain(item) for item in (blk.get("items") or [])]
+                items = [s for s in items if s]
+                if items:
+                    body_parts.append("\n".join(items))
+            elif btype == "checklist":
+                items = [_spans_plain(item.get("spans")) for item in (blk.get("items") or []) if isinstance(item, dict)]
+                items = [s for s in items if s]
+                if items:
+                    c_title = str(blk.get("title") or "环境准备自查").strip()
+                    chunks.append({
+                        "text": f"## {title}（{c_title}）\n" + "\n".join(f"- [ ] {it}" for it in items),
+                        "metadata": {**base_meta, "content_category": "checklist"},
+                    })
+            elif btype == "table":
+                cols = [str(c) for c in (blk.get("columns") or [])]
+                rows = [
+                    " | ".join(_spans_plain(cell) for cell in row)
+                    for row in (blk.get("rows") or [])
+                    if isinstance(row, list)
+                ]
+                if cols or rows:
+                    body_parts.append("\n".join(([" | ".join(cols)] if cols else []) + rows))
+            elif btype == "code_block" and blk.get("code"):
+                body_parts.append(str(blk["code"]))
+
+        if body_parts:
+            chunks.append({
+                "text": f"## {title}\n" + "\n\n".join(body_parts),
+                "metadata": {**base_meta, "content_category": "body"},
+            })
+
+        for anno in sec.get("annotations") or []:
+            if not isinstance(anno, dict):
+                continue
+            kind = str(anno.get("kind") or "why")
+            hint = str(anno.get("short_hint") or "").strip()
+            detail = str(anno.get("full_detail") or "").strip()
+            if detail or hint:
+                ts = anno.get("timestamp")
+                anno_meta = {
+                    **base_meta,
+                    "content_category": f"annotation:{kind}",
+                    "annotation_id": str(anno.get("id") or ""),
+                    "annotation_kind": kind,
+                }
+                if isinstance(ts, (int, float)):
+                    anno_meta["start_time"] = int(ts)
+                    anno_meta["end_time"] = int(ts)
+                chunks.append({
+                    "text": f"## {title}（批注·{kind}）\n{hint}\n{detail}".strip(),
+                    "metadata": anno_meta,
+                })
+
+        quiz = sec.get("quiz")
+        if isinstance(quiz, dict) and quiz.get("full_question"):
+            opts = [
+                f"{o.get('key', '')}. {o.get('text', '')}"
+                for o in (quiz.get("options") or [])
+                if isinstance(o, dict)
+            ]
+            quiz_text = "\n".join([
+                f"## {title}（实战自测）",
+                str(quiz.get("full_question") or ""),
+                *opts,
+                f"参考答案：{quiz.get('correct_key', '')} — {quiz.get('explanation', '')}",
+            ])
+            chunks.append({
+                "text": quiz_text,
+                "metadata": {**base_meta, "content_category": "quiz"},
+            })
+
+    return chunks
+
+
 def _chunk_markdown(markdown: str) -> list[dict]:
     """按 H2/H3 标题拆分 markdown 为语义块。"""
     sections = re.split(r'(?=^#{2,3}\s)', markdown, flags=re.MULTILINE)
@@ -133,7 +260,24 @@ class VectorStoreManager:
         audio_meta = note_data.get("audio_meta", {})
 
         meta_chunks = _build_meta_chunk(audio_meta)
-        md_chunks = _chunk_markdown(markdown)
+        structured_doc = None
+        try:
+            from app.services import note_storage
+            task = note_storage.get_task(task_id)
+            versions = task.get("markdown") if isinstance(task, dict) else None
+            if isinstance(versions, list) and versions and isinstance(versions[0], dict):
+                latest = versions[0]
+                if isinstance(latest.get("structured"), dict):
+                    structured_doc = latest["structured"]
+                elif latest.get("ver_id"):
+                    jpath = note_storage._note_dir(task_id) / "versions" / f"{latest['ver_id']}.json"
+                    if jpath.is_file() and not jpath.is_symlink():
+                        structured_doc = json.loads(jpath.read_text(encoding="utf-8"))
+        except Exception:
+            structured_doc = None
+        md_chunks = _chunk_structured_note(structured_doc) if structured_doc else _chunk_markdown(markdown)
+        if not md_chunks and markdown:
+            md_chunks = _chunk_markdown(markdown)
         tr_chunks = _chunk_transcript(segments)
         all_chunks = meta_chunks + md_chunks + tr_chunks
 

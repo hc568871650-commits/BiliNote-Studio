@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Expand, Type } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 
 const SIZES = [14, 16, 18, 20, 22]
 
@@ -46,9 +45,9 @@ export default function ReaderDisplayMenu({ fontSize, onFontSize, wide, onWide, 
   }
 
   return <>
-    <Button ref={trigger} size="sm" variant="ghost" aria-label="阅读显示设置" title="字号与宽度" aria-expanded={open} aria-haspopup="dialog" onClick={toggle}>
-      <Type className="h-4 w-4" />
-    </Button>
+    <button ref={trigger} type="button" className="workspace-topbar-btn" aria-label="阅读显示设置" title="字号与宽度" aria-expanded={open} aria-haspopup="dialog" onClick={toggle}>
+      <Type className="h-4 w-4" aria-hidden="true" />
+    </button>
     {position && createPortal(<div ref={panel} role="dialog" aria-label="阅读显示设置" className="reader-display-menu" style={position}>
       <div className="reader-display-group">
         <span>字号</span>

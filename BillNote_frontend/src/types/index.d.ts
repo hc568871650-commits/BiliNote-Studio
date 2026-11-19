@@ -6,6 +6,7 @@ export interface IProvider {
   apiKey: string
   baseUrl: string
   enabled: number
+  protocol?: 'openai-chat' | 'openai-responses' | 'anthropic' | 'gemini'
 }
 export interface IResponse<T> {
   code: number

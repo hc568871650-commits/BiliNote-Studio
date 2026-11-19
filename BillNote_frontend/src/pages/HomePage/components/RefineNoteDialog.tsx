@@ -13,10 +13,17 @@ import { getRefinementContext, previewRefinement, applyRefinement, type Refineme
 import './refine-note.css'
 
 interface Props {
-  task: Task; versionId: string; texts: string[]; originalModel: PurposeModelSelection | null
+  task: Task; versionId: string; texts: string[]; sectionIds?: string[]
+  originalModel: PurposeModelSelection | null
   originalProtocol?: ProviderProtocol
   onClose: () => void; onApplied: (task: Task) => void
 }
+const REFINEMENT_PRESETS = [
+  { label: '参数改表格', text: '把关键参数、配置项或方案对比整理为紧凑表格' },
+  { label: '环境自查清单', text: '将前置环境、版本、依赖与权限要求归纳为环境准备自查清单' },
+  { label: '补充避坑详注', text: '补齐原片中的底层原理、实测案例与高频避坑细节' },
+  { label: '去水份精简', text: '压缩冗余表述，只保留核心判断、参数与因果短链' },
+] as const
 const timeLabel = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
 const frameReasons: Record<string, string> = { coverage:'时间段取样',stable_frame:'稳定画面',local_parameter_change:'局部变化',scene_change:'画面切换',subtitle_operation:'操作提示',fixed_interval:'定时取样' }
 const frameReason = (reason: string) => reason.split(',').map(value => frameReasons[value.trim()] || value.trim()).join(' · ')
@@ -25,16 +32,18 @@ const errorMessage = (error: unknown) => {
   return value?.msg || value?.message || '请求失败，请稍后重试'
 }
 
-export default function RefineNoteDialog({ task, versionId, texts, originalModel, originalProtocol, onClose, onApplied }: Props) {
+export default function RefineNoteDialog({ task, versionId, texts, sectionIds, originalModel, originalProtocol, onClose, onApplied }: Props) {
   const readingDefault = usePurposeModelStore(state => state.defaults.reading)
   const [model, setModel] = useState<PurposeModelSelection | null>(originalModel || readingDefault)
   const providerProtocol = useEffectiveProviderProtocol(model?.provider_id)
   const officialProtocol = useProviderStore(state => officialProviderProtocol(state.provider.find(item => item.id === model?.provider_id)?.baseUrl || ''))
   const protocol = officialProtocol || (originalProtocol && originalModel?.provider_id === model?.provider_id && originalModel?.model_name === model?.model_name ? originalProtocol : providerProtocol)
+  const [activeSectionIds, setActiveSectionIds] = useState<string[] | undefined>(() => (sectionIds?.length ? sectionIds : undefined))
   const [context, setContext] = useState<RefinementContext | null>(null)
   const [draft, setDraft] = useState<RefinementPreview | null>(null)
   const [start, setStart] = useState('')
   const [end, setEnd] = useState('')
+  const [customEdited, setCustomEdited] = useState(false)
   const [instruction, setInstruction] = useState('')
   const [useVideo, setUseVideo] = useState(false)
   const [phase, setPhase] = useState<'context' | 'idle' | 'preview' | 'apply'>('context')
@@ -42,16 +51,23 @@ export default function RefineNoteDialog({ task, versionId, texts, originalModel
   const [contextAttempt, setContextAttempt] = useState(0)
   const epoch = useRef(0)
   const requestBusy = useRef(false)
-  const selection = { version_id: versionId, texts }
+  const structuredMode = Boolean(activeSectionIds?.length)
+  const selection = structuredMode
+    ? { version_id: versionId, texts: [] as string[], section_ids: activeSectionIds }
+    : { version_id: versionId, texts }
   const busy = phase !== 'idle'
   useEffect(() => {
+    setActiveSectionIds(sectionIds?.length ? sectionIds : undefined)
+  }, [sectionIds])
+  useEffect(() => {
     const requestId = ++epoch.current
-    setPhase('context'); setError('')
-    getRefinementContext(task.id, { version_id: versionId, texts }).then(value => {
+    setPhase('context'); setError(''); setDraft(null)
+    getRefinementContext(task.id, selection).then(value => {
       if (epoch.current !== requestId) return
       setContext(value)
       setStart(value.start_time == null ? '' : String(value.start_time))
       setEnd(value.end_time == null ? '' : String(value.end_time))
+      setCustomEdited(false)
     }).catch(error => { if (epoch.current === requestId) setError(errorMessage(error)) })
       .finally(() => { if (epoch.current === requestId) setPhase('idle') })
     return () => {
@@ -59,7 +75,16 @@ export default function RefineNoteDialog({ task, versionId, texts, originalModel
       // eslint-disable-next-line react-hooks/exhaustive-deps
       epoch.current++
     }
-  }, [task.id, versionId, texts, contextAttempt])
+  }, [task.id, versionId, texts, activeSectionIds, contextAttempt])
+  const appendPreset = (text: string) => {
+    setInstruction(prev => {
+      const trimmed = prev.trim()
+      if (!trimmed) return text
+      if (trimmed.includes(text)) return trimmed
+      return `${trimmed}；${text}`
+    })
+    setDraft(null)
+  }
   // A protocol change also changes what will be sent to the model.
   useEffect(() => { setDraft(null) }, [protocol])
   const generate = async () => {
@@ -73,7 +98,9 @@ export default function RefineNoteDialog({ task, versionId, texts, originalModel
     requestBusy.current = true
     setPhase('preview'); setError(''); setDraft(null)
     try {
+      const multiRanges = !customEdited && context.time_ranges && context.time_ranges.length > 1 ? context.time_ranges : undefined
       const result = await previewRefinement(task.id, { ...selection, start_time: startTime, end_time: endTime,
+        ...(multiRanges ? { time_ranges: multiRanges } : {}),
         instruction, ...model, protocol, use_video: useVideo && context.video_available })
       if (epoch.current === requestId) setDraft(result)
     } catch (error) { if (epoch.current === requestId) setError(errorMessage(error)) }
@@ -99,7 +126,7 @@ export default function RefineNoteDialog({ task, versionId, texts, originalModel
   const sourceResourceBase = Array.isArray(task.markdown) ? task.markdown.find(version => version.ver_id === versionId)?.resource_base || task.resource_base : task.resource_base
   const resolveImage = (src: string, revised: boolean) => {
     if (revised && src.startsWith('images/')) {
-      const frame = draft?.evidence.frames.find(frame => frame.image_url.endsWith(`/${src.slice('images/'.length)}`))
+      const frame = draft?.evidence?.frames?.find(frame => frame.image_url.endsWith(`/${src.slice('images/'.length)}`))
       if (frame) return resourceURL(frame.image_url)
     }
     if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(src)) return src
@@ -113,18 +140,41 @@ export default function RefineNoteDialog({ task, versionId, texts, originalModel
   } })
   return <Dialog open onOpenChange={open => { if (!open) close() }}>
     <DialogContent className="refine-note-dialog" showCloseButton={phase !== 'apply'} onEscapeKeyDown={event => { if (phase === 'apply') event.preventDefault() }} onPointerDownOutside={event => event.preventDefault()}>
-      <DialogTitle>重新蒸馏选中段落</DialogTitle>
-      <DialogDescription>根据原字幕和可用画面补充步骤、依据与核验方法。比较修订稿后，采纳并保存为新版本。</DialogDescription>
+      <DialogTitle>{structuredMode ? '重新蒸馏选中章节' : '重新蒸馏选中段落'}</DialogTitle>
+      <DialogDescription>{structuredMode ? '按原字幕与自定义重整指令重算选中章节，未选章节的详注、表格与自测原样保留。' : '根据原字幕和可用画面补充步骤、依据与核验方法，采纳后保存为新版本。'}</DialogDescription>
       <div className="refine-note-body">
         <fieldset disabled={busy || Boolean(task.archived_at)} className="refine-note-settings">
-          <div className="refine-note-range"><label>开始（秒）<input type="number" min="0" step="0.1" value={start} onChange={event => { setStart(event.target.value); setDraft(null) }} /></label><label>结束（秒）<input type="number" min="0" step="0.1" value={end} onChange={event => { setEnd(event.target.value); setDraft(null) }} /></label><span>{context ? `${context.transcript_count} 条来源字幕` : '正在定位来源…'}</span></div>
+          {structuredMode && context?.section_titles?.length ? (
+            <div className="refine-mode-bar">
+              <span className="refine-mode-badge">结构化无损修订 · {context.section_titles.join('、')}</span>
+            </div>
+          ) : !structuredMode && context?.matched_section_ids && context.matched_section_ids.length > 0 ? (
+            <div className="refine-mode-bar">
+              <span className="refine-note-hint">当前为结构化笔记，可切到整节修订以保留毛玻璃详注与自测</span>
+              <button type="button" className="refine-switch-btn" onClick={() => setActiveSectionIds(context.matched_section_ids)}>
+                切到结构化整节修订
+              </button>
+            </div>
+          ) : null}
+          <div className="refine-note-range"><label>开始（秒）<input type="number" min="0" step="0.1" value={start} onChange={event => { setStart(event.target.value); setCustomEdited(true); setDraft(null) }} /></label><label>结束（秒）<input type="number" min="0" step="0.1" value={end} onChange={event => { setEnd(event.target.value); setCustomEdited(true); setDraft(null) }} /></label><span>{context ? `${context.transcript_count} 条来源字幕` : '正在定位来源…'}</span></div>
+          {!customEdited && context?.time_ranges && context.time_ranges.length > 1 && <p className="refine-note-hint">跨段区间：{context.time_ranges.map(r => `${timeLabel(r.start)}–${timeLabel(r.end)}`).join(' · ')}</p>}
           {context && (context.start_time == null || context.end_time == null) && <p className="refine-note-hint">选中内容没有可定位时间，请按原视频输入开始和结束秒数。</p>}
-          <label className="refine-note-instruction">补充要求<textarea rows={3} placeholder="例如：逐步说明软件操作、参数、原因和常见错误；不要补写来源未支持的结论。" value={instruction} onChange={event => { setInstruction(event.target.value); setDraft(null) }} /></label>
+          <div className="refine-note-instruction">
+            <label htmlFor="refine-instruction-input">重整指令（可选）</label>
+            <div className="refine-preset-row" role="group" aria-label="快捷重整指令">
+              {REFINEMENT_PRESETS.map(preset => (
+                <button key={preset.label} type="button" className="refine-preset-chip" onClick={() => appendPreset(preset.text)}>
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <textarea id="refine-instruction-input" rows={3} placeholder="例如：把参数整理成表格、补充环境准备自查清单或核对避坑细节。" value={instruction} onChange={event => { setInstruction(event.target.value); setDraft(null) }} />
+          </div>
           <div className="refine-note-model"><PurposeModelPicker label="重新蒸馏模型" value={model} disabled={busy || Boolean(task.archived_at)} onChange={value => { setModel(value); setDraft(null) }} /><label><input type="checkbox" checked={useVideo} disabled={!context?.video_available || busy} onChange={event => { setUseVideo(event.target.checked); setDraft(null) }} />分析画面</label><span className="refine-note-hint">{context?.video_available ? '开启后结合关键帧分析' : '没有可用视频，使用字幕分析'}</span></div>
         </fieldset>
         {error && <div role="alert" className="refine-note-error">{error}{!context && phase === 'idle' && <button onClick={() => setContextAttempt(value => value + 1)}>重新定位来源</button>}</div>}
         <div className="refine-note-compare"><section><h3>原文</h3><div className="markdown-body"><ReactMarkdown remarkPlugins={[gfm]} skipHtml components={imageComponents(false)}>{draft?.before || context?.before || texts.join('\n\n')}</ReactMarkdown></div></section><section><h3>修订稿</h3>{draft ? <div className="markdown-body"><ReactMarkdown remarkPlugins={[gfm]} skipHtml components={imageComponents(true)}>{draft.after}</ReactMarkdown></div> : <p className="refine-note-hint">{phase === 'preview' ? '正在根据来源生成修订稿，请稍候…' : '生成后在这里比较，再决定是否采纳。'}</p>}</section></div>
-        {draft && <details className="refine-note-evidence" open><summary>来源依据 · {timeLabel(draft.start_time!)}–{timeLabel(draft.end_time!)} · {draft.evidence.transcript.length} 条字幕 · {draft.evidence.frames.length} 张关键帧</summary><div className="refine-note-subtitles">{draft.evidence.transcript.map((segment, index) => <p key={index}><time>{timeLabel(segment.start)}–{timeLabel(segment.end)}</time>{segment.text}</p>)}</div><div className="refine-note-frames">{draft.evidence.frames.map((frame, index) => <figure key={index}><img src={resourceURL(frame.image_url)} alt={`来源关键帧 ${timeLabel(frame.time)}`} loading="lazy" /><figcaption>{timeLabel(frame.time)} · {frameReason(frame.reason)}</figcaption></figure>)}</div></details>}
+        {draft && <details className="refine-note-evidence" open><summary>来源依据 · {timeLabel(draft.start_time!)}–{timeLabel(draft.end_time!)} · {(draft.evidence?.transcript || []).length} 条字幕 · {(draft.evidence?.frames || []).length} 张关键帧</summary><div className="refine-note-subtitles">{(draft.evidence?.transcript || []).map((segment, index) => <p key={index}><time>{timeLabel(segment.start)}–{timeLabel(segment.end)}</time>{segment.text}</p>)}</div><div className="refine-note-frames">{(draft.evidence?.frames || []).map((frame, index) => <figure key={index}><img src={resourceURL(frame.image_url)} alt={`来源关键帧 ${timeLabel(frame.time)}`} loading="lazy" /><figcaption>{timeLabel(frame.time)} · {frameReason(frame.reason)}</figcaption></figure>)}</div></details>}
       </div>
       <div className="refine-note-actions"><span role="status">{phase === 'context' ? '定位来源中…' : phase === 'preview' ? '正在生成（最多等待 180 秒）' : phase === 'apply' ? '保存新版本中…' : ''}</span><button onClick={close} disabled={phase === 'apply'}>关闭</button><button onClick={() => void generate()} disabled={busy || !context || !model || Boolean(task.archived_at)}>生成修订稿</button><button className="refine-note-accept" onClick={() => void apply()} disabled={busy || !draft || Boolean(task.archived_at)}>采纳并保存新版本</button></div>
     </DialogContent>

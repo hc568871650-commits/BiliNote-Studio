@@ -1,42 +1,45 @@
-from pydantic import AnyUrl, validator, BaseModel, field_validator, model_validator
+from pydantic import AnyUrl, BaseModel, field_validator, model_validator
 import re
+from typing import Optional
 from urllib.parse import urlparse
 
-from app.utils.url_parser import normalize_video_url
+from app.utils.url_parser import detect_video_platform, normalize_video_url
 
 SUPPORTED_PLATFORMS = {
-    "bilibili": r"(https?://)?(www\.)?bilibili\.com/video/[a-zA-Z0-9]+",
-    "youtube": r"(https?://)?(www\.)?(youtube\.com/(watch\?v=|shorts/)|youtu\.be/)[\w\-]+",
-    "kuaishou": "kuaishou"
+    "bilibili": r"^https?://(?:(?:www|m)\.)?bilibili\.com/video/[a-zA-Z0-9]+",
+    "youtube": r"^https?://(?:(?:www|m|music)\.)?(?:youtube\.com/(?:watch\?(?:[^#]*&)?v=|shorts/|live/|embed/)|youtu\.be/)[\w\-]{6,}",
+    "kuaishou": r"^https?://(?:(?:www|v|m)\.)?(?:kuaishou\.com|gifshow\.com)/",
 }
 
 
 def is_supported_video_url(url: str) -> bool:
-    parsed = urlparse(url)
+    cleaned = normalize_video_url(str(url or ""))
+    parsed = urlparse(cleaned)
+    host = (parsed.hostname or "").lower()
 
-    # 检查是否为Bilibili的短链接
-    if parsed.netloc == "b23.tv":
+    # 检查是否为 Bilibili 的短链接
+    if host == "b23.tv" and parsed.path.strip("/"):
         return True
 
-    for name, pattern in SUPPORTED_PLATFORMS.items():
-        if pattern in ["douyin", "kuaishou"]:
-            if pattern in url:
-                return True
-        else:
-            if re.match(pattern, url):
-                return True
+    for pattern in SUPPORTED_PLATFORMS.values():
+        if re.match(pattern, cleaned, re.IGNORECASE):
+            return True
     return False
 
 
 class VideoRequest(BaseModel):
     url: AnyUrl
-    platform: str
+    platform: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
     def normalize_url(cls, data):
-        if isinstance(data, dict) and data.get("platform") == "bilibili" and data.get("url"):
-            data["url"] = normalize_video_url(str(data["url"]))
+        if isinstance(data, dict) and data.get("url"):
+            cleaned = normalize_video_url(str(data["url"]))
+            data["url"] = cleaned
+            detected = detect_video_platform(cleaned)
+            if detected:
+                data["platform"] = detected
         return data
 
     @field_validator("url")

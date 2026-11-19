@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Search, X, Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
 import { searchLibrary, type LibrarySearchHit } from '@/services/librarySearch'
 import { useLibrarySearchStore } from '@/store/librarySearchStore'
@@ -19,7 +19,7 @@ function HitExcerpt({ hit }: { hit: LibrarySearchHit }) {
   </span>
 }
 
-export default function LibrarySearch({ onSelect }: { onSelect: (id: string) => void }) {
+export default function LibrarySearch({ onSelect, trailing }: { onSelect: (id: string) => void; trailing?: ReactNode }) {
   const state = useLibrarySearchStore()
   const folderId = useFolderStore(s => s.selectedFolderId)
   const folders = useFolderStore(s => s.folders)
@@ -63,11 +63,14 @@ export default function LibrarySearch({ onSelect }: { onSelect: (id: string) => 
     } finally { setOpening(null) }
   }
   return <div className={active ? 'flex min-h-0 flex-1 flex-col gap-2' : 'shrink-0'} data-library-search>
-    <div className="flex shrink-0 items-center gap-2 rounded-md border border-input bg-background px-2 focus-within:ring-1 focus-within:ring-ring">
-      <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      {/* type="text": WebView2 adds its own clear button to type="search", duplicating ours. */}
-      <input type="text" role="searchbox" enterKeyHint="search" aria-label="全文查找" placeholder="查找标题或正文…" maxLength={500} className="select-text h-8 min-w-0 flex-1 bg-transparent text-xs outline-none" value={state.query} onChange={event => state.change({ query: event.target.value })} onKeyDown={event => { if (event.key === 'Escape' && state.query) state.change({ query: '' }) }} />
-      {state.query && <button type="button" className="rounded p-0.5 text-muted-foreground hover:text-foreground" title="清除查找（Esc）" aria-label="清除查找" onClick={() => state.change({ query: '' })}><X size={13} /></button>}
+    <div className="flex shrink-0 items-center gap-1.5">
+      <div className="workspace-search-pill min-w-0 flex-1">
+        <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        {/* type="text": WebView2 adds its own clear button to type="search", duplicating ours. */}
+        <input type="text" role="searchbox" enterKeyHint="search" aria-label="查找标题或正文" placeholder="查找标题或正文…" maxLength={500} className="select-text h-8 min-w-0 flex-1 bg-transparent text-xs outline-none" value={state.query} onChange={event => state.change({ query: event.target.value })} onKeyDown={event => { if (event.key === 'Escape' && state.query) { event.stopPropagation(); state.change({ query: '' }) } }} />
+        {state.query && <button type="button" className="rounded p-0.5 text-muted-foreground hover:text-foreground" title="清除查找（Esc）" aria-label="清除查找" onClick={() => state.change({ query: '' })}><X size={13} aria-hidden="true" /></button>}
+      </div>
+      {trailing}
     </div>
     {active && <>
       <div className="flex shrink-0 items-center gap-2 text-xs">

@@ -8,6 +8,8 @@ import type { GroqConnection } from '@/services/transcriber'
 import { advanceGenerationFixture, fixtureDelay, generationScenario, generationTransportFailure, hasGenerationFixture, startGenerationFixture } from './generationPreview'
 import { imageReaderContent } from './imageReaderFixture'
 import { diagnosticsEndpoint, diagnosticsPreview, diagnosticsTaskId } from './diagnosticsPreview'
+import { structuredPreviewDoc } from './structuredPreviewFixture'
+import { spansPlainText, type StructuredNoteDocument, type StructuredSection } from '@/types/structuredNote'
 
 const imageReaderPreview = new URLSearchParams(location.search).get('images') === '1'
 export const PREVIEW_STORAGE_KEY = diagnosticsPreview ? 'bilinote-diagnostics-synthetic-v1' : imageReaderPreview ? 'bilinote-image-reader-synthetic-v3' : generationScenario ? 'bilinote-generation-preview-synthetic-v1' : 'bilinote-ui-preview-synthetic-v3'
@@ -29,6 +31,7 @@ interface PreviewBody {
   operation?: 'create' | 'set_limit'; limit?: number; confirmation_token?: string;
   request_id?: string; expected_revision?: number;
   instruction?: string; scope?: OrganizerScope; plan_id?: string; task_id?: string; task_ids?: string[];
+  version_id?: string; texts?: string[]; section_ids?: string[]; draft_id?: string; start_time?: number; end_time?: number; time_ranges?: { start: number; end: number }[]; use_video?: boolean;
   folder_id?: string; name?: string; changes?: Partial<NoteLibraryEntry>; provider_id?: string; model_name?: string; display_name?: string | null;
   id?: string; base_url?: string; api_key?: string; type?: string; logo?: string; enabled?: number | boolean; url?: string; cookie?: string;
   question?: string; context_mode?: string; attachments?: { type: string; name: string; text?: string; data_url?: string }[];
@@ -84,6 +87,45 @@ const previewModelNames = () => [...Object.keys(previewBuiltins), ...Object.keys
 const previewTranscriberConfig = () => ({ groq_model: settings.groq_model, groq_connection: { ...previewGroqConnection, api_key: previewGroqConnection.api_key ? '********' : '' }, transcriber_type: settings.transcriber_type, whisper_model_size: settings.whisper_model_size, mlx_whisper_model_size: settings.mlx_whisper_model_size, available_types: previewTypes, whisper_model_sizes: previewModelNames(), whisper_builtin_models: previewBuiltins, whisper_custom_models: settings.custom, mlx_whisper_available: false, simulated: true })
 interface PreviewJournal { plan: OrganizerPlan; fingerprint: string; before?: PreviewLibrary; after?: string; status: 'planned' | 'executed' | 'undone'; session_id?: string }
 const journals = new Map<string, PreviewJournal>()
+interface PreviewRefinementDraft {
+  draft_id: string
+  task_id: string
+  version_id: string
+  structured_mode: boolean
+  section_ids: string[]
+  before: string
+  after: string
+  after_sections?: StructuredSection[]
+  start_time: number
+  end_time: number
+  model_name: string
+  provider_id: string
+  protocol: string
+}
+const previewRefinementDrafts = new Map<string, PreviewRefinementDraft>()
+const serializePreviewSection = (sec: StructuredSection): string => {
+  const lines = [`${sec.level === 3 ? '###' : '##'} ${sec.title}`]
+  for (const tk of sec.core_takeaways || []) {
+    const t = spansPlainText(tk.spans).trim()
+    if (t) lines.push('', t)
+  }
+  for (const blk of sec.blocks || []) {
+    if (blk.type === 'paragraph') {
+      lines.push('', spansPlainText(blk.spans))
+    } else if (blk.type === 'checklist') {
+      if (blk.title) lines.push('', `**${blk.title}**`)
+      for (const item of blk.items || []) {
+        lines.push(`- [${item.checked ? 'x' : ' '}] ${spansPlainText(item.spans)}`)
+      }
+    } else if (blk.type === 'flow_chain') {
+      lines.push('', blk.steps.map(step => spansPlainText(step)).join(' → '))
+    } else if (blk.type === 'table') {
+      lines.push('', `| ${blk.columns.join(' | ')} |`, `| ${blk.columns.map(() => '---').join(' | ')} |`,
+        ...blk.rows.map(r => `| ${r.map(c => spansPlainText(c)).join(' | ')} |`))
+    }
+  }
+  return lines.join('\n').trim()
+}
 const clone = <T,>(value: T): T => structuredClone(value)
 const blankEntry = (): NoteLibraryEntry => ({ favorite: false, pinned: false, learning_status: 'unread', tags: [], remark: '' })
 interface PreviewSample { title: string; topic: string; overview: string; steps: string[]; check: string; practice: string }
@@ -134,12 +176,13 @@ ${sample.practice}
 记录本次练习的结果、遇到的问题和下一步。下次复习时先回答问题，再回看资料。`
 const syntheticTask = (id: string, title: string, modelName = sampleModel): Task => {
   const sample = sampleForTitle(title)
+  const useStructured = !imageReaderPreview && id === 'ui-general-1'
   return {
   id, status: 'SUCCESS', createdAt: new Date().toISOString(), archived_at: null,
-  markdown: [{ ver_id: 'preview-v1', content: imageReaderPreview && id === 'ui-general-1' ? imageReaderContent : sampleContent(sample), style: 'tutorial', model_name: modelName, created_at: new Date().toISOString() }],
-  transcript: { full_text: `模拟原文：${sample.overview}${sample.steps.join('')}`, language: 'zh', raw: null, segments: [{ start: 0, end: 15, text: sample.overview }, { start: 15, end: 30, text: sample.steps.join('') }] },
-  audioMeta: { title, cover_url: '', duration: 720, file_path: '', platform: 'local', raw_info: null, video_id: 'sample' },
-  formData: { video_url: '/sample.mp4', platform: 'local', quality: 'medium', model_name: modelName, provider_id: 'preview-1', style: 'tutorial', link: false, screenshot: false },
+  markdown: [{ ver_id: 'preview-v1', content: imageReaderPreview && id === 'ui-general-1' ? imageReaderContent : sampleContent(sample), ...(useStructured ? { structured: structuredPreviewDoc } : {}), style: useStructured ? 'knowledge' : 'tutorial', model_name: modelName, created_at: new Date().toISOString() }],
+  transcript: { full_text: `模拟原文：${sample.overview}${sample.steps.join('')}`, language: 'zh', raw: null, segments: [{ start: 0, end: 15, text: sample.overview }, { start: 15, end: 30, text: sample.steps.join('') }, ...(useStructured ? [{ start: 728, end: 760, text: '12:08 讲解数据库连接池核心原理：单核同一时刻只能跑单线程，连接数超过并发上限会引发上下文切换雪崩。' }, { start: 840, end: 870, text: '14:05 实测对比：8 核机器把连接数从 20 拉到 200 后 TPS 从 4500 暴跌到 1100。' }, { start: 1300, end: 1360, text: '21:40 慢查询未命中索引触发全表扫描锁，80 ms 单次查询在高并发下照样阻塞队列。' }, { start: 2055, end: 2100, text: '34:15 补坑提示：客户端 maxLifetime 必须比数据库 wait_timeout 短 60 秒以上。' }] : [])] },
+  audioMeta: { title, cover_url: '', duration: useStructured ? 2700 : 720, file_path: '', platform: 'local', raw_info: null, video_id: 'sample' },
+  formData: { video_url: '/sample.mp4', platform: 'local', quality: 'medium', model_name: modelName, provider_id: 'preview-1', style: useStructured ? 'knowledge' : 'tutorial', link: false, screenshot: false },
   }
 }
 const initialState = (): PreviewState => ({
@@ -539,6 +582,143 @@ export const previewAdapter: AxiosAdapter = async config => {
     }
     else if (url === '/notes') data = state.tasks
     else if (url === '/notes/import') data = state.tasks // Persisted business-store snapshots cannot overwrite synthetic server data.
+    else if (/^\/notes\/[^/]+\/refine\/(context|preview|apply)$/.test(url) && method === 'post') {
+      const parts = url.split('/')
+      const taskId = decodeURIComponent(parts[2])
+      const action = parts[4]
+      const task = state.tasks.find(item => item.id === taskId)
+      if (!task || task.archived_at) throw new Error('笔记不存在或已归档')
+      const versions = Array.isArray(task.markdown) ? task.markdown : []
+      if (action === 'context') {
+        const ver = versions.find(v => v.ver_id === body.version_id) || versions[0]
+        const doc = (ver as { structured?: StructuredNoteDocument } | undefined)?.structured
+        const sectionIds = body.section_ids?.filter(Boolean) || []
+        const segments = task.transcript?.segments || []
+        if (sectionIds.length && doc?.sections?.length) {
+          const picked = doc.sections.filter(sec => sectionIds.includes(sec.id))
+          if (!picked.length) throw new Error('选中的章节不存在')
+          const ranges = picked.flatMap(sec => sec.time_ranges || []).map(r => ({ start: r.start, end: Math.max(r.end, r.start + 30) }))
+          const start = ranges.length ? ranges[0].start : 0
+          const end = ranges.length ? ranges[ranges.length - 1].end : 60
+          data = {
+            before: picked.map(serializePreviewSection).join('\n\n'),
+            start_time: start,
+            end_time: end,
+            time_ranges: ranges,
+            video_available: false,
+            transcript_count: segments.length,
+            structured_mode: true,
+            section_ids: picked.map(sec => sec.id),
+            section_titles: picked.map(sec => sec.title),
+            before_sections: clone(picked),
+          }
+        } else {
+          data = {
+            before: (body.texts || []).join('\n\n') || (ver?.content || '').slice(0, 200),
+            start_time: 0,
+            end_time: 30,
+            time_ranges: [{ start: 0, end: 30 }],
+            video_available: false,
+            transcript_count: segments.length,
+            structured_mode: false,
+            matched_section_ids: doc?.sections?.length ? [doc.sections[0].id] : [],
+          }
+        }
+      } else if (action === 'preview') {
+        checkModel(body)
+        const ver = versions.find(v => v.ver_id === body.version_id) || versions[0]
+        const doc = (ver as { structured?: StructuredNoteDocument } | undefined)?.structured
+        const sectionIds = body.section_ids?.filter(Boolean) || []
+        const start = Number(body.start_time ?? 0)
+        const end = Number(body.end_time ?? 30)
+        const instruction = (body.instruction || '').trim()
+        const segments = (task.transcript?.segments || []).filter(s => s.start < end && s.end > start)
+        const draftId = crypto.randomUUID().replace(/-/g, '')
+        if (sectionIds.length && doc?.sections?.length) {
+          const picked = doc.sections.filter(sec => sectionIds.includes(sec.id))
+          if (!picked.length) throw new Error('选中的章节不存在')
+          const revised: StructuredSection[] = clone(picked).map(sec => ({
+            ...sec,
+            blocks: [
+              ...(sec.blocks || []),
+              ...(instruction.includes('自查') || instruction.includes('checklist')
+                ? [{
+                    type: 'checklist' as const,
+                    title: '模拟重整新增自查清单',
+                    items: [
+                      { id: 'sim-c1', spans: [{ text: '已核对本节原片参数与超时边界', emphasis: 'plain' as const }], checked: false },
+                      { id: 'sim-c2', spans: [{ text: '确认指令已生效：', emphasis: 'plain' as const }, { text: instruction.slice(0, 24), emphasis: 'code' as const }], checked: false },
+                    ],
+                  }]
+                : [{
+                    type: 'paragraph' as const,
+                    spans: [{ text: `【模拟重蒸馏】已按指令「${instruction || '依据原片字幕精修'}」更新本节，未选章节保持原样。`, emphasis: 'hl' as const }],
+                  }]),
+            ],
+          }))
+          const beforeMd = picked.map(serializePreviewSection).join('\n\n')
+          const afterMd = revised.map(serializePreviewSection).join('\n\n')
+          previewRefinementDrafts.set(draftId, {
+            draft_id: draftId, task_id: task.id, version_id: ver.ver_id, structured_mode: true, section_ids: sectionIds,
+            before: beforeMd, after: afterMd, after_sections: revised, start_time: start, end_time: end,
+            model_name: body.model_name || sampleModel, provider_id: body.provider_id || 'preview-1', protocol: body.protocol || 'openai-chat',
+          })
+          data = {
+            draft_id: draftId, before: beforeMd, after: afterMd, structured_mode: true, section_ids: sectionIds,
+            before_sections: clone(picked), after_sections: revised, start_time: start, end_time: end,
+            time_ranges: body.time_ranges || [{ start, end }],
+            evidence: { transcript: segments.length ? segments : (task.transcript?.segments || []).slice(0, 2), frames: [] },
+          }
+        } else {
+          const beforeMd = (body.texts || []).join('\n\n')
+          const afterMd = `${beforeMd}\n\n> **模拟修订**：已按指令「${instruction || '依据原片字幕修订'}」生成草稿。`
+          previewRefinementDrafts.set(draftId, {
+            draft_id: draftId, task_id: task.id, version_id: ver.ver_id, structured_mode: false, section_ids: [],
+            before: beforeMd, after: afterMd, start_time: start, end_time: end,
+            model_name: body.model_name || sampleModel, provider_id: body.provider_id || 'preview-1', protocol: body.protocol || 'openai-chat',
+          })
+          data = {
+            draft_id: draftId, before: beforeMd, after: afterMd, structured_mode: false, start_time: start, end_time: end,
+            time_ranges: body.time_ranges || [{ start, end }],
+            evidence: { transcript: segments.length ? segments : (task.transcript?.segments || []).slice(0, 2), frames: [] },
+          }
+        }
+      } else {
+        const draft = previewRefinementDrafts.get(body.draft_id || '')
+        if (!draft || draft.task_id !== task.id) throw new Error('修订稿不存在，请重新生成')
+        const origVer = versions.find(v => v.ver_id === draft.version_id) || versions[0]
+        const origDoc = (origVer as { structured?: StructuredNoteDocument } | undefined)?.structured
+        const newVerId = `preview-ref-${crypto.randomUUID().slice(0, 8)}`
+        let nextStructured: StructuredNoteDocument | undefined
+        let nextContent = origVer.content
+        if (draft.structured_mode && origDoc && draft.after_sections) {
+          nextStructured = clone(origDoc)
+          const firstIdx = nextStructured.sections.findIndex(sec => draft.section_ids.includes(sec.id))
+          if (firstIdx >= 0) {
+            nextStructured.sections.splice(firstIdx, draft.section_ids.length, ...clone(draft.after_sections))
+          }
+          nextContent = nextStructured.sections.map(serializePreviewSection).join('\n\n')
+        } else {
+          nextContent = origVer.content.replace(draft.before, draft.after)
+        }
+        const newVer = {
+          ver_id: newVerId,
+          content: nextContent,
+          ...(nextStructured ? { structured: nextStructured } : {}),
+          style: origVer.style,
+          model_name: draft.model_name,
+          provider_id: draft.provider_id,
+          protocol: draft.protocol,
+          created_at: new Date().toISOString(),
+        }
+        task.markdown = [newVer as typeof versions[number], ...versions]
+        data = clone(task)
+      }
+    }
+    else if (url === '/ai_purposes') data = previewDefaultModels
+    else if (url === '/learning/review-bank' && method === 'get') { const allItems = [{ kind: 'pit_annotation', task_id: state.tasks[0]?.id || 'ui-general-1', note_title: state.tasks[0]?.audioMeta?.title || '示例笔记', section_id: 'sec-1', section_title: '核心要点', hint: '高频避坑示例', detail: '生产环境请确保配置独立的超时边界与错误降级策略。' }]; const reqKind = String(config.params?.kind || 'all'); const items = reqKind === 'all' ? allItems : allItems.filter(i => reqKind === 'wrong_quiz' ? i.kind === 'wrong_quiz' : i.kind === 'pit_annotation'); data = { total: allItems.length, wrong_quiz_count: 0, pit_count: 1, items } }
+    else if (/^\/notes\/[^/]+\/learning-state$/.test(url)) { const tid = decodeURIComponent(url.split('/')[2]); data = { task_id: tid, quiz_attempts: {}, pinned_annotations: {}, checklist_states: {} } }
+    else if (/^\/notes\/[^/]+\/upgrade-structured$/.test(url) && method === 'post') { const tid = decodeURIComponent(url.split('/')[2]); data = clone(state.tasks.find(item => item.id === tid) || state.tasks[0] || null) }
     else if (url.startsWith('/notes/')) {
       const [, , rawId, action] = url.split('/'); const id = decodeURIComponent(rawId)
       if (method === 'delete') state.tasks = state.tasks.filter(task => task.id !== id)
@@ -583,7 +763,11 @@ export const previewAdapter: AxiosAdapter = async config => {
     } else if (url === '/update_provider') {
       state.providers = state.providers.map(provider => provider.id === body.id ? { ...provider, name: body.name || provider.name, logo: body.logo ?? provider.logo, base_url: body.base_url ?? provider.base_url, enabled: Number(body.enabled ?? provider.enabled) } : provider)
       data = { id: body.id, enabled: state.providers.find(provider => provider.id === body.id)?.enabled }
-    } else if (url === '/connect_test') data = { simulated: true, message: '模拟连接成功，未发起真实网络请求。' }
+    } else if (url.startsWith('/providers/') && method === 'delete') { const pid = decodeURIComponent(url.split('/')[2]); state.providers = state.providers.filter(p => p.id !== pid); state.models = state.models.filter(m => m.provider_id !== pid); data = { id: pid } }
+    else if (/^\/models\/\d+$/.test(url) && method === 'put') { const mid = Number(url.split('/')[2]); state.models = state.models.map(m => m.id === mid ? { ...m, model_name: (body as { model_name?: string }).model_name || m.model_name, display_name: (body as { display_name?: string | null }).display_name ?? m.display_name } : m); data = state.models.find(m => m.id === mid) || null }
+    else if (url === '/models/batch' && method === 'post') { const list = ((body as { models?: { model_name: string; display_name?: string | null }[] }).models || []); const pid = (body as { provider_id?: string }).provider_id || ''; let nextId = Math.max(0, ...state.models.map(i => i.id)) + 1; for (const item of list) { if (!state.models.some(m => m.provider_id === pid && m.model_name === item.model_name)) state.models.push({ id: nextId++, provider_id: pid, model_name: item.model_name, display_name: item.display_name || null }) }; data = { added: list.length } }
+    else if (url === '/models/batch-delete' && method === 'post') { const ids = new Set(((body as { ids?: number[] }).ids || [])); state.models = state.models.filter(m => !ids.has(m.id)); data = { deleted: ids.size } }
+    else if (url === '/connect_test') data = { simulated: true, message: '模拟连接成功，未发起真实网络请求。' }
     else if (url === '/model_list') data = state.models.filter(model => state.providers.some(provider => provider.id === model.provider_id && provider.enabled))
     else if (url.startsWith('/model_list/')) data = { models: [{ id: sampleModel }, { id: '通用示例视觉模型' }, { id: '通用示例推理模型' }] }
     else if (url.startsWith('/model_enable/')) data = state.models.filter(model => model.provider_id === decodeURIComponent(url.split('/')[2]))

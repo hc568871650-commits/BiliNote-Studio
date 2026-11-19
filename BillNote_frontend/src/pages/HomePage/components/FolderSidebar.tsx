@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Folder, FolderOpen, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, Folder, FolderOpen, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -48,10 +48,10 @@ const FolderSidebar = ({ tasks, archived, disabled, onCreate, onRename, onDelete
   const folderRows = folders
   const folded = searching ? !peek : collapsed
   const selectedFolderName = folderRows.find(folder => folder.id === selectedFolderId)?.name || '默认文件夹'
-  return <aside aria-label="笔记文件夹" className="library-folders flex min-h-0 w-full shrink-0 flex-col border-b border-border pb-1">
+  return <aside aria-label="笔记文件夹" className="library-folders flex min-h-0 w-full shrink-0 flex-col border-b border-[var(--surface-hairline)] pb-1.5">
     <div className="flex items-center justify-between px-1 pb-1">
       <button type="button" className="library-folders-toggle" aria-label={folded ? '展开文件夹区域' : '收起文件夹区域'} aria-expanded={!folded} aria-controls="library-folder-rows" onClick={toggleCollapsed} title={folded ? `当前：${selectedFolderName}，点击展开文件夹` : '收起文件夹，为笔记列表腾出空间'}>
-        {folded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}<span>{folded ? selectedFolderName : '文件夹'}</span>{folded && <small>{count(selectedFolderId)}</small>}
+        <ChevronDown size={14} className={cn('library-folders-chevron', !folded && 'is-open')} aria-hidden="true" /><span>{folded ? selectedFolderName : '文件夹'}</span>{folded && <small>{count(selectedFolderId)}</small>}
       </button>
       <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={disabled} onClick={onCreate} title="新建文件夹" aria-label="新建文件夹">
         <Plus className="h-3.5 w-3.5" />
@@ -62,20 +62,20 @@ const FolderSidebar = ({ tasks, archived, disabled, onCreate, onRename, onDelete
       {folderRows.map(folder => {
         const system = folder.id === DEFAULT_FOLDER_ID
         const selected = selectedFolderId === folder.id
-        return <div key={folder.id} className={cn('group flex min-w-0 items-center rounded-md', selected && 'bg-accent')}>
+        return <div key={folder.id} className={cn('group library-folder-row', selected && 'is-selected')}>
           <button type="button" disabled={disabled} aria-current={selected ? 'true' : undefined} onClick={() => {
             selectFolder(folder.id)
             const search = useLibrarySearchStore.getState()
             if (search.query.trim() && search.scope === 'folder') search.change({ folderId: folder.id })
           }}
-            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed">
-            {selected ? <FolderOpen className="h-4 w-4 shrink-0 text-primary" /> : <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />}
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-[9px] px-2 py-1.5 text-left text-xs hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed">
+            {selected ? <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" strokeWidth={1.6} /> : <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={1.6} />}
             <span className="min-w-0 flex-1 truncate">{folder.name}</span>
-            <span className="shrink-0 text-xs text-muted-foreground">{count(folder.id)}</span>
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{count(folder.id)}</span>
           </button>
-          {!disabled && folder.id !== ALL_FOLDER_ID && !system && <div className="flex shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
-            <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0" title="重命名文件夹" aria-label={`重命名${folder.name}`} onClick={() => onRename(folder.id)}><Pencil className="h-3 w-3" /></Button>
-            <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0" title="删除文件夹" aria-label={`删除${folder.name}`} onClick={() => onDelete(folder.id)}><Trash2 className="h-3 w-3 text-destructive" /></Button>
+          {!disabled && folder.id !== ALL_FOLDER_ID && !system && <div className="flex shrink-0 items-center gap-0.5 pr-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+            <button type="button" className="library-folder-action" title="重命名文件夹" aria-label={`重命名${folder.name}`} onClick={() => onRename(folder.id)}><Pencil className="h-3 w-3" strokeWidth={1.5} /></button>
+            <button type="button" className="library-folder-action library-folder-action--danger" title="删除文件夹" aria-label={`删除${folder.name}`} onClick={() => onDelete(folder.id)}><Trash2 className="h-3 w-3" strokeWidth={1.5} /></button>
           </div>}
         </div>
       })}

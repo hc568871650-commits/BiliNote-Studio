@@ -74,3 +74,77 @@ export const delete_task = async ({ video_id, platform }: { video_id: string; pl
 
 export const get_task_status = (task_id: string, options: NoteRequestOptions = {}) =>
   request.get('/task_status/' + encodeURIComponent(task_id), { suppressToast: true, ...options }) as unknown as Promise<TaskStatusResponse>
+
+export interface UpgradeStructuredPayload {
+  provider_id?: string
+  model_name?: string
+  protocol?: string
+  style?: 'knowledge' | 'tutorial'
+  extras?: string
+}
+
+export const upgradeNoteStructured = (taskId: string, payload: UpgradeStructuredPayload = {}) =>
+  request.post(`/notes/${encodeURIComponent(taskId)}/upgrade-structured`, payload, { timeout: 180000 }) as unknown as Promise<Task>
+
+export interface QuizAttemptRecord {
+  picked_key: string
+  correct_key?: string
+  is_correct: boolean
+  question?: string
+  section_title?: string
+  explanation?: string
+  updated_at?: number
+}
+
+export interface NoteLearningState {
+  task_id: string
+  quiz_attempts: Record<string, QuizAttemptRecord>
+  pinned_annotations: Record<string, { pinned: boolean; note?: string; updated_at?: number }>
+  checklist_states: Record<string, boolean>
+  updated_at?: number
+}
+
+export const getNoteLearningState = (taskId: string) =>
+  request.get(`/notes/${encodeURIComponent(taskId)}/learning-state`, { suppressToast: true }) as unknown as Promise<NoteLearningState>
+
+export const updateNoteLearningState = (
+  taskId: string,
+  payload: Partial<Pick<NoteLearningState, 'quiz_attempts' | 'pinned_annotations' | 'checklist_states'>>,
+) =>
+  request.put(`/notes/${encodeURIComponent(taskId)}/learning-state`, payload, { suppressToast: true }) as unknown as Promise<NoteLearningState>
+
+export interface ReviewBankItem {
+  kind: 'wrong_quiz' | 'pit_annotation'
+  task_id: string
+  note_title: string
+  section_id: string
+  section_title: string
+  question?: string
+  picked_key?: string
+  correct_key?: string
+  explanation?: string
+  hint?: string
+  detail?: string
+  timestamp?: number | null
+  timestamp_label?: string
+  updated_at?: number
+}
+
+export interface ReviewBankResponse {
+  total: number
+  wrong_quiz_count: number
+  pit_count: number
+  items: ReviewBankItem[]
+}
+
+export const fetchReviewBank = (params: { kind?: 'all' | 'wrong_quiz' | 'pit'; limit?: number } = {}) =>
+  request.get('/learning/review-bank', { params, suppressToast: true }) as unknown as Promise<ReviewBankResponse>
+
+export const noteMediaStreamUrl = (baseURL: string, taskId: string) => {
+  const apiBase = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
+  if (/^https?:\/\//i.test(apiBase)) {
+    return `${apiBase}/notes/${encodeURIComponent(taskId)}/media`
+  }
+  const origin = (baseURL || '').replace(/\/$/, '')
+  return `${origin}${apiBase}/notes/${encodeURIComponent(taskId)}/media`
+}

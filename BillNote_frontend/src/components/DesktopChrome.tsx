@@ -41,9 +41,9 @@ export default function DesktopChrome({ children, preview = false }: { children:
       <div className="studio-titlebar-drag" data-tauri-drag-region={desktop && !windowControlsLocked ? '' : undefined}
         onDoubleClick={desktop ? undefined : () => { if (!blockImageViewerWindowControl()) setMaximized(value => !value) }}><span className="studio-titlebar-logo" aria-hidden="true" dangerouslySetInnerHTML={{ __html: studioMarkMarkup }} /><span className="studio-titlebar-name">BiliNote Studio</span></div>
       <div className="studio-window-controls" role="group" aria-label="窗口控制">
-        <button type="button" disabled={windowControlsLocked} aria-label="最小化" title="最小化" onClick={() => control(minimizeDesktopWindow, () => toast('预览不最小化浏览器；正式桌面会最小化窗口'))}><Minus size={16} strokeWidth={1.4} /></button>
-        <button type="button" disabled={windowControlsLocked} aria-label={maximized ? '还原窗口' : '最大化'} title={maximized ? '还原窗口' : '最大化'} onClick={() => control(toggleMaximizeDesktopWindow, () => setMaximized(value => !value))}>{maximized ? <Copy size={13} strokeWidth={1.4} /> : <Square size={13} strokeWidth={1.4} />}</button>
-        <button type="button" disabled={windowControlsLocked} className="studio-window-close" aria-label="关闭窗口" title="关闭窗口（保留原托盘行为）" onClick={() => control(closeDesktopWindow, () => toast('预览不关闭页面；正式桌面沿用原托盘行为'))}><X size={17} strokeWidth={1.4} /></button>
+        <button type="button" disabled={windowControlsLocked} aria-label="最小化" title="最小化" onClick={() => control(minimizeDesktopWindow, () => toast('预览不最小化浏览器；正式桌面会最小化窗口'))}><Minus size={13} strokeWidth={1.6} /></button>
+        <button type="button" disabled={windowControlsLocked} aria-label={maximized ? '还原窗口' : '最大化'} title={maximized ? '还原窗口' : '最大化'} onClick={() => control(toggleMaximizeDesktopWindow, () => setMaximized(value => !value))}>{maximized ? <Copy size={11} strokeWidth={1.6} /> : <Square size={11} strokeWidth={1.6} />}</button>
+        <button type="button" disabled={windowControlsLocked} className="studio-window-close" aria-label="关闭窗口" title="关闭窗口（保留原托盘行为）" onClick={() => control(closeDesktopWindow, () => toast('预览不关闭页面；正式桌面沿用原托盘行为'))}><X size={13} strokeWidth={1.6} /></button>
       </div>
     </header>}
     {children}

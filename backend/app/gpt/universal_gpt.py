@@ -101,15 +101,34 @@ class UniversalGPT(GPT):
         return [TranscriptSegment(**seg) if isinstance(seg, dict) else seg for seg in segments]
 
     def create_messages(self, segments: List[TranscriptSegment], **kwargs):
-
-        content_text = generate_base_prompt(
-            title=kwargs.get('title'),
-            segment_text=self._build_segment_text(segments),
-            tags=kwargs.get('tags'),
-            _format=kwargs.get('_format'),
-            style=kwargs.get('style'),
-            extras=kwargs.get('extras'),
-        )
+        from app.gpt import prompt_builder as builder_mod
+        prompt_mode = kwargs.get('prompt_mode')
+        if prompt_mode == 'structured' and callable(getattr(builder_mod, 'generate_structured_prompt', None)):
+            content_text = builder_mod.generate_structured_prompt(
+                title=kwargs.get('title'),
+                segment_text=self._build_segment_text(segments),
+                tags=kwargs.get('tags'),
+                _format=kwargs.get('_format'),
+                style=kwargs.get('style'),
+                extras=kwargs.get('extras'),
+            )
+        elif prompt_mode == 'knowledge_pass1' and callable(getattr(builder_mod, 'generate_knowledge_pass1_prompt', None)):
+            content_text = builder_mod.generate_knowledge_pass1_prompt(
+                title=kwargs.get('title'),
+                segment_text=self._build_segment_text(segments),
+                tags=kwargs.get('tags'),
+                _format=kwargs.get('_format'),
+                extras=kwargs.get('extras'),
+            )
+        else:
+            content_text = generate_base_prompt(
+                title=kwargs.get('title'),
+                segment_text=self._build_segment_text(segments),
+                tags=kwargs.get('tags'),
+                _format=kwargs.get('_format'),
+                style=kwargs.get('style'),
+                extras=kwargs.get('extras'),
+            )
 
         video_img_urls = kwargs.get('video_img_urls', [])
         # Local paths, hashes and detector internals are not model evidence.
@@ -177,6 +196,7 @@ class UniversalGPT(GPT):
         payload = {
             "prompt_version": getattr(prompt_contract, 'PROMPT_VERSION', 'distillation-2'),
             "response_contract": "complete-body-1",
+            "structured_contract": "structured-v1" if getattr(source, 'structured', False) else "markdown-legacy",
             "frame_time_contract": "seconds-with-timecode-1",
             "frame_evidence": getattr(source, 'frame_evidence', None) or [],
             "video_image_ranges": getattr(source, 'video_image_ranges', None),
@@ -491,7 +511,8 @@ class UniversalGPT(GPT):
         return current_partials[0]
 
     def _summarize_chunk(self, chunk, source, message_builder, depth=0, *, progress=None,
-                         save_progress=None, node='root', budget=None) -> str:
+                         save_progress=None, node='root', budget=None, prompt_mode=None,
+                         assemble_fn=None) -> str:
         progress = progress if progress is not None else {}
         budget = budget if budget is not None else {'remaining': 15}
         cached = progress.get(node, {})
@@ -500,6 +521,8 @@ class UniversalGPT(GPT):
             return cached['text']
         kwargs = dict(title=source.title, tags=source.tags, _format=source._format,
             style=source.style, extras=source.extras, frame_evidence=getattr(source, 'frame_evidence', None))
+        if prompt_mode:
+            kwargs['prompt_mode'] = prompt_mode
         messages = message_builder(chunk.segments, chunk.image_urls,
             video_image_ranges=getattr(chunk, 'video_image_ranges', None), **kwargs)
         try:
@@ -538,13 +561,364 @@ class UniversalGPT(GPT):
             progress[node] = {'split': True}
             if save_progress:
                 save_progress()
-            text = self._assemble_partials([self._summarize_chunk(part, source, message_builder, depth + 1,
-                progress=progress, save_progress=save_progress, node=f'{node}/{index}', budget=budget)
-                for index, part in enumerate(subchunks)])
+            sub_results = [self._summarize_chunk(part, source, message_builder, depth + 1,
+                progress=progress, save_progress=save_progress, node=f'{node}/{index}',
+                budget=budget, prompt_mode=prompt_mode, assemble_fn=assemble_fn)
+                for index, part in enumerate(subchunks)]
+            text = assemble_fn(sub_results) if callable(assemble_fn) else self._assemble_partials(sub_results)
             progress[node] = {'text': text}
             if save_progress:
                 save_progress()
             return text
+
+    @staticmethod
+    def _structured_module():
+        from app.models import structured_note
+        return structured_note
+
+    def _repair_json_once(self, raw_text: str, schema_hint: str) -> str:
+        if getattr(self, '_http_attempt_count', 0) >= getattr(self, '_max_http_attempts', 64):
+            return raw_text
+        prompt = (
+            f"将下面内容无损整理为单个合法 JSON 对象（{schema_hint}），不要增删事实，不要输出任何额外说明或代码块围栏：\n\n"
+            + raw_text[:18000]
+        )
+        try:
+            self._generation_context = dict(phase='summarize', node='json_repair', depth=0)
+            resp = self._chat_completion_create([{"role": "user", "content": prompt}])
+            return self._validated_response(resp, '格式整理')
+        except Exception:
+            return raw_text
+
+    def _parse_or_fallback_structured(self, raw_text: str, source: GPTSource, note_style: str) -> dict:
+        sn = self._structured_module()
+        cleaned = sn.strip_reasoning_and_fences(raw_text) if hasattr(sn, 'strip_reasoning_and_fences') else raw_text.strip()
+        doc = sn.extract_structured_note_json(
+            cleaned, fallback_title=source.title or "视频笔记", default_style=note_style
+        )
+        # 仅当输出形态疑似残缺 JSON 时发起单轮无损修复，避免对纯 Markdown 浪费额外请求。
+        looks_like_json = "{" in cleaned or '"sections"' in cleaned
+        if doc is None and looks_like_json:
+            repaired = self._repair_json_once(cleaned, "包含 title 与 sections 数组")
+            doc = sn.extract_structured_note_json(
+                repaired, fallback_title=source.title or "视频笔记", default_style=note_style
+            )
+        if doc is not None:
+            return doc
+        # Deterministic structured fallback so valid prose is never discarded.
+        fallback_text = cleaned or raw_text.strip()
+        paragraphs = [p.strip() for p in re.split(r"\n{2,}", fallback_text) if p.strip()]
+        blocks = [{"type": "paragraph", "spans": [{"text": p, "emphasis": "plain", "annotation_id": None}]} for p in paragraphs]
+        return sn.normalize_structured_note(
+            {
+                "schema_version": 1,
+                "note_style": note_style,
+                "title": source.title or "视频笔记",
+                "sections": [{
+                    "id": "sec-1",
+                    "title": source.title or "核心笔记",
+                    "level": 2,
+                    "time_ranges": [{"start": int(getattr(source.segment[0], "start", 0))} ] if source.segment else [],
+                    "core_takeaways": [],
+                    "blocks": blocks or [{"type": "paragraph", "spans": [{"text": fallback_text, "emphasis": "plain"}]}],
+                    "annotations": [],
+                    "quiz": None,
+                }],
+            },
+            fallback_title=source.title or "视频笔记",
+            default_style=note_style,
+        )
+
+    def _parse_knowledge_cards(self, raw_text: str, segments: List[TranscriptSegment], title: str) -> list[dict]:
+        sn = self._structured_module()
+        cleaned = sn.strip_reasoning_and_fences(raw_text) if hasattr(sn, 'strip_reasoning_and_fences') else raw_text.strip()
+        obj = sn.extract_json_object(cleaned)
+        if not (isinstance(obj, dict) and isinstance(obj.get("cards"), list)):
+            repaired = self._repair_json_once(cleaned, '格式为 {"cards": [...]}')
+            obj = sn.extract_json_object(repaired)
+        if isinstance(obj, dict) and isinstance(obj.get("cards"), list) and obj["cards"]:
+            return [c for c in obj["cards"] if isinstance(c, dict)]
+        start_s = self._format_time(segments[0].start) if segments else "00:00"
+        end_s = self._format_time(segments[-1].end) if segments else start_s
+        return [{
+            "topic": title or "核心要点",
+            "start": start_s,
+            "end": end_s,
+            "claims": [cleaned or raw_text.strip()],
+        }]
+
+    @staticmethod
+    def _assemble_structured_sections(docs: list[dict], source: GPTSource, note_style: str) -> dict:
+        sn = UniversalGPT._structured_module()
+        combined_sections = []
+        for doc in docs:
+            for sec in doc.get("sections") or []:
+                combined_sections.append(sec)
+        for idx, sec in enumerate(combined_sections, 1):
+            sec["id"] = f"sec-{idx}"
+        return sn.normalize_structured_note(
+            {
+                "schema_version": 1,
+                "note_style": note_style,
+                "title": source.title or (docs[0].get("title") if docs else "视频笔记"),
+                "sections": combined_sections,
+            },
+            fallback_title=source.title or "视频笔记",
+            default_style=note_style,
+        )
+
+    def _consolidate_knowledge_cards(self, partials: list[str], chunks, source: GPTSource,
+                                     checkpoint_key: str | None, source_signature: str | None) -> str:
+        sn = self._structured_module()
+        cards: list[dict] = []
+        for idx, raw in enumerate(partials):
+            segs = chunks[idx].segments if idx < len(chunks) else source.segment
+            cards.extend(self._parse_knowledge_cards(raw, segs, source.title))
+
+        batch_prompt = getattr(prompt_contract, 'KNOWLEDGE_CARD_BATCH_MERGE_INSTRUCTIONS', MERGE_PROMPT)
+        pass2_prompt = getattr(prompt_contract, 'KNOWLEDGE_CONSOLIDATE_PASS2_INSTRUCTIONS', MERGE_PROMPT)
+        max_chars = getattr(self, 'max_merge_text_chars', 24000)
+
+        def build_pass2_messages(card_items: list[dict]) -> list:
+            payload = {
+                "title": source.title or "",
+                "tags": source.tags or "",
+                "extras": source.extras or "",
+                "screenshot_enabled": "screenshot" in (source._format or []),
+                "cards": card_items,
+            }
+            return [{"role": "user", "content": pass2_prompt + "\n\n" + json.dumps(payload, ensure_ascii=False)}]
+
+        # Compress overflowing cards by topic without dropping timestamps before Pass 2 consolidation.
+        serialized = json.dumps(cards, ensure_ascii=False)
+        if len(serialized) > max_chars and len(cards) > 1:
+            card_texts = [json.dumps([c], ensure_ascii=False) for c in cards]
+            chunker = RequestChunker(lambda *_a, **_k: [], self.max_request_bytes, self._estimate_messages_bytes)
+            def batch_msg(items, *_a, **_k):
+                return [{"role": "user", "content": batch_prompt + "\n\n" + "\n".join(items)}]
+            try:
+                groups = chunker.group_texts_by_budget(card_texts, batch_msg, max_text_chars=max_chars)
+            except ValueError:
+                groups = [card_texts]
+            if len(groups) < len(card_texts):
+                merged_cards: list[dict] = []
+                for g_idx, group in enumerate(groups):
+                    if len(group) == 1:
+                        merged_cards.extend(json.loads(group[0]))
+                        continue
+                    try:
+                        self._generation_context = dict(phase='merge', node=f'cards-group-{g_idx}', depth=0)
+                        resp = self._chat_completion_create(batch_msg(group))
+                        text = self._validated_response(resp, '素材整理')
+                        merged_cards.extend(self._parse_knowledge_cards(text, source.segment, source.title))
+                    except IncompleteOutputError:
+                        for raw_card in group:
+                            merged_cards.extend(json.loads(raw_card))
+                cards = merged_cards
+
+        messages = build_pass2_messages(cards)
+        try:
+            self._generation_context = dict(phase='merge', node='knowledge-pass2', depth=0)
+            resp = self._chat_completion_create(messages)
+            raw_doc = self._validated_response(resp, '主题合拢')
+            doc = self._parse_or_fallback_structured(raw_doc, source, "knowledge")
+            return json.dumps(doc, ensure_ascii=False)
+        except IncompleteOutputError:
+            # Split cards deterministically by topic groups so long videos still consolidate without "来源分段 N".
+            by_topic: dict[str, list[dict]] = {}
+            for card in cards:
+                key = str(card.get("topic") or "核心知识").strip()[:16] or "核心知识"
+                by_topic.setdefault(key, []).append(card)
+            buckets: list[list[dict]] = []
+            current: list[dict] = []
+            for topic_cards in by_topic.values():
+                if current and len(json.dumps(current + topic_cards, ensure_ascii=False)) > max_chars // 2:
+                    buckets.append(current)
+                    current = list(topic_cards)
+                else:
+                    current.extend(topic_cards)
+            if current:
+                buckets.append(current)
+            if len(buckets) == 1 and len(cards) > 1:
+                mid = len(cards) // 2
+                buckets = [cards[:mid], cards[mid:]]
+            docs: list[dict] = []
+            for b_idx, bucket in enumerate(buckets):
+                self._generation_context = dict(phase='merge', node=f'knowledge-pass2-bucket-{b_idx}', depth=0)
+                resp = self._chat_completion_create(build_pass2_messages(bucket))
+                raw_doc = self._validated_response(resp, '主题分簇合拢')
+                docs.append(self._parse_or_fallback_structured(raw_doc, source, "knowledge"))
+            combined = self._assemble_structured_sections(docs, source, "knowledge")
+            return json.dumps(combined, ensure_ascii=False)
+
+    def _merge_structured_tutorial(self, partials: list[str], source: GPTSource,
+                                   checkpoint_key: str | None, source_signature: str | None) -> str:
+        docs = [self._parse_or_fallback_structured(p, source, "tutorial") for p in partials]
+        if len(docs) == 1:
+            return json.dumps(docs[0], ensure_ascii=False)
+        merge_inst = getattr(prompt_contract, 'TUTORIAL_STRUCTURED_MERGE_INSTRUCTIONS', MERGE_PROMPT)
+
+        def build_messages(texts, *_args, **_kwargs):
+            return [{"role": "user", "content": merge_inst + "\n\n" + "\n\n---\n\n".join(texts)}]
+
+        merge_chunker = RequestChunker(lambda *_a, **_k: [], self.max_request_bytes, self._estimate_messages_bytes)
+        current_texts = [json.dumps(doc, ensure_ascii=False) for doc in docs]
+        rounds = 0
+        while len(current_texts) > 1:
+            if rounds >= 4 or sum(map(len, current_texts)) > getattr(self, 'max_merge_text_chars', 24000):
+                combined = self._assemble_structured_sections(
+                    [self._parse_or_fallback_structured(t, source, "tutorial") for t in current_texts],
+                    source,
+                    "tutorial",
+                )
+                return json.dumps(combined, ensure_ascii=False)
+            try:
+                groups = merge_chunker.group_texts_by_budget(
+                    current_texts, build_messages, max_text_chars=getattr(self, 'max_merge_text_chars', 24000)
+                )
+            except ValueError:
+                break
+            if len(groups) >= len(current_texts):
+                break
+            rounds += 1
+            next_texts: list[str] = []
+            for group_idx, group in enumerate(groups):
+                if len(group) == 1:
+                    next_texts.append(group[0])
+                    continue
+                try:
+                    self._generation_context = dict(phase='merge', node=f'tutorial-round-{rounds}/group-{group_idx}', depth=0)
+                    resp = self._chat_completion_create(build_messages(group))
+                    merged_raw = self._validated_response(resp, '教程合并')
+                    merged_doc = self._parse_or_fallback_structured(merged_raw, source, "tutorial")
+                    next_texts.append(json.dumps(merged_doc, ensure_ascii=False))
+                except IncompleteOutputError:
+                    self._audit_event('merge_truncation_assembled', **self._generation_context)
+                    rem_texts = next_texts + [t for rem in groups[group_idx:] for t in rem]
+                    combined = self._assemble_structured_sections(
+                        [self._parse_or_fallback_structured(t, source, "tutorial") for t in rem_texts],
+                        source,
+                        "tutorial",
+                    )
+                    return json.dumps(combined, ensure_ascii=False)
+                except Exception:
+                    if checkpoint_key and source_signature:
+                        rem = [t for rem in groups[group_idx:] for t in rem]
+                        self._save_checkpoint(checkpoint_key, source_signature, next_texts + rem, "merge")
+                    raise
+                if checkpoint_key and source_signature:
+                    rem = [t for rem in groups[group_idx + 1:] for t in rem]
+                    self._save_checkpoint(checkpoint_key, source_signature, next_texts + rem, "merge")
+            current_texts = next_texts
+
+        final_docs = [self._parse_or_fallback_structured(t, source, "tutorial") for t in current_texts]
+        if len(final_docs) == 1:
+            return json.dumps(final_docs[0], ensure_ascii=False)
+        return json.dumps(self._assemble_structured_sections(final_docs, source, "tutorial"), ensure_ascii=False)
+
+    def _summarize_structured(self, source: GPTSource) -> str:
+        from app.gpt import prompt_builder as builder_mod
+        note_style = (
+            builder_mod.normalize_note_style(source.style)
+            if callable(getattr(builder_mod, 'normalize_note_style', None))
+            else ('knowledge' if source.style == 'knowledge' else 'tutorial')
+        )
+        checkpoint_key = source.checkpoint_key
+        source_signature = self._build_source_signature(source) if checkpoint_key else None
+
+        def base_builder(segments, image_urls, **kwargs):
+            return self.create_messages(segments, video_img_urls=image_urls, **kwargs)
+
+        chunker = RequestChunker(
+            base_builder, self.max_request_bytes, self._estimate_messages_bytes,
+            getattr(self, 'max_chunk_text_chars', 8000), getattr(self, 'max_chunk_seconds', 600)
+        )
+        chunks = chunker.chunk(
+            source.segment,
+            source.video_img_urls or [],
+            video_image_ranges=getattr(source, 'video_image_ranges', None),
+            title=source.title,
+            tags=source.tags,
+            _format=source._format,
+            style=note_style,
+            extras=source.extras,
+            frame_evidence=getattr(source, 'frame_evidence', None),
+            prompt_mode='structured',
+        )
+
+        is_knowledge_multi = (note_style == 'knowledge' and len(chunks) > 1)
+        prompt_mode = 'knowledge_pass1' if is_knowledge_multi else 'structured'
+
+        def assemble_subcards(sub_results: list[str]) -> str:
+            if not is_knowledge_multi:
+                combined = self._assemble_structured_sections(
+                    [self._parse_or_fallback_structured(r, source, note_style) for r in sub_results],
+                    source,
+                    note_style,
+                )
+                return json.dumps(combined, ensure_ascii=False)
+            cards: list[dict] = []
+            for r in sub_results:
+                cards.extend(self._parse_knowledge_cards(r, source.segment, source.title))
+            return json.dumps({"cards": cards}, ensure_ascii=False)
+
+        partials = []
+        chunk_progress = {}
+        phase = 'summarize'
+        if checkpoint_key and source_signature:
+            checkpoint = self._load_checkpoint(checkpoint_key, source_signature)
+            if checkpoint and isinstance(checkpoint.get("partials"), list):
+                if checkpoint.get('phase') in ('summarize', 'merge') and all(isinstance(t, str) and t.strip() for t in checkpoint['partials']):
+                    partials = checkpoint["partials"]
+                    phase = checkpoint['phase']
+                    if isinstance(checkpoint.get('chunk_progress'), dict):
+                        chunk_progress = checkpoint['chunk_progress']
+
+        if phase == 'merge' and partials:
+            if is_knowledge_multi:
+                result = self._consolidate_knowledge_cards(partials, chunks, source, checkpoint_key, source_signature)
+            else:
+                result = self._merge_structured_tutorial(partials, source, checkpoint_key, source_signature)
+            self._clear_checkpoint(checkpoint_key)
+            return result
+
+        if len(partials) > len(chunks):
+            partials = []
+            chunk_progress = {}
+
+        for chunk_index, chunk in enumerate(chunks[len(partials):], len(partials)):
+            self._chunk_index = chunk_index
+            def save_progress():
+                if checkpoint_key and source_signature:
+                    self._save_checkpoint(checkpoint_key, source_signature, partials, 'summarize', chunk_progress)
+            try:
+                text = self._summarize_chunk(
+                    chunk, source, base_builder, progress=chunk_progress,
+                    save_progress=save_progress, prompt_mode=prompt_mode,
+                    assemble_fn=assemble_subcards,
+                )
+            except Exception:
+                if checkpoint_key and source_signature:
+                    self._save_checkpoint(checkpoint_key, source_signature, partials, "summarize", chunk_progress)
+                raise
+            partials.append(text)
+            chunk_progress = {}
+            if checkpoint_key and source_signature:
+                self._save_checkpoint(checkpoint_key, source_signature, partials, "summarize")
+
+        if len(partials) == 1:
+            doc = self._parse_or_fallback_structured(partials[0], source, note_style)
+            if checkpoint_key:
+                self._clear_checkpoint(checkpoint_key)
+            return json.dumps(doc, ensure_ascii=False)
+
+        if is_knowledge_multi:
+            result = self._consolidate_knowledge_cards(partials, chunks, source, checkpoint_key, source_signature)
+        else:
+            result = self._merge_structured_tutorial(partials, source, checkpoint_key, source_signature)
+        if checkpoint_key:
+            self._clear_checkpoint(checkpoint_key)
+        return result
 
     def summarize(self, source: GPTSource) -> str:
         self.screenshot = source.screenshot
@@ -552,6 +926,8 @@ class UniversalGPT(GPT):
         source.segment = self.ensure_segments_type(source.segment)
         if not source.segment and not source.video_img_urls:
             raise ValueError('没有可总结的转写内容，请先完成音频转写')
+        if getattr(source, 'structured', False):
+            return self._summarize_structured(source)
         checkpoint_key = source.checkpoint_key
         source_signature = self._build_source_signature(source) if checkpoint_key else None
 

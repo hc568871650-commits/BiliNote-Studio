@@ -76,13 +76,20 @@ export default function ReadingOutlineRail({ headings, activeId, storageKey, act
       setHoveredId(group.id)
       show(nearest.button, group.id)
     }}>
-      {groups.map((group, index) => <button key={group.id} type="button" className="reading-outline-rail-marker"
-        aria-label={`跳转分类：${group.title.text}${bookmarks.includes(group.id) ? '（已标重）' : ''}`} aria-current={current?.id === group.id ? 'location' : undefined}
-        onFocus={event => show(event.currentTarget, group.id)}
-        onClick={() => { onJump(group.title.id); hide() }}>
-        <span className={index === center ? 'is-emphasized' : ''} style={{ width: center < 0 ? 7 : [30, 23, 17, 11, 7][Math.min(4, Math.abs(index - center))] }} />
-        {bookmarks.includes(group.id) && <i className="reading-outline-bookmark-dot" aria-hidden="true" />}
-      </button>)}
+      {groups.map((group, index) => {
+        const isCurrent = current?.id === group.id
+        const dist = center < 0 ? 4 : Math.min(3, Math.abs(index - center))
+        const barWidth = center < 0
+          ? (isCurrent ? 16 : 9)
+          : [22, 16, 12, 9][dist]
+        return <button key={group.id} type="button" className="reading-outline-rail-marker"
+          aria-label={`跳转分类：${group.title.text}${bookmarks.includes(group.id) ? '（已标重）' : ''}`} aria-current={isCurrent ? 'location' : undefined}
+          onFocus={event => show(event.currentTarget, group.id)}
+          onClick={() => { onJump(group.title.id); hide() }}>
+          <span className={index === center ? 'is-emphasized' : ''} style={{ width: barWidth }} />
+          {bookmarks.includes(group.id) && <i className="reading-outline-bookmark-dot" aria-hidden="true" />}
+        </button>
+      })}
     </nav>
     {selected && preview && <div className="reading-outline-rail-preview" role="group" aria-label="分类预览" style={{ top: preview.top }} onMouseEnter={cancelClose} onMouseLeave={hide} onFocus={cancelClose}>
       <div className="reading-outline-preview-heading"><strong>{selected.title.text}</strong>

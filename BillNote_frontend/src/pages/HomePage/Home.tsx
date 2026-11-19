@@ -44,14 +44,22 @@ export const HomePage: FC = () => {
   }, [setCurrentTask])
 
   const currentTask = tasks.find(t => t.id === currentTaskId)
+  const syncRouteView = useCallback((nextView: 'create' | 'read') => {
+    const search = new URLSearchParams(location.search)
+    if (search.get('view') === nextView) return
+    search.set('view', nextView)
+    navigate({ pathname: '/', search: `?${search}` }, { replace: true })
+  }, [location.search, navigate])
   const createNote = () => {
     setView('create')
+    syncRouteView('create')
   }
   const findRecentNote = useCallback(() => resolveReadableNote(tasks, null, recentNoteId.current), [tasks])
   const openNotes = () => {
     const note = tasks.find(task => task.id === currentTaskId) || resolveReadableNote(tasks, null, recentNoteId.current)
     setCurrentTask(note?.id || null)
     setView('notes')
+    syncRouteView('read')
     window.dispatchEvent(new Event('bilinote-refresh-task'))
   }
 
@@ -104,13 +112,14 @@ export const HomePage: FC = () => {
       onCreate={createNote}
       onRead={openNotes}
       onConfigure={() => setView('configure')}
-      NoteForm={<><div hidden={view === 'configure'}><NoteForm creating onSubmitted={submitted} /></div>{view === 'configure' && <NoteForm onSubmitted={submitted} />}</>}
+      NoteForm={<><div hidden={view === 'configure'}><NoteForm creating onSubmitted={submitted} /></div>{null}</>}
+      ConfigureForm={<NoteForm onSubmitted={submitted} />}
       Preview={currentTask ? <MarkdownViewer status={status} /> : <div className="workspace-empty">
         <h1>暂时没有笔记</h1>
         <p>点击左上角的新建笔记图标，整理你的第一篇视频笔记。</p>
         <button type="button" className="workspace-toolbar-button" onClick={createNote}>创建第一篇笔记</button>
       </div>}
-      History={onCollapse => <History onCollapse={onCollapse} onSelectNote={() => { setView('notes'); window.dispatchEvent(new Event('bilinote-refresh-task')) }} />}
+      History={onCollapse => <History onCollapse={onCollapse} onSelectNote={() => { setView('notes'); syncRouteView('read'); window.dispatchEvent(new Event('bilinote-refresh-task')) }} />}
     />
   )
 }

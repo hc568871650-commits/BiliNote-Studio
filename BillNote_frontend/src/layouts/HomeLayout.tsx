@@ -1,14 +1,16 @@
-import AccentSettings from '@/components/AccentSettings'
-import { type ReactNode, useLayoutEffect, useRef, useState } from 'react'
-import { BookOpen, PanelLeftOpen, Settings2, SquarePen, SlidersHorizontal, BotMessageSquare } from 'lucide-react'
-import { Link, useLocation } from 'react-router-dom'
+import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { SlidersHorizontal } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
 import { resolveSidebarTransition, type SidebarSnapshot } from '@/utils/sidebarTransition'
+import WorkspaceRail from './WorkspaceRail'
+import { WorkspaceTopbarContext } from './WorkspaceTopbarContext'
+import './topbar.css'
 import './workspace.css'
-import { isQuickEdition } from '@/utils/edition'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 
 interface Props {
   NoteForm: ReactNode
+  ConfigureForm?: ReactNode
   Preview: ReactNode
   History: (onCollapse: () => void) => ReactNode
   composing: boolean
@@ -19,7 +21,7 @@ interface Props {
   onConfigure: () => void
 }
 
-export default function HomeLayout({ NoteForm, Preview, History, composing, hasTask, title, onCreate, onRead, onConfigure }: Props) {
+export default function HomeLayout({ NoteForm, ConfigureForm, Preview, History, composing, hasTask, title, onCreate, onRead, onConfigure }: Props) {
   const location = useLocation()
   const previousView = useRef<SidebarSnapshot | null>(null)
   const [createExpanded, setCreateExpanded] = useState(false)
@@ -39,15 +41,53 @@ export default function HomeLayout({ NoteForm, Preview, History, composing, hasT
   const { creating, expanded, resetCreate, animate } = transition
   const sidebarRef = useRef<HTMLElement>(null)
   const expandRef = useRef<HTMLButtonElement>(null)
-  const setExpanded = (open: boolean) => {
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const [sidebarOverlaps, setSidebarOverlaps] = useState(false)
+
+  const setExpanded = useCallback((open: boolean) => {
     setSidebarAnimated(true)
-    if (!open && sidebarRef.current?.contains(document.activeElement)) requestAnimationFrame(() => expandRef.current?.focus())
+    if (open) window.dispatchEvent(new Event('bilinote-close-outline'))
+    if (!open && sidebarRef.current?.contains(document.activeElement)) {
+      requestAnimationFrame(() => expandRef.current?.focus())
+    }
     if (creating) setCreateExpanded(open)
     else {
       setReadingExpanded(open)
       try { localStorage.setItem('bilinote-reading-sidebar-v1', open ? 'open' : 'closed') } catch { /* Session state still works. */ }
     }
-  }
+  }, [creating])
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 760px)')
+    const updateOverlap = () => setSidebarOverlaps(media.matches)
+    updateOverlap()
+    media.addEventListener('change', updateOverlap)
+    return () => media.removeEventListener('change', updateOverlap)
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
+      const hasModalOrFocusReader = Boolean(
+        document.querySelector('[role="dialog"], .fixed.z-40[aria-label="笔记阅读器"]'),
+      )
+      if (!event.altKey && !event.shiftKey && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'b') {
+        if (hasModalOrFocusReader) return
+        event.preventDefault()
+        setExpanded(!expanded)
+        return
+      }
+      if (event.key === 'Escape' && expanded) {
+        if (hasModalOrFocusReader || document.querySelector('[data-radix-popper-content-wrapper], .reader-display-menu')) return
+        if (sidebarOverlaps || sidebarRef.current?.contains(document.activeElement)) {
+          setExpanded(false)
+        }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [expanded, sidebarOverlaps, setExpanded])
+
   // Restore hidden routes before paint. Visible view changes animate in either
   // direction; manual toggles retain their own transition setting.
   useLayoutEffect(() => {
@@ -55,42 +95,79 @@ export default function HomeLayout({ NoteForm, Preview, History, composing, hasT
     if (resetCreate) setCreateExpanded(false)
     previousView.current = transition.snapshot
   }, [animate, resetCreate, transition.snapshot])
-  const closeMobileSidebar = () => {
-    if (window.matchMedia('(max-width: 760px)').matches) setExpanded(false)
+
+  const [leftSlot, setLeftSlot] = useState<HTMLDivElement | null>(null)
+  const [rightSlot, setRightSlot] = useState<HTMLDivElement | null>(null)
+  const [hasTopbarOwner, setHasTopbarOwner] = useState(false)
+  const previewActive = !(composing && !hasTask)
+  const closeSidebar = useCallback(() => setExpanded(false), [setExpanded])
+  const topbarContext = useMemo(
+    () => ({
+      active: previewActive,
+      leftSlot,
+      rightSlot,
+      onConfigure: hasTask ? onConfigure : undefined,
+      closeSidebar,
+      setHasTopbarOwner,
+    }),
+    [previewActive, leftSlot, rightSlot, hasTask, onConfigure, closeSidebar],
+  )
+
+  const handleCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!expanded || !sidebarOverlaps) return
+    const target = event.target as Element | null
+    if (target && !target.closest('[role="dialog"], [data-radix-popper-content-wrapper]')) {
+      setExpanded(false)
+    }
   }
-  return <div className={`workspace ${sidebarAnimated ? 'workspace--sidebar-animate' : ''} ${!expanded ? 'workspace--collapsed' : ''} ${expanded ? 'workspace--notes-open' : ''}`}>
-    <nav className="workspace-rail" aria-label="主导航">
-      <button className={`workspace-icon ${composing && !hasTask ? 'workspace-icon--active' : ''}`} aria-pressed={composing && !hasTask} title="新建笔记" aria-label="新建笔记" onClick={() => { setSidebarAnimated(location.pathname === '/' && expanded); setCreateExpanded(false); onCreate() }}><SquarePen size={19} /></button>
-      <button className={`workspace-icon ${!composing || hasTask ? 'workspace-icon--active' : ''}`} aria-pressed={!composing || hasTask} title="笔记库" aria-label="笔记库" onClick={() => { onRead() }}><BookOpen size={19} /></button>
-      {!isQuickEdition && <Link className="workspace-icon" to="/organizer" title="资料库助手" aria-label="资料库助手"><BotMessageSquare size={19} /></Link>}
-      <div className="flex-1" />
-      <AccentSettings rail />
-      <Link className="workspace-icon" to="/settings" title="设置" aria-label="设置"><Settings2 size={19} /></Link>
-    </nav>
+
+  return <WorkspaceTopbarContext.Provider value={topbarContext}>
+    <div
+      className={`workspace ${sidebarAnimated ? 'workspace--sidebar-animate' : ''} ${!expanded ? 'workspace--collapsed' : ''} ${expanded ? 'workspace--notes-open' : ''}`}
+      data-sidebar-overlaps={sidebarOverlaps ? 'true' : undefined}
+    >
+    <WorkspaceRail
+      active={composing && !hasTask ? 'create' : 'library'}
+      libraryExpanded={expanded}
+      libraryButtonRef={expandRef}
+      onCreateClick={() => {
+        setSidebarAnimated(location.pathname === '/' && expanded)
+        setCreateExpanded(false)
+        onCreate()
+      }}
+      onLibraryClick={() => {
+        if (!composing) setExpanded(!expanded)
+        else {
+          onRead()
+          setExpanded(true)
+        }
+      }}
+    />
     <div className="workspace-frame">
     <aside ref={sidebarRef} id="workspace-note-sidebar" className="workspace-sidebar" aria-label="笔记导航" aria-hidden={!expanded} inert={!expanded}>
       <div className="workspace-sidebar-inner">
-      <div className="workspace-library" onClick={event => { if ((event.target as HTMLElement).closest('[data-note-select]')) closeMobileSidebar() }}>{History(() => setExpanded(false))}</div>
+        <div className="workspace-library" onClick={event => { if ((event.target as HTMLElement).closest('[data-note-select], [data-search-hit]') && sidebarOverlaps) setExpanded(false) }}>{History(closeSidebar)}</div>
       </div>
     </aside>
-    <button className="workspace-scrim" aria-label="关闭笔记导航" aria-hidden={!expanded} tabIndex={-1} disabled={!expanded} onClick={() => setExpanded(false)} />
     <main className="workspace-main">
       <header className="workspace-topbar">
-        <button ref={expandRef} className="workspace-icon workspace-expand" title="展开笔记栏" aria-label="展开笔记栏" aria-expanded={expanded} aria-controls="workspace-note-sidebar" onClick={() => { setExpanded(true) }}><PanelLeftOpen size={18} /></button>
-        <div className="workspace-tab">{composing && !hasTask && <SquarePen size={15} />}<span>{composing && !hasTask ? '新建笔记' : title}</span></div>
-        <div className="flex-1" />
-        {hasTask && <button className="workspace-toolbar-button" onClick={onConfigure}><SlidersHorizontal size={15} />生成设置</button>}
+        <div className="workspace-tab" title={composing && !hasTask ? '新建笔记' : title}><span>{composing && !hasTask ? '新建笔记' : title}</span></div>
+        <div ref={setLeftSlot} className="workspace-topbar-left" />
+        <div ref={setRightSlot} className="workspace-topbar-right" />
+        {previewActive && hasTask && !hasTopbarOwner && <button type="button" className="workspace-toolbar-button ml-auto" onClick={onConfigure}><SlidersHorizontal size={15} strokeWidth={1.6} /><span>生成设置</span></button>}
       </header>
-      {!hasTask && <div className={composing ? 'workspace-compose' : 'hidden'}>
-        <div className="workspace-compose-inner">
-          <div className="workspace-compose-heading"><h1>{hasTask ? '生成新的笔记版本' : '新建视频笔记'}</h1><p>{hasTask ? '调整处理方式，保留已有版本。' : '添加视频，选择需要保留的内容，开始生成。'}</p></div>
-          <div className="workspace-composer">{NoteForm}</div>
-          <p className="workspace-compose-hint">支持哔哩哔哩、YouTube、快手及本地视频</p>
-        </div>
-      </div>}
-      {hasTask && <Dialog open={composing && location.pathname === '/'} onOpenChange={open => { if (!open) onRead() }}><DialogContent className="note-generation-window"><DialogHeader><DialogTitle>生成设置</DialogTitle><DialogDescription className="truncate">{title} · 生成新版本，保留已有笔记</DialogDescription></DialogHeader><div className="note-generation-window-body">{NoteForm}</div></DialogContent></Dialog>}
-      <div className={composing && !hasTask ? 'hidden' : 'workspace-preview'}>{Preview}</div>
+      <div ref={bodyRef} className="workspace-body">
+        {!hasTask && <div className={composing ? 'workspace-compose' : 'hidden'} onPointerDown={handleCanvasPointerDown}>
+          <div className="workspace-compose-inner">
+            <div className="workspace-compose-heading"><h1>{hasTask ? '生成新的笔记版本' : '新建视频笔记'}</h1></div>
+            <div className="workspace-composer">{NoteForm}</div>
+          </div>
+        </div>}
+        <div className={composing && !hasTask ? 'hidden' : 'workspace-preview'} onPointerDown={handleCanvasPointerDown}>{Preview}</div>
+      </div>
+      {hasTask && <Dialog open={composing && location.pathname === '/'} onOpenChange={open => { if (!open) onRead() }}><DialogContent className="note-generation-window"><DialogHeader><DialogTitle>生成设置</DialogTitle><DialogDescription className="truncate">{title}</DialogDescription></DialogHeader><div className="note-generation-window-body">{ConfigureForm ?? NoteForm}</div></DialogContent></Dialog>}
     </main>
     </div>
   </div>
+  </WorkspaceTopbarContext.Provider>
 }

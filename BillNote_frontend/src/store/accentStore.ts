@@ -2,13 +2,13 @@ import { create } from 'zustand'
 import { normalizeHex } from '@/utils/accentColor'
 
 export const accentColors = [
-  { id: 'blue', name: '雾蓝', light: '#45679e', dark: '#9ab6e4' },
-  { id: 'slate', name: 'Codex', light: '#333333', dark: '#ffffff' },
-  { id: 'violet', name: '紫罗兰', light: '#7950b0', dark: '#c6a5ed' },
-  { id: 'green', name: '森林绿', light: '#34734a', dark: '#99cca7' },
-  { id: 'teal', name: '青碧', light: '#247477', dark: '#8fced0' },
-  { id: 'orange', name: '琥珀', light: '#9a5b1b', dark: '#e9bd82' },
-  { id: 'rose', name: '玫瑰', light: '#a34467', dark: '#e6a1ba' },
+  { id: 'slate', name: '曜石', light: '#1f2328', dark: '#f0f3f6' },
+  { id: 'blue', name: '晴空', light: '#1a62d6', dark: '#6cb6ff' },
+  { id: 'violet', name: '靛紫', light: '#6344d4', dark: '#b49bff' },
+  { id: 'teal', name: '青碧', light: '#0d7480', dark: '#56d4dd' },
+  { id: 'green', name: '翠绿', light: '#1b7f4b', dark: '#5cd68d' },
+  { id: 'orange', name: '琥珀', light: '#c2500a', dark: '#ff9f43' },
+  { id: 'rose', name: '珊瑚', light: '#d12f5d', dark: '#ff7aa2' },
 ] as const
 export type AccentColor = typeof accentColors[number]['id'] | 'custom'
 const KEY = 'bilinote-accent-v1'
@@ -23,8 +23,8 @@ function initialAccent(): AccentColor {
 function initialCustom() {
   try {
     if (localStorage.getItem(KEY) === 'indigo') return '#5058b8'
-    return normalizeHex(localStorage.getItem(CUSTOM_KEY) || '') || '#45679e'
-  } catch { return '#45679e' }
+    return normalizeHex(localStorage.getItem(CUSTOM_KEY) || '') || '#1a62d6'
+  } catch { return '#1a62d6' }
 }
 export const useAccentStore = create<{ accent: AccentColor; customColor: string; setAccent: (accent: AccentColor) => void; setCustomColor: (hex: string) => void }>((set, get) => ({
   accent: initialAccent(),

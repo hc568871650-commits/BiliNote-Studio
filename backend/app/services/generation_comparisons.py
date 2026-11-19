@@ -60,6 +60,7 @@ def list_runs(task_id):
                 # Lists carry metadata only; full result bodies are loaded on selection.
                 for variant in run['variants']:
                     variant.pop('markdown', None)
+                    variant.pop('structured', None)
                 result.append(run)
         except (ValueError, OSError):
             continue
@@ -238,8 +239,17 @@ def execute_run(run_id):
                     title=snapshot['title'], tags=snapshot['tags'], style=snapshot['style'],
                     extras=snapshot['extras'], _format=snapshot['format'],
                     video_img_urls=snapshot['images'], video_image_ranges=snapshot['ranges'],
-                    frame_evidence=snapshot['frames'], checkpoint_key=None)
-                variant['markdown'] = gpt.summarize(source)
+                    frame_evidence=snapshot['frames'], checkpoint_key=None, structured=True)
+                raw_output = gpt.summarize(source)
+                from app.models.structured_note import extract_structured_note_json, serialize_structured_note_to_markdown
+                structured_doc = extract_structured_note_json(
+                    raw_output, fallback_title=snapshot['title'] or '对比结果', default_style=snapshot['style'] or 'tutorial'
+                )
+                if structured_doc is not None:
+                    variant['structured'] = structured_doc
+                    variant['markdown'] = serialize_structured_note_to_markdown(structured_doc, include_source_link=False)
+                else:
+                    variant['markdown'] = raw_output
                 variant['status'] = 'completed'
                 notes._atomic_text(folder(run_id) / f'variant-{index}.md', variant['markdown'])
                 recorder.finish('completed')

@@ -2,7 +2,8 @@ import { useTaskStore } from '@/store/taskStore'
 import { useFolderStore, ALL_FOLDER_ID, DEFAULT_FOLDER_ID } from '@/store/folderStore'
 import { useLibraryStore, defaultLibraryEntry } from '@/store/libraryStore'
 import { cn } from '@/lib/utils.ts'
-import { Archive, CheckSquare, FolderInput, FolderOpen, RotateCcw, Square, Trash2, Star, Pin, Pencil, X, Search, SlidersHorizontal, Download, Info } from 'lucide-react'
+import { Archive, CheckSquare, FolderInput, FolderOpen, RotateCcw, Square, Trash2, Star, Pin, Pencil, X, Download, Info } from 'lucide-react'
+import { AnimatedFilterSlidersIcon } from '@/components/AnimatedRailIcons'
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { Button } from '@/components/ui/button.tsx'
 import { FC, useEffect, useMemo, useState } from 'react'
@@ -42,6 +43,7 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId, archived, fol
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [filters, setFilters] = useState<LibraryFilters>(defaultLibraryFilters)
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [moveOpen, setMoveOpen] = useState(false)
   const [moveBusy, setMoveBusy] = useState(false)
@@ -90,26 +92,44 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId, archived, fol
   const libraryReady = libraryLoadState === 'ready' && !libraryMutating
 
   return <div className="flex h-full min-h-0 flex-col gap-1.5">
-    <LibrarySearch onSelect={onSelect} />
+    <LibrarySearch
+      onSelect={onSelect}
+      trailing={!searching ? (
+        <button
+          type="button"
+          className={cn('library-filter-toggle', filtersOpen && 'is-open')}
+          aria-expanded={filtersOpen}
+          aria-controls="library-filter-drawer"
+          aria-label="筛选与排序"
+          title="筛选与排序"
+          onClick={() => setFiltersOpen(open => !open)}
+        >
+          <AnimatedFilterSlidersIcon open={filtersOpen} className="h-3.5 w-3.5" />
+          <span className="library-filter-dot" data-active={hasActiveFilters} aria-hidden={!hasActiveFilters} />
+        </button>
+      ) : undefined}
+    />
     {!searching && <>
-    <details className="shrink-0 rounded-md">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md px-1 py-1 text-xs text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"><SlidersHorizontal className="h-3 w-3" />筛选与排序{hasActiveFilters && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" aria-label="已启用筛选" />}</summary>
-    <div className="flex shrink-0 items-center gap-2 rounded-md border border-input bg-background px-2 focus-within:ring-1 focus-within:ring-ring">
-      <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <input type="search" aria-label="筛选标题标签备注" placeholder="标题、标签、备注…" className="select-text h-8 min-w-0 flex-1 bg-transparent text-xs outline-none" value={filters.search} onChange={event => setFilters(current => ({ ...current, search: event.target.value }))} />
-    </div>
-      <div className="flex flex-wrap items-center gap-1.5 px-1 py-1">
-      <ChoiceSelect label="阅读状态筛选" className="choice-compact" menuClassName="choice-menu-compact" disabled={!libraryReady} value={filters.learningStatus} onChange={value => setFilters(current => ({ ...current, learningStatus: value as LibraryFilters['learningStatus'] }))} options={[{ value: 'all', label: '全部阅读' }, { value: 'unread', label: readingLabels.unread }, { value: 'learning', label: readingLabels.learning }, { value: 'done', label: readingLabels.done }]} />
-      <ChoiceSelect label="任务状态筛选" className="choice-compact" menuClassName="choice-menu-compact" value={filters.taskStatus} onChange={value => setFilters(current => ({ ...current, taskStatus: value as LibraryFilters['taskStatus'] }))} options={[{ value: 'all', label: '全部任务' }, { value: 'complete', label: '生成完成' }, { value: 'pending', label: '进行中' }, { value: 'failed', label: '失败' }]} />
-      <ChoiceSelect label="排序" className="choice-compact" menuClassName="choice-menu-compact" value={filters.sort} onChange={value => setFilters(current => ({ ...current, sort: value as LibraryFilters['sort'] }))} options={[{ value: 'newest', label: '最新' }, { value: 'oldest', label: '最旧' }, { value: 'title', label: '标题' }]} />
-      <Button type="button" size="sm" className="h-7 px-2 text-xs" variant={filters.favoriteOnly ? 'default' : 'outline'} disabled={!libraryReady} aria-pressed={filters.favoriteOnly} title="只看收藏" onClick={() => setFilters(current => ({ ...current, favoriteOnly: !current.favoriteOnly }))}><Star className="h-3 w-3" />收藏</Button>
-      <Button type="button" size="sm" className="h-7 w-7 p-0" variant="ghost" title="清空筛选" aria-label="清空筛选" onClick={() => setFilters(defaultLibraryFilters)}><X className="h-3.5 w-3.5" /></Button>
+    <div
+      id="library-filter-drawer"
+      className={cn('library-filter-collapse shrink-0', filtersOpen && 'is-open')}
+      aria-hidden={!filtersOpen}
+      inert={!filtersOpen}
+    >
+      <div className="library-filter-clip">
+        <div className="library-filter-panel">
+          <ChoiceSelect label="阅读状态筛选" className="choice-compact" menuClassName="choice-menu-compact" disabled={!libraryReady} value={filters.learningStatus} onChange={value => setFilters(current => ({ ...current, learningStatus: value as LibraryFilters['learningStatus'] }))} options={[{ value: 'all', label: '全部阅读' }, { value: 'unread', label: readingLabels.unread }, { value: 'learning', label: readingLabels.learning }, { value: 'done', label: readingLabels.done }]} />
+          <ChoiceSelect label="任务状态筛选" className="choice-compact" menuClassName="choice-menu-compact" value={filters.taskStatus} onChange={value => setFilters(current => ({ ...current, taskStatus: value as LibraryFilters['taskStatus'] }))} options={[{ value: 'all', label: '全部任务' }, { value: 'complete', label: '生成完成' }, { value: 'pending', label: '进行中' }, { value: 'failed', label: '失败' }]} />
+          <ChoiceSelect label="排序" className="choice-compact" menuClassName="choice-menu-compact" value={filters.sort} onChange={value => setFilters(current => ({ ...current, sort: value as LibraryFilters['sort'] }))} options={[{ value: 'newest', label: '最新' }, { value: 'oldest', label: '最旧' }, { value: 'title', label: '标题' }]} />
+          <Button type="button" size="sm" className="h-7 px-2 text-xs" variant={filters.favoriteOnly ? 'default' : 'outline'} disabled={!libraryReady} aria-pressed={filters.favoriteOnly} title="只看收藏" onClick={() => setFilters(current => ({ ...current, favoriteOnly: !current.favoriteOnly }))}><Star className={cn('library-filter-star h-3 w-3', filters.favoriteOnly && 'is-active')} />收藏</Button>
+          {hasActiveFilters && <Button type="button" size="sm" className="h-7 w-7 p-0" variant="ghost" title="清空筛选" aria-label="清空筛选" onClick={() => setFilters(defaultLibraryFilters)}><X className="h-3.5 w-3.5" /></Button>}
+        </div>
       </div>
-    </details>
-    <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
+    </div>
+    <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-1.5 text-[11px] text-muted-foreground">
       <span className="mr-auto">{filteredTasks.length} 篇{selectedIds.length > 0 && ` · 已选 ${selectedIds.length}`}</span>
       {libraryLoadState === 'error' && <span className="flex w-full items-center gap-1 text-destructive">{libraryError}<Button size="sm" className="h-6 px-2 text-xs" variant="outline" disabled={libraryMutating} onClick={() => void loadLibrary().catch(() => undefined)}>重试</Button></span>}
-      {filteredTasks.length > 0 && <Button type="button" size="sm" className="h-6 px-1 text-[11px]" variant="ghost" onClick={selectedIds.length === filteredTasks.length ? () => setSelectedIds([]) : () => setSelectedIds(filteredTasks.map(task => task.id))}>{selectedIds.length === filteredTasks.length ? '取消全选' : '全选'}</Button>}
+      {filteredTasks.length > 0 && <Button type="button" size="sm" className="h-7 px-2 text-[11px]" variant="ghost" onClick={selectedIds.length === filteredTasks.length ? () => setSelectedIds([]) : () => setSelectedIds(filteredTasks.map(task => task.id))}>{selectedIds.length === filteredTasks.length ? '取消全选' : '全选'}</Button>}
       {selectedIds.length > 0 && <>
         <Button type="button" size="sm" className="h-6 px-2 text-xs" variant="outline" disabled={!foldersReady} onClick={() => setMoveOpen(true)}><FolderInput className="h-3 w-3" />移动</Button>
         <ChoiceSelect label="批量阅读状态" className="choice-compact" menuClassName="choice-menu-compact" title={selectedReadableIds.length ? '仅更新选中且有正文的笔记' : '选中的任务暂无正文，不能设置阅读状态'} disabled={!libraryReady || !selectedReadableIds.length} value="" displayValue="阅读状态" onChange={value => { if (value && selectedReadableIds.length) void updateMetadata(selectedReadableIds, { learning_status: value as LearningStatus }, '阅读状态已更新') }} options={[{ value: 'unread', label: readingLabels.unread }, { value: 'learning', label: readingLabels.learning }, { value: 'done', label: readingLabels.done }]} />
@@ -120,7 +140,7 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId, archived, fol
     {filteredTasks.length === 0 ? <div className="py-6 text-center"><p className="text-xs text-muted-foreground">{hasActiveFilters ? '没有匹配的笔记' : archived ? '归档区暂无笔记' : '此文件夹暂无笔记'}</p></div> : <div className="flex flex-col gap-0.5">{filteredTasks.map(task => {
       const entry = entries[task.id] || defaultLibraryEntry()
       const title = generationTitle(task)
-      return <div key={task.id} data-note-current={selectedId === task.id} className={cn('group relative rounded-md px-1.5 py-1 transition-colors hover:bg-accent/60', selectedId === task.id && 'note-row-current')}>
+      return <div key={task.id} data-note-current={selectedId === task.id} className={cn('group relative rounded-[10px] px-2 py-1.5 transition-[background-color,box-shadow] duration-150 hover:bg-[var(--surface-hover)]', selectedId === task.id && 'note-row-current')}>
         <div className="flex min-w-0 items-center gap-1.5">
           <button type="button" aria-label={`${selectedIds.includes(task.id) ? '取消选择' : '选择'}：${title}`} aria-pressed={selectedIds.includes(task.id)} className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring data-[selected=true]:opacity-100" data-selected={selectedIds.includes(task.id)} onClick={() => toggleSelected(task.id)}>{selectedIds.includes(task.id) ? <CheckSquare className="h-3.5 w-3.5 text-primary" /> : <Square className="h-3.5 w-3.5" />}</button>
           <button type="button" data-note-select title={title} aria-current={selectedId === task.id ? 'true' : undefined} onClick={() => onSelect(task.id)} className="min-w-0 flex-1 rounded py-0.5 pr-7 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">

@@ -18,7 +18,7 @@ export default function Appearance() {
       <div className="settings-row"><div><h2>模式</h2></div><ThemeModePicker /></div>
     </section>
     <section className="settings-card settings-card-spaced">
-      <div className="settings-row"><div><h2>强调色</h2><p>用于重点标记、链接与思维导图</p></div><AccentColorPicker /></div>
+      <div className="settings-row"><div><h2>强调色</h2><p>用于重点标记、批注与思维导图</p></div><AccentColorPicker /></div>
       <div className="settings-row"><div><h2>字体</h2></div><ChoiceSelect label="界面字体" value={preferences.font} onChange={value => preferences.update({font:value as typeof preferences.font})} options={[{value:'system',label:'系统'},{value:'yahei',label:'微软雅黑'},{value:'segoe',label:'Segoe UI'}]} /></div>
       <div className="settings-row"><div><h2>背景</h2></div><span className="settings-color-value"><i className="surface-sample" />{resolvedTheme === 'dark' ? '#181818' : '#FFFFFF'}</span></div>
     </section>
@@ -29,6 +29,5 @@ export default function Appearance() {
       <div className="settings-row"><div><h2>代码字号</h2></div><ChoiceSelect label="代码字号" value={String(preferences.codeSize)} onChange={value => preferences.update({codeSize:Number(value)})} options={[11,12,13,14,15,16,18].map(size => ({value:String(size),label:`${size} px`}))} /></div>
       <div className="settings-row"><div><h2>减少动态效果</h2></div><Switch aria-label="减少动态效果" checked={preferences.reducedMotion} onCheckedChange={value => preferences.update({reducedMotion:value})} /></div>
     </section>
-    <p className="settings-footnote">修改立即生效并自动保存。笔记正文字号仍可在阅读工具栏独立调整。</p>
   </article>
 }

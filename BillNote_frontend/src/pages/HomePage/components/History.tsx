@@ -3,7 +3,6 @@ import FolderSidebar from '@/pages/HomePage/components/FolderSidebar.tsx'
 import { useTaskStore } from '@/store/taskStore'
 import { useFolderStore } from '@/store/folderStore'
 import { useLibraryViewStore } from '@/store/libraryViewStore'
-import { PanelLeftClose } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
@@ -11,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 
 interface HistoryProps { onSelectNote?: (taskId: string) => void; onCollapse?: () => void }
 
-const History = ({ onSelectNote, onCollapse }: HistoryProps) => {
+const History = ({ onSelectNote }: HistoryProps) => {
   const archived = useLibraryViewStore(state => state.archived)
   const setArchived = useLibraryViewStore(state => state.setArchived)
   const [folderDialog, setFolderDialog] = useState<{ mode: 'create' | 'rename' | 'delete', id?: string } | null>(null)
@@ -45,10 +44,10 @@ const History = ({ onSelectNote, onCollapse }: HistoryProps) => {
     } catch (error) { console.error('文件夹操作失败', error) } finally { setBusy(false) }
   }
   const foldersReady = loadState === 'ready'
-  return <div className="flex h-full min-h-0 w-full flex-col gap-2 px-2 py-2">
-    <header className="workspace-library-heading"><h2>笔记库</h2><span className="workspace-library-count">{tasks.length}</span>{onCollapse && <button type="button" className="workspace-icon" title="收起笔记栏" aria-label="收起笔记栏" onClick={onCollapse}><PanelLeftClose size={17} /></button>}</header>
-    <div className="flex shrink-0 border-b border-border" role="tablist" aria-label="笔记分类">
-      {([false, true] as const).map(value => <button key={String(value)} type="button" role="tab" aria-selected={archived === value} onClick={() => setArchived(value)} className={`min-w-0 flex-1 border-b-2 px-1 py-1.5 text-xs ${archived === value ? 'border-primary font-medium text-primary' : 'border-transparent text-muted-foreground'}`}>{value ? '归档区' : '正常笔记'}</button>)}
+  return <div className="flex h-full min-h-0 w-full flex-col gap-2 p-2.5">
+    <div className="codex-segmented shrink-0" role="tablist" aria-label="笔记分类" data-active-index={archived ? 1 : 0}>
+      <span className="codex-segmented-thumb" aria-hidden="true" />
+      {([false, true] as const).map(value => <button key={String(value)} type="button" role="tab" aria-selected={archived === value} onClick={() => setArchived(value)} className={`codex-segmented-tab min-w-0 flex-1 text-xs ${archived === value ? 'is-active' : ''}`}>{value ? '归档区' : '正常笔记'}</button>)}
     </div>
     {loadState === 'error' ? <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"><p className="text-muted-foreground">{errorMessage}</p><Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => void loadFolders().catch(() => undefined)}>重试</Button></div> :
       <div className="flex min-h-0 flex-1 flex-col gap-2">

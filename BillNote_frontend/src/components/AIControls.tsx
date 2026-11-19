@@ -14,22 +14,18 @@ export default function AIControls({ modelName, modelPicker, value, context, con
   const percent = Math.min(100, Math.ceil(count / limit * 100))
   const estimated = !context || context.estimated || Boolean(draft)
   return <div className="ai-controls">
-    <Tooltip>
+    {percent >= 50 && <Tooltip>
       <TooltipTrigger asChild>
-        <button type="button" className="ai-context-control" aria-label={`上下文输入预算：已用 ${percent}%，剩余 ${100 - percent}%，${count.toLocaleString()} tokens，共 ${tokens(limit)}`}>
-          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-            <circle cx="12" cy="12" r="9" className="ai-context-track" />
-            <circle cx="12" cy="12" r="9" pathLength="100" strokeDasharray={`${percent} ${100 - percent}`} strokeDashoffset="25" className={percent >= 90 ? 'ai-context-fill is-full' : 'ai-context-fill'} />
-          </svg>
+        <button type="button" className={percent >= 85 ? 'ai-context-pill is-warn' : 'ai-context-pill'} aria-label={`上下文输入预算：已用 ${percent}%，剩余 ${100 - percent}%，${count.toLocaleString()} tokens，共 ${tokens(limit)}`}>
+          {percent}%
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" align="end" sideOffset={8} className="ai-context-tooltip">
-        <span>上下文输入预算：</span>
+        <span>上下文预算</span>
         <p>{percent}% 已用（剩余 {100 - percent}%）</p>
-        <p>已用{estimated ? '约 ' : ' '}{tokens(count)}，共 {tokens(limit)}</p>
-        {contextBudget && <p>{contextBudget.source === 'unknown' ? '模型容量未核实，采用保守值' : '模型容量为手动声明'}</p>}
+        <p>已用{estimated ? '约 ' : ' '}{tokens(count)} / {tokens(limit)}</p>
       </TooltipContent>
-    </Tooltip>
+    </Tooltip>}
     {modelPicker}
   </div>
 }

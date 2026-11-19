@@ -1,0 +1,1168 @@
+.structured-note-shell {
+  --app-accent: var(--reading-accent, var(--control-active, #1a62d6));
+  --app-accent-spot: var(--reading-spot, var(--app-accent));
+  --app-accent-soft: color-mix(in oklab, var(--app-accent) 11%, transparent);
+  --app-accent-mid: color-mix(in oklab, var(--app-accent) 26%, transparent);
+  --app-accent-wave: color-mix(in oklab, var(--app-accent) 72%, transparent);
+  --ui-bg: #fdfdfd;
+  --ui-dim: #eef0f4;
+  --ui-ink: #1d1d1f;
+  --ui-muted: #5a5a60;
+  --ui-ok: #24a148;
+  --ui-err: #e5352b;
+  --ui-err-soft: rgba(255, 59, 48, 0.1);
+  --ui-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--ui-ink);
+  font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', 'Microsoft YaHei', sans-serif);
+  font-size: 1em;
+  position: relative;
+}
+
+.dark .structured-note-shell {
+  --app-accent-soft: color-mix(in oklab, var(--app-accent) 15%, transparent);
+  --app-accent-mid: color-mix(in oklab, var(--app-accent) 32%, transparent);
+  --ui-bg: #1c1c1e;
+  --ui-dim: #2c2c2e;
+  --ui-ink: #f5f5f7;
+  --ui-muted: #a1a1a7;
+  --ui-ok: #32d74b;
+  --ui-err: #ff453a;
+  --ui-err-soft: rgba(255, 69, 58, 0.18);
+}
+
+.structured-note-shell :is(button, [role='button']):focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+
+.structured-note-shell .stage-wrap {
+  position: relative;
+  background: transparent;
+  border: 0;
+  border-radius: 16px;
+  padding: 6px 4px 72px 4px;
+  container-type: inline-size;
+}
+
+.structured-note-shell .main-column {
+  min-width: 0;
+}
+
+.structured-note-shell .note-section {
+  position: relative;
+}
+
+.structured-note-shell .note-section + .note-section {
+  margin-top: 1.55em;
+  padding-top: 1.15em;
+  border-top: 1px solid color-mix(in oklab, var(--ui-ink) 7%, transparent);
+}
+
+.structured-note-shell .note-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.65em;
+  margin-bottom: 0.65em;
+}
+
+/* Reset github-markdown-css heading borders and margins inside structured view. */
+.structured-note-shell .note-title {
+  font-size: 1.14em;
+  font-weight: 600;
+  color: var(--ui-ink);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  letter-spacing: -0.01em;
+  line-height: 1.45;
+  text-wrap: balance;
+}
+
+.structured-note-shell .note-title[data-level='3'] {
+  font-size: 1.04em;
+}
+
+.structured-note-shell .sec-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  flex-shrink: 0;
+}
+
+.structured-note-shell .sec-refine-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 1.78em;
+  height: 1.78em;
+  padding: 0;
+  border-radius: 999px;
+  border: 0.75px solid transparent;
+  background: transparent;
+  color: var(--ui-muted);
+  cursor: pointer;
+  opacity: 0.45;
+  transition:
+    opacity 0.18s ease,
+    color 0.18s ease,
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.structured-note-shell .note-section:hover .sec-refine-btn,
+.structured-note-shell .sec-refine-btn:focus-visible {
+  opacity: 0.88;
+}
+
+.structured-note-shell .sec-refine-btn:hover {
+  opacity: 1;
+  color: var(--app-accent);
+  background: var(--app-accent-soft);
+  border-color: color-mix(in oklab, var(--app-accent) 22%, transparent);
+}
+
+.structured-note-shell .sec-refine-btn:active {
+  transform: scale(0.94);
+}
+
+.structured-note-shell .ts-pill-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
+  font-family: var(--ui-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78em;
+  line-height: 1.25;
+  color: var(--app-accent);
+  background: var(--app-accent-soft);
+  border: 0.75px solid color-mix(in oklab, var(--app-accent) 18%, transparent);
+  padding: 0.2em 0.65em;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-weight: 500;
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.structured-note-shell .ts-pill-btn {
+  background: transparent;
+  border: 0;
+  padding: 0 0.14em;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.structured-note-shell .ts-pill-btn:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.structured-note-shell .ts-pill-btn:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.structured-note-shell .ts-pill-sep {
+  opacity: 0.65;
+  margin: 0 0.12em;
+}
+
+.structured-note-shell .note-p {
+  font-size: 1em;
+  line-height: 1.85;
+  color: var(--ui-ink);
+  margin: 0 0 0.78em 0;
+  text-wrap: pretty;
+}
+
+.structured-note-shell .note-p.is-takeaway {
+  margin-bottom: 0.65em;
+}
+
+.structured-note-shell .emp-hl {
+  background: var(--app-accent-soft);
+  color: var(--ui-ink);
+  padding: 0.06em 0.36em;
+  border-radius: 0.32em;
+  font-weight: 500;
+  transition: background 0.2s ease;
+}
+
+.structured-note-shell .emp-ul {
+  text-decoration: underline;
+  text-decoration-color: var(--app-accent);
+  text-decoration-thickness: 1.6px;
+  text-underline-offset: 0.24em;
+  transition: text-decoration-color 0.2s ease;
+}
+
+.structured-note-shell .emp-wave {
+  text-decoration: underline wavy;
+  text-decoration-color: var(--app-accent-wave);
+  text-decoration-thickness: 1.4px;
+  text-underline-offset: 0.24em;
+  transition: text-decoration-color 0.2s ease;
+}
+
+.structured-note-shell .code-pill {
+  font-family: var(--ui-mono);
+  font-size: 0.85em;
+  background: color-mix(in oklab, var(--ui-dim) 78%, transparent);
+  color: var(--ui-ink);
+  padding: 0.12em 0.42em;
+  border-radius: 0.38em;
+  white-space: nowrap;
+}
+
+.structured-note-shell .unit-nowrap {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Lightweight Apple frosted disc inline trigger: centered to 0.5cap and inside its own square box. */
+.structured-note-shell .anno-dot {
+  --anno-size: 1.14em;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: var(--anno-size);
+  height: var(--anno-size);
+  min-width: var(--anno-size);
+  min-height: var(--anno-size);
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  margin-inline: 0.24em 0.16em;
+  border-radius: 50%;
+  box-sizing: border-box;
+  line-height: 0;
+  vertical-align: -0.2em;
+  vertical-align: calc(0.5cap - var(--anno-size) / 2);
+  background: color-mix(in oklab, var(--app-accent) 13%, rgba(255, 255, 255, 0.65));
+  border: 0.75px solid color-mix(in oklab, var(--app-accent) 26%, transparent);
+  color: var(--app-accent);
+  box-shadow: none;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.22s ease;
+}
+
+.structured-note-shell .anno-dot::before {
+  content: '';
+  position: absolute;
+  inset: -0.24em;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in oklab, var(--app-accent-spot) 18%, transparent) 0%, transparent 74%);
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.structured-note-shell .anno-dot:hover::before,
+.structured-note-shell .anno-dot.is-open::before {
+  opacity: 0.95;
+}
+
+.dark .structured-note-shell .anno-dot {
+  background: color-mix(in oklab, var(--app-accent) 20%, rgba(255, 255, 255, 0.07));
+  border-color: color-mix(in oklab, var(--app-accent) 34%, rgba(255, 255, 255, 0.14));
+}
+
+.structured-note-shell .anno-dot:hover,
+.structured-note-shell .anno-dot.is-open {
+  background: var(--app-accent-spot);
+  border-color: color-mix(in oklab, #ffffff 22%, var(--app-accent-spot));
+  color: #ffffff;
+  transform: scale(1.06);
+  box-shadow: 0 2px 8px -2px color-mix(in oklab, var(--app-accent-spot) 38%, transparent);
+}
+
+.structured-note-shell .anno-dot svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
+/* Unified Apple iOS-inspired lightweight frosted glass recipe shared by popovers, bubbles, and quiz capsules. */
+.structured-note-shell .glass-surface {
+  background: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.44) 0%,
+    rgba(246, 248, 252, 0.34) 100%
+  );
+  backdrop-filter: blur(11px) saturate(210%);
+  -webkit-backdrop-filter: blur(11px) saturate(210%);
+  border: 0.75px solid rgba(15, 23, 42, 0.11);
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.86),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.42),
+    0 10px 28px -8px rgba(15, 23, 42, 0.12),
+    0 2px 6px -1px rgba(15, 23, 42, 0.05);
+}
+
+.dark .structured-note-shell .glass-surface {
+  background: rgba(38, 41, 48, 0.46);
+  backdrop-filter: blur(16px) saturate(190%);
+  -webkit-backdrop-filter: blur(16px) saturate(190%);
+  border: 0.75px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.16),
+    0 12px 30px -8px rgba(0, 0, 0, 0.36);
+}
+
+.structured-note-shell .hover-bubble {
+  position: absolute;
+  z-index: 25;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px) scale(0.97);
+  transition: opacity 0.18s cubic-bezier(0.22, 1, 0.36, 1), transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  padding: 0.34em 0.85em;
+  border-radius: 999px;
+  font-size: 0.8em;
+  line-height: 1.45;
+  color: var(--ui-ink);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  max-width: min(24em, calc(100% - 24px));
+}
+
+.structured-note-shell .hover-bubble.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.structured-note-shell .hover-bubble > span:last-child {
+  display: block;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.structured-note-shell .bubble-dot {
+  width: 0.45em;
+  height: 0.45em;
+  min-width: 0.45em;
+  min-height: 0.45em;
+  border-radius: 50%;
+  background: var(--app-accent);
+  flex-shrink: 0;
+}
+
+.structured-note-shell .apple-popover {
+  position: absolute;
+  z-index: 35;
+  width: min(24.5em, calc(100% - 28px));
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px) scale(0.96);
+  transform-origin: top center;
+  transition: opacity 0.22s cubic-bezier(0.22, 1, 0.36, 1), transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+  border-radius: 1.15em;
+  padding: 0.85em 1em 0.92em 1em;
+}
+
+.structured-note-shell .apple-popover.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.88) 0%, rgba(247, 249, 252, 0.82) 100%);
+  backdrop-filter: blur(18px) saturate(195%);
+  -webkit-backdrop-filter: blur(18px) saturate(195%);
+}
+
+.dark .structured-note-shell .apple-popover.is-open {
+  background: linear-gradient(155deg, rgba(40, 43, 50, 0.88) 0%, rgba(28, 30, 36, 0.84) 100%);
+}
+
+.structured-note-shell .pop-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55em;
+  margin-bottom: 0.52em;
+}
+
+.structured-note-shell .pop-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.52em;
+}
+
+.structured-note-shell .pop-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  font-size: 0.78em;
+  line-height: 1.3;
+  font-weight: 600;
+  color: var(--app-accent);
+  background: var(--app-accent-soft);
+  padding: 0.22em 0.68em;
+  border-radius: 999px;
+}
+
+.structured-note-shell .pop-ts {
+  font-family: var(--ui-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78em;
+  line-height: 1.3;
+  color: var(--ui-muted);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.structured-note-shell .pop-ts:hover {
+  color: var(--app-accent);
+  text-decoration: underline;
+}
+
+.structured-note-shell .close-circle {
+  width: 1.4em;
+  height: 1.4em;
+  min-width: 1.4em;
+  min-height: 1.4em;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ui-ink);
+  opacity: 0.56;
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+  cursor: pointer;
+  transition: opacity 0.18s ease, color 0.18s ease, transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  flex-shrink: 0;
+}
+
+.structured-note-shell .close-circle:hover {
+  opacity: 0.95;
+  color: var(--app-accent);
+  transform: scale(1.06);
+}
+
+.structured-note-shell .close-circle svg {
+  width: 92%;
+  height: 92%;
+  display: block;
+}
+
+.structured-note-shell .pop-content {
+  font-size: 0.86em;
+  line-height: 1.66;
+  color: var(--ui-ink);
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.structured-note-shell .note-table-wrap {
+  overflow-x: auto;
+  border-radius: 0.9em;
+  background: color-mix(in oklab, var(--ui-dim) 45%, transparent);
+  padding: 0.25em 0.65em;
+  margin: 0.65em 0 0.78em 0;
+}
+
+.structured-note-shell .clean-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  margin: 0;
+  display: table;
+}
+
+.structured-note-shell .clean-table tr {
+  background: transparent;
+  border: 0;
+}
+
+.structured-note-shell .clean-table th {
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--ui-muted);
+  padding: 0.55em 0.55em;
+  border: 0;
+  border-bottom: 1px solid color-mix(in oklab, var(--ui-ink) 8%, transparent);
+  white-space: nowrap;
+}
+
+.structured-note-shell .clean-table td {
+  padding: 0.52em 0.55em;
+  border: 0;
+  border-bottom: 1px solid color-mix(in oklab, var(--ui-ink) 5%, transparent);
+  vertical-align: middle;
+}
+
+.structured-note-shell .clean-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.structured-note-shell .nowrap-cell {
+  white-space: nowrap;
+  font-family: var(--ui-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82em;
+  color: var(--ui-ink);
+}
+
+.structured-note-shell .wrap-cell {
+  min-width: 10em;
+  font-size: 0.88em;
+  color: var(--ui-muted);
+  line-height: 1.5;
+}
+
+.structured-note-shell .flow-chain {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15em;
+  font-size: 0.88em;
+  color: var(--ui-ink);
+  background: color-mix(in oklab, var(--ui-dim) 65%, transparent);
+  padding: 0.42em 0.85em;
+  border-radius: 0.7em;
+  margin-bottom: 0.68em;
+}
+
+.structured-note-shell .chain-arrow {
+  color: var(--app-accent);
+  margin: 0 0.4em;
+  font-weight: 600;
+}
+
+.structured-note-shell .note-list {
+  margin: 0.3em 0 0.78em 0;
+  padding-left: 1.35em;
+  font-size: 1em;
+  line-height: 1.85;
+  color: var(--ui-ink);
+}
+
+.structured-note-shell .note-list > li {
+  margin-top: 0.25em;
+}
+
+.structured-note-shell .note-code-block {
+  background: color-mix(in oklab, var(--ui-dim) 72%, transparent);
+  border-radius: 0.8em;
+  padding: 0.68em 0.92em;
+  margin: 0.55em 0 0.78em 0;
+  overflow-x: auto;
+  font-family: var(--ui-mono);
+  font-size: 0.84em;
+  line-height: 1.6;
+}
+
+.structured-note-shell .note-screenshot-figure {
+  margin: 0.65em 0 0.9em 0;
+}
+
+.structured-note-shell .note-screenshot-caption {
+  margin-top: 0.42em;
+  font-size: 0.8em;
+  color: var(--ui-muted);
+}
+
+/* CRITICAL: Never set z-index on .quiz-anchor-slot or will-change on .morph-quiz,
+   so Chromium/WebView2 never isolates the stacking context and backdrop-filter keeps sampling siblings. */
+.structured-note-shell .quiz-anchor-slot {
+  position: relative;
+  height: 2.05em;
+  margin-top: 0.8em;
+  width: 100%;
+}
+
+.structured-note-shell .morph-quiz {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 32;
+  box-sizing: border-box;
+  transform-origin: top left;
+  border-radius: 1.025em;
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    width 0.44s cubic-bezier(0.32, 0.72, 0, 1),
+    height 0.44s cubic-bezier(0.32, 0.72, 0, 1),
+    border-radius 0.44s cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 0.35s ease,
+    border-color 0.25s ease;
+}
+
+.structured-note-shell .morph-quiz:hover:not(.is-expanded) {
+  border-color: color-mix(in oklab, var(--app-accent) 34%, transparent);
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.48),
+    0 6px 18px -6px rgba(0, 0, 0, 0.1);
+}
+
+.structured-note-shell .morph-quiz.is-expanded {
+  border-radius: 1.2em;
+  cursor: default;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.89) 0%, rgba(247, 249, 252, 0.84) 100%);
+  backdrop-filter: blur(18px) saturate(195%);
+  -webkit-backdrop-filter: blur(18px) saturate(195%);
+  border-color: color-mix(in oklab, var(--app-accent) 24%, rgba(15, 23, 42, 0.12));
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.72),
+    0 16px 38px -10px rgba(0, 0, 0, 0.14);
+}
+
+.dark .structured-note-shell .morph-quiz.is-expanded {
+  background: linear-gradient(155deg, rgba(40, 43, 50, 0.89) 0%, rgba(28, 30, 36, 0.85) 100%);
+  border-color: color-mix(in oklab, var(--app-accent) 28%, rgba(255, 255, 255, 0.16));
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.18),
+    0 18px 40px -10px rgba(0, 0, 0, 0.42);
+}
+
+.structured-note-shell .quiz-mini-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  min-height: 2.05em;
+  max-width: min(26em, 92cqw);
+  padding: 0.36em 0.85em;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  box-sizing: border-box;
+  opacity: 1;
+  transition: opacity 0.14s ease 0.08s, padding 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.structured-note-shell .quiz-mini-layer.has-badge {
+  padding-left: 0.38em;
+}
+
+.structured-note-shell .morph-quiz.is-expanded .quiz-mini-layer {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.structured-note-shell .mini-dot {
+  width: 0;
+  height: 1.18em;
+  min-width: 0;
+  margin-right: 0;
+  opacity: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+  flex-shrink: 0;
+  transform: scale(0.6);
+  transition:
+    width 0.28s cubic-bezier(0.32, 0.72, 0, 1),
+    min-width 0.28s cubic-bezier(0.32, 0.72, 0, 1),
+    margin-right 0.28s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.22s ease,
+    transform 0.28s cubic-bezier(0.32, 0.72, 0, 1),
+    background 0.22s ease;
+}
+
+.structured-note-shell .mini-dot.is-pass {
+  width: 1.18em;
+  min-width: 1.18em;
+  margin-right: 0.45em;
+  opacity: 1;
+  transform: scale(1);
+  background: var(--ui-ok);
+  box-shadow: none;
+}
+
+.structured-note-shell .mini-dot.is-fail {
+  width: 1.18em;
+  min-width: 1.18em;
+  margin-right: 0.45em;
+  opacity: 1;
+  transform: scale(1);
+  background: var(--ui-err);
+  box-shadow: none;
+}
+
+.structured-note-shell .mini-dot svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  flex-shrink: 0;
+}
+
+.structured-note-shell .mini-text {
+  font-size: 0.82em;
+  line-height: 1.45;
+  color: var(--ui-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.structured-note-shell .quiz-full-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  padding: 0.68em 0.85em 0.75em 0.85em;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-2px, -2px);
+  transform-origin: top left;
+  transition:
+    opacity 0.14s ease,
+    transform 0.38s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.structured-note-shell .morph-quiz.is-expanded .quiz-full-layer {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(0, 0);
+  transition:
+    opacity 0.24s ease 0.04s,
+    transform 0.42s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.structured-note-shell .quiz-q-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65em;
+  margin-bottom: 0.55em;
+}
+
+.structured-note-shell .quiz-q {
+  font-size: 0.88em;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--ui-ink);
+  margin: 0.06em 0 0 0;
+}
+
+.structured-note-shell .quiz-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+}
+
+.structured-note-shell .quiz-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65em;
+  width: 100%;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.32);
+  border: 0.75px solid color-mix(in oklab, var(--ui-ink) 8%, transparent);
+  border-radius: 0.72em;
+  padding: 0.42em 0.68em;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.dark .structured-note-shell .quiz-opt:not(.is-answer-right):not(.is-picked-wrong):not(.is-crossed-out) {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.structured-note-shell .quiz-opt:hover:not(.is-locked) {
+  border-color: var(--app-accent-mid);
+  background: color-mix(in oklab, var(--app-accent) 9%, transparent);
+}
+
+.structured-note-shell .quiz-opt.is-locked {
+  cursor: default;
+}
+
+.structured-note-shell .quiz-opt.is-answer-right {
+  background: color-mix(in oklab, var(--app-accent) 14%, transparent);
+  border-color: var(--app-accent-mid);
+}
+
+.structured-note-shell .quiz-opt.is-answer-right .opt-key {
+  background: var(--app-accent-spot);
+  color: #ffffff;
+}
+
+.structured-note-shell .quiz-opt.is-answer-right .opt-text {
+  color: var(--ui-ink);
+  font-weight: 500;
+}
+
+.structured-note-shell .quiz-opt.is-picked-wrong {
+  background: var(--ui-err-soft);
+  border-color: color-mix(in oklab, var(--ui-err) 38%, transparent);
+  opacity: 0.92;
+}
+
+.structured-note-shell .quiz-opt.is-picked-wrong .opt-key {
+  background: var(--ui-err);
+  color: #ffffff;
+}
+
+.structured-note-shell .quiz-opt.is-picked-wrong .opt-text {
+  color: var(--ui-err);
+}
+
+.structured-note-shell .quiz-opt.is-crossed-out {
+  background: transparent;
+  border-color: transparent;
+  opacity: 0.38;
+}
+
+.structured-note-shell .quiz-opt.is-crossed-out .opt-text {
+  color: var(--ui-muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1.2px;
+}
+
+.structured-note-shell .opt-left {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  min-width: 0;
+}
+
+.structured-note-shell .opt-key {
+  width: 1.42em;
+  height: 1.42em;
+  min-width: 1.42em;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--ui-ink) 9%, transparent);
+  color: var(--ui-muted);
+  font-family: var(--ui-mono);
+  font-size: 0.78em;
+  line-height: 1;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.structured-note-shell .opt-text {
+  font-size: 0.84em;
+  line-height: 1.45;
+  color: var(--ui-ink);
+}
+
+.structured-note-shell .opt-mark {
+  width: 1.22em;
+  height: 1.22em;
+  min-width: 1.22em;
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 0.2s ease, transform 0.24s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.structured-note-shell .quiz-opt.show-mark .opt-mark {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.structured-note-shell .opt-mark svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.structured-note-shell .quiz-answer-wrap {
+  height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition:
+    height 0.4s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.24s ease;
+}
+
+.structured-note-shell .quiz-answer-wrap.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.structured-note-shell .quiz-answer-inner {
+  padding-top: 0.55em;
+  margin-top: 0.55em;
+  border-top: 1px solid color-mix(in oklab, var(--ui-ink) 8%, transparent);
+}
+
+.structured-note-shell .ans-status-chip {
+  display: inline-block;
+  font-size: 1em;
+  font-weight: 600;
+  margin-right: 0.38em;
+}
+
+.structured-note-shell .ans-status-chip.is-pass {
+  color: var(--ui-ok);
+}
+
+.structured-note-shell .ans-status-chip.is-fail {
+  color: var(--ui-err);
+}
+
+.structured-note-shell .ans-explain {
+  font-size: 0.82em;
+  line-height: 1.56;
+  color: var(--ui-ink);
+  margin: 0 0 0.48em 0;
+}
+
+.structured-note-shell .ans-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.52em;
+}
+
+.structured-note-shell .ans-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65em;
+}
+
+.structured-note-shell .ask-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36em;
+  font-size: 0.8em;
+  line-height: 1.3;
+  font-weight: 500;
+  color: var(--app-accent);
+  background: var(--app-accent-soft);
+  border: 0;
+  padding: 0.3em 0.78em;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s ease;
+}
+
+.structured-note-shell .ask-pill:hover {
+  background: var(--app-accent-mid);
+  transform: translateY(-1px);
+}
+
+.structured-note-shell .ask-pill svg {
+  width: 1.08em;
+  height: 1.08em;
+  display: block;
+  flex: none;
+}
+
+.structured-note-shell .quiz-reset {
+  font-size: 0.82em;
+  line-height: 1.2;
+  color: var(--ui-muted);
+  background: transparent;
+  border: 0;
+  padding: 0.16em 0.28em;
+  cursor: pointer;
+  opacity: 0.78;
+  transition: opacity 0.16s ease, color 0.16s ease;
+}
+
+.structured-note-shell .quiz-reset:hover {
+  opacity: 1;
+  color: var(--app-accent);
+}
+
+.structured-note-shell .ask-toast {
+  font-size: 0.8em;
+  color: var(--ui-muted);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.structured-note-shell .ask-toast.is-shown {
+  opacity: 1;
+}
+
+.structured-note-shell .note-checklist {
+  margin: 0.45em 0 0.95em;
+  padding: 0.68em 0.92em 0.58em;
+  border-radius: 0.88em;
+  background: color-mix(in oklab, var(--ui-dim) 46%, transparent);
+  border: 0.75px solid color-mix(in oklab, var(--ui-ink) 8%, transparent);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.dark .structured-note-shell .note-checklist {
+  background: color-mix(in oklab, var(--ui-dim) 52%, transparent);
+  border-color: color-mix(in oklab, #ffffff 10%, transparent);
+}
+
+.structured-note-shell .note-checklist.is-all-done {
+  border-color: color-mix(in oklab, var(--ui-ok) 32%, transparent);
+}
+
+.structured-note-shell .note-checklist-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6em;
+  margin-bottom: 0.34em;
+}
+
+.structured-note-shell .note-checklist-title {
+  font-size: 0.84em;
+  font-weight: 600;
+  color: var(--ui-muted);
+  letter-spacing: 0.01em;
+}
+
+.structured-note-shell .note-checklist-count {
+  font-family: var(--ui-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.76em;
+  font-weight: 500;
+  color: var(--ui-muted);
+  background: color-mix(in oklab, var(--ui-ink) 6%, transparent);
+  padding: 0.14em 0.55em;
+  border-radius: 999px;
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.structured-note-shell .note-checklist-count.is-done {
+  color: var(--ui-ok);
+  background: color-mix(in oklab, var(--ui-ok) 14%, transparent);
+}
+
+.structured-note-shell .note-checklist-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.14em;
+}
+
+.structured-note-shell .note-checklist-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.62em;
+  min-block-size: 2.35em;
+  padding: 0.32em 0.28em;
+  border-radius: 0.52em;
+  transition: background-color 0.16s ease;
+}
+
+.structured-note-shell .note-checklist-row:hover {
+  background: color-mix(in oklab, var(--ui-ink) 3.5%, transparent);
+}
+
+.structured-note-shell .note-checklist-input {
+  --cb-size: 1.12em;
+  --cb-icon-size: 0.68em;
+  --cb-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'></polyline></svg>");
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  inline-size: var(--cb-size);
+  aspect-ratio: 1;
+  margin: 0.28em 0 0;
+  border-radius: 0.32em;
+  border: 1.5px solid color-mix(in oklab, var(--ui-ink) 30%, transparent);
+  background: color-mix(in oklab, var(--ui-bg) 82%, transparent);
+  color: #ffffff;
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease;
+}
+
+.structured-note-shell .note-checklist-input::before {
+  content: '';
+  inline-size: var(--cb-icon-size);
+  aspect-ratio: 1;
+  background-color: currentColor;
+  mask: var(--cb-check) no-repeat center / contain;
+  -webkit-mask: var(--cb-check) no-repeat center / contain;
+  scale: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .structured-note-shell .note-checklist-input::before {
+    transition: scale 160ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+}
+
+@media (forced-colors: active) {
+  .structured-note-shell .note-checklist-input::before {
+    background-color: CanvasText;
+  }
+}
+
+.structured-note-shell .note-checklist-input:checked {
+  background: var(--app-accent);
+  border-color: var(--app-accent);
+}
+
+.structured-note-shell .note-checklist-input:checked::before {
+  scale: 1;
+}
+
+.structured-note-shell .note-checklist-input:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+
+.structured-note-shell .note-checklist-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.structured-note-shell .note-checklist-content {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.96em;
+  line-height: 1.65;
+  color: var(--ui-ink);
+}
+
+.structured-note-shell .note-checklist-label {
+  cursor: pointer;
+  transition: color 0.18s ease, opacity 0.18s ease;
+}
+
+.structured-note-shell .note-checklist-row.is-checked .note-checklist-label {
+  color: var(--ui-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--ui-muted) 55%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .structured-note-shell .morph-quiz,
+  .structured-note-shell .quiz-full-layer,
+  .structured-note-shell .quiz-mini-layer,
+  .structured-note-shell .quiz-answer-wrap,
+  .structured-note-shell .mini-dot,
+  .structured-note-shell .apple-popover,
+  .structured-note-shell .hover-bubble,
+  .structured-note-shell .note-checklist-input::before,
+  .structured-note-shell .sec-refine-btn {
+    transition: none;
+  }
+}

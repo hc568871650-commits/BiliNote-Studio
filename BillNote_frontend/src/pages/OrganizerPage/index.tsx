@@ -2,8 +2,7 @@ import { shouldSendMessage, sendShortcutLabel } from '@/utils/sendShortcut'
 import { scrollMotion } from '@/utils/motion'
 import { useInterfaceStore } from '@/store/interfaceStore'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUp, Check, FolderInput, Loader2, MessageSquare, RotateCcw, Settings2, X } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { ArrowUp, Check, Loader2, Plus, RotateCcw, X } from 'lucide-react'
 import PurposeModelPicker from '@/components/PurposeModelPicker'
 import ChoiceSelect from '@/components/ChoiceSelect'
 import OrganizerRetentionDialog from '@/components/OrganizerRetentionDialog'
@@ -26,7 +25,6 @@ import { useEffectiveProviderProtocol } from '@/hooks/useEffectiveProviderProtoc
 import { useModelCapabilities } from '@/hooks/useModelCapabilities'
 import { webSearchState } from '@/utils/webSearch'
 import { useModelWebSearchSettings } from '@/hooks/useModelWebSearchSettings'
-import AssistantChatSettings from '@/components/AssistantChatSettings'
 import useModelContext from '@/hooks/useModelContext'
 import WorkProgress from '@/components/WorkProgress'
 import OrganizerScopePicker from './OrganizerScopePicker'
@@ -50,7 +48,6 @@ export default function OrganizerPage() {
   const loadLibrary = useLibraryStore(current => current.loadLibrary)
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [catalogLoading, setCatalogLoading] = useState(true)
-  const [chatSettingsOpen, setChatSettingsOpen] = useState(false)
   const [scopeOpen, setScopeOpen] = useState(false)
   const { setControls } = state
   const protocol = useEffectiveProviderProtocol(model?.provider_id)
@@ -128,12 +125,12 @@ export default function OrganizerPage() {
   const disabled = busy || state.session?.status === 'planning' || !model || !state.draft.trim()
 
   return <main className={`organizer-page ${!state.messages.length ? 'organizer-page--empty' : ''}`}>
-    <AssistantChatSettings open={chatSettingsOpen} onOpenChange={setChatSettingsOpen} providerId={model?.provider_id} modelName={model?.model_name} protocol={protocol} value={controls} onChange={setControls} disabled={busy} />
     <header className="organizer-topbar">
-      <span className="organizer-title"><FolderInput size={16} />资料库助手</span>
+      <span className="organizer-title">资料库助手</span>
       <ChoiceSelect className="organizer-session-select" label="整理会话" value={state.session?.session_id || ''} disabled={busy} onChange={id => { if (id) void state.restore(id) }} options={[{ value: '', label: '选择历史对话' }, ...state.sessions.map(session => ({ value: session.session_id, label: `${session.history.find(item => item.role === 'user')?.content.slice(0, 22) || '新对话'} · ${new Date(session.updated_at * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` }))]} />
-      <button className="organizer-text-button" onClick={() => void state.clear()} disabled={busy || !state.messages.length}><MessageSquare size={14} />新对话</button>
+      <button className="organizer-text-button" onClick={() => void state.clear()} disabled={busy || !state.messages.length}><Plus size={14} />新对话</button>
     </header>
+    <div className="organizer-canvas">
     {!!state.messages.length && <div className="organizer-current-target"><span title={`当前目标：${targetLabel}`}>{target?.authorized ? targetLabel : '对话'}{target?.exclude_favorites && ' · 排除收藏'}</span><span>{state.busy === 'compacting' ? '压缩中' : state.busy === 'loading' ? '读取中' : state.session ? statusNames[state.session.status] : ''}</span></div>}
     {state.compactNotice && <div className="organizer-current-target" role="status">{state.compactNotice}</div>}
     {state.session?.status === 'interrupted' && <aside className="organizer-pending-summary" role="status"><span>上次处理已中断，恢复后可继续对话；不会自动执行计划。</span><button disabled={busy} onClick={() => void state.recover()}><RotateCcw size={13} />恢复对话</button></aside>}
@@ -168,7 +165,7 @@ export default function OrganizerPage() {
               {operation.type === 'archive' && <p className="organizer-operation-target">移入归档区，可恢复</p>}
               {operation.type === 'restore' && <p className="organizer-operation-target">从归档区恢复到笔记库</p>}
             </li>)}</ol>
-            {message.phase === 'pending' && <div className="organizer-plan-footer"><span>确认以上笔记与目标后执行；也可继续输入修改。</span><div><button disabled={busy} onClick={() => void state.cancel(message.id)}><X size={13} />取消计划</button><button className="organizer-primary" disabled={busy} onClick={() => void perform(message)}>{state.busy === 'executing' ? <Loader2 className="organizer-spin" size={13} /> : <Check size={13} />}确认执行</button></div></div>}
+            {message.phase === 'pending' && <div className="organizer-plan-footer"><div><button disabled={busy} onClick={() => void state.cancel(message.id)}><X size={13} />取消计划</button><button className="organizer-primary" disabled={busy} onClick={() => void perform(message)}>{state.busy === 'executing' ? <Loader2 className="organizer-spin" size={13} /> : <Check size={13} />}确认执行</button></div></div>}
             {message.phase === 'cancelled' && <div className="organizer-result">计划已取消，未执行。</div>}
             {message.phase === 'executed' && <div className="organizer-result"><Check size={14} /><span>已按这份计划完成修改。</span>{message.result?.undo_available && <button disabled={busy || pending} onClick={() => void perform(message, true)}><RotateCcw size={13} />撤销这次操作</button>}</div>}
             {message.phase === 'undone' && <div className="organizer-result"><RotateCcw size={14} />已撤销这次修改，笔记库已恢复。</div>}
@@ -182,18 +179,18 @@ export default function OrganizerPage() {
     <div className="organizer-compose-area">
       <div className="organizer-compose-inner">
         {catalogError && <div className="organizer-error" role="alert">{catalogError}<button disabled={busy || catalogLoading} onClick={() => void loadCatalog()}>重新读取</button></div>}
-        {!model && <div className="organizer-config-hint">选择资料库助手模型后即可对话。<Link to="/settings/model">前往模型设置</Link></div>}
+        {!model && <div className="organizer-config-hint">请在左侧「设置 · 模型与 API」中选择默认资料库模型。</div>}
         <div className="organizer-composer">
           <SlashCommandMenu open={slash.open} id={slash.id} onSelect={slash.select} />
           <textarea ref={composer} aria-controls={slash.open ? slash.id : undefined} aria-activedescendant={slash.open ? `${slash.id}-compact` : undefined} onBlur={slash.dismiss} aria-label="资料库问题或整理指令" maxLength={4000} placeholder={pending ? '继续修改计划…' : '询问资料、比较方法或整理笔记…'} value={state.draft} onChange={event => state.setDraft(event.target.value)} onKeyDown={event => { if (slash.onKeyDown(event)) return; if (shouldSendMessage(event, useInterfaceStore.getState().sendKey)) { event.preventDefault(); send() } }} rows={1} />
           <div className="organizer-compose-toolbar">
             <OrganizerScopePicker scope={state.scope} folderId={state.folderId} selectedIds={state.selectedIds} folders={folders} tasks={tasks} disabled={busy} open={scopeOpen} onOpenChange={setScopeOpen} onScope={state.setScope} onFolder={state.setFolderId} onToggleNote={state.toggleNote} />
-            <button type="button" className="organizer-text-button organizer-settings-button" aria-label="聊天设置" title="聊天设置" onClick={() => setChatSettingsOpen(true)}><Settings2 size={15} /></button>
             <AIControls contextBudget={contextBudget} modelPicker={<PurposeModelPicker inline value={model} onChange={state.setModel} label="整理模型" disabled={busy} controls={controls} onControlsChange={setControls} />} modelName={model?.model_name} value={controls} context={state.session?.context || undefined} draft={state.draft} />
             {(state.busy === 'planning' || state.busy === 'compacting' || state.session?.status === 'planning') && state.session ? <button className="organizer-send" aria-label="停止整理处理" title="停止当前处理" onClick={() => void state.cancel()}><X size={17} /></button> : <button className="organizer-send" aria-label="发送整理指令" title={sendShortcutLabel(sendKey)} disabled={disabled} onClick={() => send()}>{busy ? <Loader2 size={17} className="organizer-spin" /> : <ArrowUp size={18} />}</button>}
           </div>
         </div>
       </div>
+    </div>
     </div>
     <OrganizerRetentionDialog preview={state.retentionPreview} busy={Boolean(state.busy)} error={state.error} onCancel={state.cancelCreation} onConfirm={() => void state.confirmCreation()} />
   </main>

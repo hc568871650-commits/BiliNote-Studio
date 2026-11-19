@@ -11,12 +11,17 @@ export function rehypeReadingBlocks() {
       const id = `note-block-${index++}`
       const text = node.position?.start.offset != null && node.position?.end.offset != null ? String(file.value).slice(node.position.start.offset, node.position.end.offset) : ''
       return { type: 'element', tagName: 'div', properties: { className: ['reading-block'], 'data-note-block': id, 'data-note-text': text, 'data-source-start': node.position?.start.offset, 'data-source-end': node.position?.end.offset, id }, children: [
-        { type: 'element', tagName: 'button', properties: { type: 'button', className: ['reading-block-pick'], 'data-block-pick': id, 'aria-label': `选择第 ${index} 段`, title: '选择段落，可加入 AI 问答' }, children: [{ type: 'text', value: '+' }] }, node,
+        { type: 'element', tagName: 'button', properties: { type: 'button', className: ['reading-block-pick'], 'data-block-pick': id, 'aria-label': `选择第 ${index} 段`, title: '选择段落，可加入 AI 问答' }, children: [
+          { type: 'element', tagName: 'svg', properties: { viewBox: '0 0 16 16', width: 12, height: 12, fill: 'none', stroke: 'currentColor', strokeWidth: 1.75, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true', className: ['reading-block-pick-icon'] }, children: [
+            { type: 'element', tagName: 'path', properties: { className: ['pick-plus'], d: 'M8 3.5v9M3.5 8h9' }, children: [] },
+            { type: 'element', tagName: 'path', properties: { className: ['pick-check'], d: 'M3.5 8.4 6.5 11.4 12.5 5' }, children: [] },
+          ] },
+        ] }, node,
       ] }
     })
   }
 }
-interface Props { children: ReactNode; taskId: string; versionId: string; title: string; onQuote: (quotes: ReadingAttachment[], temporary: boolean) => boolean; onRefine?: (texts: string[]) => void }
+interface Props { children: ReactNode; taskId: string; versionId: string; title: string; onQuote: (quotes: ReadingAttachment[], openChat: boolean) => boolean; onRefine?: (texts: string[]) => void }
 export default function ReadingSelection({ children, taskId, versionId, title, onQuote, onRefine }: Props) {
   const container = useRef<HTMLDivElement>(null)
   const [selected, setSelected] = useState<string[]>([])
@@ -34,7 +39,7 @@ export default function ReadingSelection({ children, taskId, versionId, title, o
     window.addEventListener('scroll', dismiss, true)
     return () => window.removeEventListener('scroll', dismiss, true)
   }, [])
-  const addBlocks = (temporary: boolean) => {
+  const addBlocks = (openChat: boolean) => {
     const blocks = Array.from(container.current?.querySelectorAll<HTMLElement>('[data-note-block]') || []).filter(el => selected.includes(el.dataset.noteBlock || ''))
     const parts = blocks.map(el => ({ text: el.dataset.noteText || Array.from(el.children).filter(child => !child.matches('[data-block-pick]')).map(child => child.textContent).join('\n'), blockId: el.dataset.noteBlock })).filter(part => part.text.trim())
     if (!parts.length) return
@@ -45,7 +50,7 @@ export default function ReadingSelection({ children, taskId, versionId, title, o
       return range
     })
     const combined = { ...quote(parts.map(part => part.text).join('\n\n'), parts[0].blockId), blockCount: parts.length, blocks: blockRanges }
-    if (onQuote([combined], temporary)) setSelected([])
+    if (onQuote([combined], openChat)) setSelected([])
   }
   return <div ref={container} data-note-task={taskId} data-note-version={versionId} className={`reading-selection ${selected.length ? 'reading-selection--active' : ''}`}
     onKeyDown={event => { if (event.key === 'Escape') { setSelection(null); setSelected([]) } }}
@@ -78,16 +83,16 @@ export default function ReadingSelection({ children, taskId, versionId, title, o
       const id = button?.dataset.blockPick || block?.dataset.noteBlock
       if (id) { event.preventDefault(); setSelection(null); setSelected(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id]) }
     }}>
-    {selected.length > 0 && <div className="reading-multiselect" role="toolbar" aria-label="段落选择"><span>已选 {selected.length} 段 · 合为 1 份引用</span><button onClick={() => addBlocks(false)}>添加到对话</button><button onClick={() => addBlocks(true)}>临时提问</button>{onRefine && <button onClick={() => {
+    {selected.length > 0 && <div className="reading-multiselect-anchor"><div className="reading-multiselect" role="toolbar" aria-label="段落选择"><span>已选 {selected.length} 段</span><button type="button" onClick={() => addBlocks(true)}>问 AI 助手</button><button type="button" onClick={() => addBlocks(false)}>加入引用</button>{onRefine && <button type="button" onClick={() => {
       const blocks = Array.from(container.current?.querySelectorAll<HTMLElement>('[data-note-block]') || [])
       const indices = blocks.map((block, index) => selected.includes(block.dataset.noteBlock || '') ? index : -1).filter(index => index >= 0)
       const texts = indices.map(index => blocks[index].dataset.noteText || '').filter(text => text.trim())
       if (texts.length) onRefine(texts)
-    }}>重新蒸馏</button>}<button onClick={() => setSelected([])}>取消</button></div>}
+    }}>重新蒸馏</button>}<button type="button" onClick={() => setSelected([])}>取消</button></div></div>}
     {children}
     {selection && <div className="reading-selection-popover" style={{ left: selection.x, top: selection.y }} role="toolbar" aria-label="选中文字操作" onMouseDown={event => event.preventDefault()}>
-      <button onClick={() => { if (onQuote([quote(selection.text, selection.blockId, selection.sourceText)], false)) { setSelection(null); window.getSelection()?.removeAllRanges() } }}>添加到对话</button>
-      <button onClick={() => { if (onQuote([quote(selection.text, selection.blockId, selection.sourceText)], true)) { setSelection(null); window.getSelection()?.removeAllRanges() } }}>在侧边聊天中提问</button>
+      <button type="button" onClick={() => { if (onQuote([quote(selection.text, selection.blockId, selection.sourceText)], true)) { setSelection(null); window.getSelection()?.removeAllRanges() } }}>问 AI 助手</button>
+      <button type="button" onClick={() => { if (onQuote([quote(selection.text, selection.blockId, selection.sourceText)], false)) { setSelection(null); window.getSelection()?.removeAllRanges() } }}>加入引用</button>
     </div>}
   </div>
 }

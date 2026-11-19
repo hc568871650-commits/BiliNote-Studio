@@ -11,12 +11,19 @@ router = APIRouter()
 
 class Selection(BaseModel):
     version_id: str = Field(min_length=1, max_length=100)
-    texts: list[str] = Field(min_length=1, max_length=80)
+    texts: list[str] = Field(default_factory=list, max_length=80)
+    section_ids: list[str] | None = Field(default=None, max_length=20)
+
+
+class TimeRangeItem(BaseModel):
+    start: float = Field(ge=0, allow_inf_nan=False)
+    end: float = Field(gt=0, allow_inf_nan=False)
 
 
 class Preview(Selection):
     start_time: float = Field(ge=0, allow_inf_nan=False)
     end_time: float = Field(gt=0, allow_inf_nan=False)
+    time_ranges: list[TimeRangeItem] | None = None
     instruction: str = Field(default='', max_length=1500)
     provider_id: str = Field(min_length=1, max_length=100)
     model_name: str = Field(min_length=1, max_length=200)
@@ -41,7 +48,7 @@ def respond(action):
 
 @router.post('/notes/{task_id}/refine/context')
 def context(task_id: str, data: Selection):
-    return respond(lambda: service.source_context(task_id, data.version_id, data.texts))
+    return respond(lambda: service.source_context(task_id, data.version_id, data.texts, section_ids=data.section_ids))
 
 
 @router.post('/notes/{task_id}/refine/preview')

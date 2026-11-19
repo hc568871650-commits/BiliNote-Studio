@@ -22,7 +22,7 @@ code,
 }
 
 /* Transparent tracks in both native WebView and standards-based scrollbars. */
-* { scrollbar-color: #858585 transparent; scrollbar-width:thin; }
+@supports not selector(::-webkit-scrollbar) { * { scrollbar-color: rgba(133, 133, 133, 0.45) transparent; scrollbar-width: thin; } }
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

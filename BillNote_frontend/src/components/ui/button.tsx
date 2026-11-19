@@ -9,13 +9,13 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground shadow-xs hover:bg-primary/90',
+        default: 'bg-[var(--action-primary-bg,var(--primary))] text-[var(--action-primary-fg,var(--primary-foreground))] hover:opacity-90',
         destructive:
-          'bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60',
+          'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/75',
         outline:
-          'border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50',
-        secondary: 'bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80',
-        ghost: 'hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50',
+          'border border-[var(--surface-border,var(--border))] bg-[var(--surface-raised,var(--background))] hover:border-[var(--surface-border-strong,var(--border))] hover:bg-[var(--surface-hover,var(--accent))] hover:text-foreground',
+        secondary: 'bg-[var(--surface-input,var(--secondary))] text-secondary-foreground hover:bg-[var(--surface-hover,var(--secondary))]',
+        ghost: 'hover:bg-[var(--surface-hover,var(--accent))] hover:text-foreground',
         link: 'text-primary underline-offset-4 hover:underline',
       },
       size: {

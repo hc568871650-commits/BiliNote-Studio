@@ -1,3 +1,4 @@
+import type { StructuredNoteDocument } from '@/types/structuredNote'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { archiveNote, deleteNote, generateNote, getNote, importNotes, listNotes, restoreNote } from '@/services/note.ts'
@@ -36,6 +37,7 @@ export interface Transcript {
 export interface Markdown {
   ver_id: string
   content: string
+  structured?: StructuredNoteDocument
   style: string
   model_name: string
   provider_id?: string

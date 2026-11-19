@@ -5,7 +5,13 @@
 .refine-note-range,.refine-note-model { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .refine-note-range label { display: grid; gap: 5px; font-size: 13px; }
 .refine-note-range input { width: 130px; }
-.refine-note-settings input[type=number],.refine-note-instruction textarea { border: 1px solid var(--border); border-radius: 8px; padding: 8px; background: var(--background); color: var(--foreground); }
+.refine-note-settings input[type=number],.refine-note-instruction textarea { border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; background: var(--surface-input, var(--background)); color: var(--foreground); }
+.refine-note-settings input[type=number]:focus-visible,.refine-note-instruction textarea:focus-visible { outline: none; border-color: var(--control-active, var(--primary)); box-shadow: 0 0 0 3px var(--focus-ring, color-mix(in srgb, var(--primary) 22%, transparent)); }
+.refine-mode-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.refine-mode-badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; color: var(--reading-accent, var(--primary)); background: color-mix(in srgb, var(--reading-accent, var(--primary)) 12%, transparent); border: 1px solid color-mix(in srgb, var(--reading-accent, var(--primary)) 24%, transparent); }
+.refine-switch-btn,.refine-preset-chip { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-raised, var(--background)); color: var(--foreground); font-size: 12px; cursor: pointer; transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease; }
+.refine-switch-btn:hover,.refine-preset-chip:hover { border-color: color-mix(in srgb, var(--reading-accent, var(--primary)) 40%, var(--border)); color: var(--reading-accent, var(--primary)); background: color-mix(in srgb, var(--reading-accent, var(--primary)) 8%, var(--surface-raised, var(--background))); }
+.refine-preset-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .refine-note-instruction { display: grid; gap: 6px; font-size: 13px; }
 .refine-note-instruction textarea { width: 100%; resize: vertical; }
 .refine-note-model label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
@@ -27,7 +33,7 @@
 .refine-note-error { color: var(--destructive); font-size: 13px; margin-top: 12px; }
 .refine-note-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; }
 .refine-note-actions>span { font-size: 12px; margin-right: auto; color: var(--muted-foreground); }
-.refine-note-actions button,.refine-note-error button { padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
-.refine-note-actions .refine-note-accept { background: var(--primary); color: var(--primary-foreground); }
+.refine-note-actions button,.refine-note-error button { padding: 7px 12px; border: 1px solid var(--border); border-radius: 9px; font-size: 12px; background: var(--surface-raised, transparent); color: var(--foreground); cursor: pointer; }
+.refine-note-actions .refine-note-accept { background: var(--action-primary-bg, var(--primary)); color: var(--action-primary-fg, var(--primary-foreground)); border-color: transparent; }
 .refine-note-dialog button:disabled { opacity: .5; cursor: not-allowed; }
 @media (max-width: 680px) { .refine-note-compare { grid-template-columns: 1fr; } .refine-note-dialog { padding: 16px; } }

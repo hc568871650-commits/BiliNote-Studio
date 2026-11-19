@@ -8,12 +8,21 @@ export interface IProviderCardProps {
   id: string
   providerName: string
   endpoint: string
+  protocol?: string
+}
+
+const protocolLabels: Record<string, string> = {
+  'openai-chat': 'Chat',
+  'openai-responses': 'Responses',
+  anthropic: 'Messages',
+  gemini: 'Gemini',
 }
 
 const ProviderCard = ({
   providerName,
   id,
   endpoint,
+  protocol,
 }: IProviderCardProps) => {
   const navigate = useNavigate()
   const updateProvider = useProviderStore(state => state.updateProvider)
@@ -36,7 +45,13 @@ const ProviderCard = ({
 
   return (
     <div className="api-provider-row">
-      <button type="button" className="api-provider-info" onClick={() => navigate(`/settings/model/${id}`)} aria-label={`配置 ${providerName}`}><strong>{providerName}</strong><span title={endpoint}>{endpoint || '未配置地址'}</span></button>
+      <button type="button" className="api-provider-info" onClick={() => navigate(`/settings/model/${id}`)} aria-label={`配置 ${providerName}`}>
+        <div className="api-provider-info-head">
+          <strong>{providerName}</strong>
+          {protocol && protocolLabels[protocol] && <span className="api-provider-protocol">{protocolLabels[protocol]}</span>}
+        </div>
+        <span title={endpoint}>{endpoint || '未配置地址'}</span>
+      </button>
 
       <div className="settings-row-controls">
         <Switch
@@ -45,7 +60,7 @@ const ProviderCard = ({
           disabled={busy}
           onCheckedChange={checked => void handleToggle(checked)}
         />
-        <button type="button" className="api-icon-button" title="配置" aria-label={`编辑 ${providerName}`} onClick={() => navigate(`/settings/model/${id}`)}><ChevronRight size={16} /></button>
+        <button type="button" className="api-icon-button" title="配置" aria-label={`编辑 ${providerName}`} onClick={() => navigate(`/settings/model/${id}`)}><ChevronRight size={15} strokeWidth={1.6} /></button>
       </div>
     </div>
   )

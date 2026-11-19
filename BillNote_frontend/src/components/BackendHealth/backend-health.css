@@ -1,11 +1,14 @@
-.backend-status-trigger { position: fixed; right: 16px; bottom: 16px; z-index: 40; display: inline-flex; max-width: calc(100vw - 32px); height: 36px; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--border); border-radius: 12px; padding: 0 12px; background: var(--card); color: var(--card-foreground); box-shadow: 0 4px 16px #0002; font-size: 12px; cursor: pointer; }
-.backend-status-trigger:hover { background: var(--accent); }
+.backend-rail-trigger { position: relative; }
+.backend-rail-dot { position: absolute; right: 5px; top: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); box-shadow: 0 0 0 1.5px var(--surface-shell); }
+.backend-status-trigger { position: fixed; right: 16px; bottom: 16px; z-index: 40; display: inline-flex; max-width: calc(100vw - 32px); height: 34px; align-items: center; justify-content: center; gap: 7px; border: var(--glass-border, 1px solid var(--border)); border-radius: 999px; padding: 0 13px; background: var(--glass-bg, var(--card)); backdrop-filter: var(--glass-blur, none); -webkit-backdrop-filter: var(--glass-blur, none); color: var(--card-foreground); box-shadow: var(--glass-shadow, 0 4px 16px #0002), var(--glass-highlight, none); font-size: 12px; font-weight: 500; cursor: pointer; transition: transform 180ms var(--ease-spring, ease), background 160ms var(--ease-apple, ease); }
+.backend-status-trigger:hover { background: var(--glass-bg-strong, var(--accent)); transform: translateY(-1px); }
+.backend-status-trigger:active { transform: scale(0.98); }
 .backend-status-trigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
 .backend-status-label { max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); padding-left: 6px; border-left: 1px solid var(--border); }
 .backend-status-name { white-space: nowrap; }
 .backend-dot { display: inline-block; width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: var(--muted-foreground); }
 .backend-dot-green { background: #16a34a; }.backend-dot-yellow { background: #d97706; }.backend-dot-red { background: #dc2626; }
-.backend-management-panel { width: min(760px, calc(100vw - 32px)); max-width: min(760px, calc(100vw - 32px)) !important; max-height: calc(100dvh - 40px); overflow: auto; gap: 14px; border-radius: 20px; padding: 24px; }
+.backend-management-panel { width: min(760px, calc(100vw - 32px)); max-width: min(760px, calc(100vw - 32px)) !important; max-height: calc(100dvh - 40px); overflow: auto; gap: 14px; border-radius: 22px; padding: 24px; }
 .backend-eyebrow { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted-foreground); }
 .backend-management-title { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 21px; }
 .backend-health-summary { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; border: 1px solid var(--border); border-radius: 12px; padding: 16px; background: var(--muted); }

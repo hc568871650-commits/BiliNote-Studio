@@ -13,5 +13,6 @@ class Provider(Base):
     type = Column(String, nullable=False)
     api_key = Column(String, nullable=False)
     base_url = Column(String, nullable=False)
+    protocol = Column(String, nullable=True, default="openai-chat")
     enabled = Column(Integer, default=1)
     created_at = Column(DateTime, server_default=func.now())

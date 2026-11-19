@@ -373,6 +373,7 @@ class NoteGenerator:
             model_name=model_name,
             provider=provider["type"],
             name=provider["name"],
+            protocol=provider.get("protocol") or "openai-chat",
         )
         return GPTFactory().from_config(config, backend_id=provider_id or "")
 
@@ -713,6 +714,7 @@ class NoteGenerator:
             checkpoint_key=task_id,
             frame_evidence=[{key: value for key, value in item.items() if key not in ('path', 'fingerprint')}
                             for item in self.frame_evidence],
+            structured=True,
         )
 
         try:
@@ -745,6 +747,19 @@ class NoteGenerator:
         :param platform: 平台标识，用于链接替换
         :return: 处理后的 Markdown 字符串
         """
+        from app.models.structured_note import extract_structured_note_json
+
+        structured_doc = extract_structured_note_json(
+            markdown,
+            fallback_title=audio_meta.title or "",
+            platform=platform or "",
+            video_id=audio_meta.video_id or "",
+        )
+        if structured_doc is not None:
+            if "screenshot" in formats and video_path:
+                structured_doc = self._insert_structured_screenshots(structured_doc, video_path)
+            return json.dumps(structured_doc, ensure_ascii=False)
+
         if "screenshot" in formats and video_path:
             markdown = self._insert_screenshots(markdown, video_path)
 
@@ -755,6 +770,45 @@ class NoteGenerator:
                 logger.warning(f"链接插入失败，跳过该步骤：{e}")
 
         return markdown
+
+    def _insert_structured_screenshots(self, doc: dict, video_path: Path) -> dict:
+        if not self.video_duration:
+            import ffmpeg
+            from ffmpeg_helper import find_ffmpeg_binary
+            self.video_duration = float(ffmpeg.probe(str(video_path), cmd=find_ffmpeg_binary('ffprobe'))['format']['duration'])
+        outcomes = []
+        idx = 0
+        for section in doc.get("sections") or []:
+            for block in section.get("blocks") or []:
+                if block.get("type") != "screenshot" or block.get("image_url"):
+                    continue
+                ts = int(block.get("timestamp") or 0)
+                try:
+                    if not self.run_dir:
+                        raise RuntimeError("Missing isolated screenshot directory")
+                    actual_ts = nearest_candidate(ts, self.frame_evidence, self.video_duration)
+                    img_path = generate_screenshot(str(video_path), str(self.run_dir / "images"), max(0, actual_ts - .001), idx)
+                    if not Path(img_path).is_file() or Path(img_path).stat().st_size == 0:
+                        raise RuntimeError('Screenshot output is missing or empty')
+                    filename = Path(img_path).name
+                    img_url = f"images/{filename}"
+                    block["timestamp"] = int(round(actual_ts))
+                    block["label"] = f"{int(actual_ts // 60):02d}:{int(actual_ts % 60):02d}"
+                    block["image_url"] = img_url
+                    if not block.get("caption"):
+                        block["caption"] = f"视频截图 {int(actual_ts // 60):02d}:{actual_ts % 60:06.3f}"
+                    outcomes.append(dict(requested_time=ts, actual_time=actual_ts, path=img_url, success=True))
+                except Exception as exc:
+                    logger.error(f"生成截图失败 (timestamp={ts})：{exc}")
+                    outcomes.append(dict(requested_time=ts, success=False, error=str(exc)))
+                    if self.run_dir:
+                        self.run_dir.mkdir(parents=True, exist_ok=True)
+                        (self.run_dir / 'screenshot_evidence.json').write_text(json.dumps(outcomes, ensure_ascii=False, indent=2), encoding='utf-8')
+                    raise
+                idx += 1
+        if self.run_dir and outcomes:
+            (self.run_dir / 'screenshot_evidence.json').write_text(json.dumps(outcomes, ensure_ascii=False, indent=2), encoding='utf-8')
+        return doc
 
     def _insert_screenshots(self, markdown: str, video_path: Path) -> str | None | Any:
         """

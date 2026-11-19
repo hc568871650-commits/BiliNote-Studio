@@ -1,6 +1,8 @@
 # Studio 源码同步与发行流程
 
-2026-10-31：`v0.1.0-preview.31` 已作为预发行版公开。最终附件与新安装、旧包升级验证见 [preview.31 验收](docs/releases/0.1.0-preview.31-validation.md)。
+2026-11-18：`v0.2.0` 正式里程碑版本发布流程，详见 [0.2.0 发布说明](docs/releases/0.2.0.md) 与 [0.2.0 验收记录](docs/releases/0.2.0-validation.md)。
+
+历史记录（2026-10-31）：`v0.1.0-preview.31` 已作为预发行版公开。最终附件与新安装、旧包升级验证见 [preview.31 验收](docs/releases/0.1.0-preview.31-validation.md)。
 
 历史记录（2026-10-12）：[`v0.1.0-preview.8` 已作为预发行版公开](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.1.0-preview.8)。源码、版本和独立安装包已完成安装/旧包升级验收，GitHub 检查与匿名附件/标签源码核验通过。累计内容见 [preview.8 发布说明](docs/releases/0.1.0-preview.8.md)，当时实测见[验证记录](docs/releases/0.1.0-preview.8-validation.md)。
 
@@ -8,7 +10,7 @@
 
 公开仓库从清理后的源码快照建立，不导入开发工作区的私人 Git 历史。后续在独立发布 checkout 逐文件对比应用源码、新增模块、依赖锁文件、必要测试和合成预览入口，不能整目录覆盖。
 
-保留公开用户指南、首发验证资料、MIT 与上游版权声明、完整许可原文及 `licenses/`。本轮公共配图位于 `doc/showcase/studio-20261012/`，来源说明随图片保留。
+保留公开用户指南、首发验证资料、MIT 与上游版权声明、完整许可原文及 `licenses/`。当前公共配图位于 `doc/showcase/studio-0.2.0/`（并保留历史 `doc/showcase/studio-20261012/`），来源说明随图片保留。
 
 不同步配置、Cookie、密钥、数据库、真实笔记、上传文件、缓存、日志、WebView2 数据、备份、构建产物、内部历史和本机部署截图。忽略规则不会移除已跟踪文件；检查实际 `BillNote_frontend` 拼写、已跟踪和新增文件。
 
@@ -16,7 +18,7 @@
 
 ## 版本、身份与构建
 
-以下应用入口统一为 `0.1.0-preview.31`，只更新应用自身版本，不能全局替换第三方版本：
+以下应用入口统一为 `0.2.0`，只更新应用自身版本，不能全局替换第三方版本：
 
 - `BillNote_frontend/package.json` 及 `package-lock.json` 的根包。
 - `BillNote_frontend/src-tauri/Cargo.toml` 和 `Cargo.lock` 的 `app` 包。

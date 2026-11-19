@@ -20,12 +20,11 @@ export default function GenerationOptionsFields({ value, onChange, disabled = fa
       {numberField('max_requests', 'HTTP 尝试总上限（含重试）', 1, 200)}
       {numberField('retry_attempts', '每请求最多尝试次数', 1, 3)}
     </div>
-    <p className="generation-details-muted">自动值交给服务端判断。不支持指定思考等级时会报错；模型明确拒绝温度时才尝试省略温度，并记录这次兼容请求。{sourceLocked && '分段参数沿用所选来源，两组保持一致。'}</p>
-    <details><summary>费用估算价格</summary><label className="generation-price-toggle"><input type="checkbox" checked={Boolean(price)} disabled={disabled} onChange={event => update({ price: event.target.checked ? { mode: 'tokens', currency: 'USD' } as GenerationPrice : undefined })} />填写服务商价格（仅用于估算）</label>
+    {sourceLocked && <p className="generation-details-muted">分段参数沿用所选来源。</p>}
+    <details><summary>费用估算价格</summary><label className="generation-price-toggle"><input type="checkbox" checked={Boolean(price)} disabled={disabled} onChange={event => update({ price: event.target.checked ? { mode: 'tokens', currency: 'USD' } as GenerationPrice : undefined })} />自定义单价（用于估算）</label>
       {price && <div className="generation-settings-grid"><label>计费方式<ChoiceSelect label="计费方式" value={price.mode} disabled={disabled} onChange={mode => updatePrice({ mode: mode as GenerationPrice['mode'] })} options={[{ value: 'tokens', label: '按 Token' }, { value: 'per_call', label: '按次' }]} /></label><label>币种<ChoiceSelect label="币种" value={price.currency} disabled={disabled} onChange={currency => updatePrice({ currency: currency as GenerationPrice['currency'] })} options={[{ value: 'USD', label: 'USD' }, { value: 'CNY', label: 'CNY' }]} /></label>
         {(price.mode === 'per_call' ? [['per_call', '每次价格']] : [['input_per_million', '输入 / 百万 Token'], ['output_per_million', '输出 / 百万 Token'], ['cached_input_per_million', '缓存输入 / 百万 Token']]).map(([key, label]) => <label key={key}>{label}<input type="number" min={0} step="any" disabled={disabled} value={price[key as keyof GenerationPrice] ?? ''} placeholder="未知" onChange={event => updatePrice({ [key]: event.target.value === '' ? undefined : Number(event.target.value) })} /></label>)}
       </div>}
-      {price && <p className="generation-details-muted">留空表示未知，填写 0 表示免费。价格未填完整时不记录价格，也不计算为零费用。</p>}
     </details>
   </div>
 }

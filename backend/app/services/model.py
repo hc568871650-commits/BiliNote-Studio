@@ -1,6 +1,15 @@
 
 
-from app.db.model_dao import insert_model, get_all_models, get_model_by_provider_and_name, delete_model, update_model_display_name
+from app.db.model_dao import (
+    insert_model,
+    insert_models_batch,
+    get_all_models,
+    get_model_by_provider_and_name,
+    delete_model,
+    delete_models_batch,
+    update_model,
+    update_model_display_name,
+)
 from app.db.provider_dao import get_enabled_providers
 from app.enmus.exception import ProviderErrorEnum
 from app.exceptions.provider import ProviderError
@@ -21,6 +30,7 @@ class ModelService:
             provider=provider["name"],
             model_name='',
             name=provider["name"],
+            protocol=provider.get("protocol") or "openai-chat",
         )
 
     @staticmethod
@@ -135,14 +145,8 @@ class ModelService:
             logger.info(f"[{provider['name']}] 获取模型成功，共 {len(models)} 个")
         return result
     @staticmethod
-    def connect_test(id: str, model: str | None = None) -> bool:
-        """连通性测试：发一条最小化 chat completion。
-
-        model 优先级：
-          1. 调用方显式传入（前端可在「模型选择」UI 里挑一个再测）
-          2. DB 中该 provider 已保存的第一个模型
-          3. 都没有 → 抛错让用户先加一个模型
-        """
+    def connect_test(id: str, model: str | None = None, protocol: str | None = None) -> bool:
+        """多协议统一连通性测试：支持 openai-chat / openai-responses / anthropic / gemini。"""
         provider = ProviderService.get_provider_by_id(id)
         if not provider:
             raise ProviderError(
@@ -177,19 +181,59 @@ class ModelService:
                 message="Whisper 是语音转写模型，不能用于聊天连接测试；请在转写配置中验证",
             )
 
+        effective_protocol = (protocol or provider.get("protocol") or "openai-chat").strip() or "openai-chat"
+        if effective_protocol == "openai-chat":
+            try:
+                ok = OpenAICompatibleProvider.test_connection(
+                    api_key=provider.get('api_key'), base_url=provider.get('base_url'), model=model)
+            except ValueError as exc:
+                failure = ProviderError(code=ProviderErrorEnum.WRONG_PARAMETER.code, message=str(exc))
+                failure.error_details = getattr(exc, 'details', None)
+                raise failure from None
+            if ok:
+                return True
+            raise ProviderError(
+                code=ProviderErrorEnum.WRONG_PARAMETER.code,
+                message=ProviderErrorEnum.WRONG_PARAMETER.message,
+            )
+
+        from app.services.ai_client import close_client, get_client
+        from app.utils.ai_errors import error_details
+        wrapper = None
         try:
-            ok = OpenAICompatibleProvider.test_connection(
-                api_key=provider.get('api_key'), base_url=provider.get('base_url'), model=model)
-        except ValueError as exc:
-            failure = ProviderError(code=ProviderErrorEnum.WRONG_PARAMETER.code, message=str(exc))
-            failure.error_details = getattr(exc, 'details', None)
+            wrapper = get_client(provider["id"], model, protocol=effective_protocol)
+            response = wrapper.client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "Reply with OK"}],
+                max_tokens=16,
+            )
+            choices = getattr(response, "choices", None) or []
+            if choices:
+                return True
+            raise ValueError("上游未返回有效响应内容")
+        except Exception as exc:
+            details = error_details(exc, protocol=effective_protocol, api_key=provider.get("api_key"))
+            failure = ProviderError(code=ProviderErrorEnum.WRONG_PARAMETER.code, message=details.get("detail") or str(exc))
+            failure.error_details = details
             raise failure from None
-        if ok:
-            return True
-        raise ProviderError(
-            code=ProviderErrorEnum.WRONG_PARAMETER.code,
-            message=ProviderErrorEnum.WRONG_PARAMETER.message,
-        )
+        finally:
+            if wrapper is not None:
+                close_client(wrapper.client)
+
+    @staticmethod
+    def update_model_full(model_id: int, *, model_name: str | None = None, display_name: str | None = None, update_display_name: bool = False):
+        return update_model(model_id, model_name=model_name, display_name=display_name, update_display_name=update_display_name)
+
+    @staticmethod
+    def add_models_batch(provider_id: str, items: list[dict]):
+        provider = ProviderService.get_provider_by_id(provider_id)
+        if not provider:
+            raise ValueError(f"供应商不存在: {provider_id}")
+        return insert_models_batch(provider_id, items)
+
+    @staticmethod
+    def delete_models_batch(model_ids: list[int]) -> int:
+        return delete_models_batch(model_ids)
 
 
 

@@ -2,18 +2,34 @@ import request from '@/utils/request'
 import { withProviderProtocol } from './providerProtocol'
 import type { Task } from '@/store/taskStore'
 import type { ProviderProtocol } from '@/store/providerProtocolStore'
+import type { StructuredSection } from '@/types/structuredNote'
 
-export interface RefinementSelection { version_id: string; texts: string[] }
+export interface RefinementSelection {
+  version_id: string
+  texts: string[]
+  section_ids?: string[]
+}
 export interface RefinementContext {
   before: string; start_time: number | null; end_time: number | null
+  time_ranges?: { start: number; end: number }[]
   video_available: boolean; transcript_count: number
+  structured_mode?: boolean
+  section_ids?: string[]
+  section_titles?: string[]
+  matched_section_ids?: string[]
+  before_sections?: StructuredSection[]
 }
 export interface RefinementPreview {
   draft_id: string; before: string; after: string; start_time: number; end_time: number
+  time_ranges?: { start: number; end: number }[]
+  structured_mode?: boolean
+  section_ids?: string[]
+  before_sections?: StructuredSection[]
+  after_sections?: StructuredSection[]
   evidence: { transcript: { start: number; end: number; text: string }[]; frames: { time: number; reason: string; image_url: string }[] }
 }
 export interface RefinementRequest extends RefinementSelection {
-  start_time: number; end_time: number; instruction: string
+  start_time: number; end_time: number; time_ranges?: { start: number; end: number }[]; instruction: string
   provider_id: string; model_name: string; protocol: ProviderProtocol; use_video: boolean
 }
 const options = { timeout: 180000, suppressToast: true }

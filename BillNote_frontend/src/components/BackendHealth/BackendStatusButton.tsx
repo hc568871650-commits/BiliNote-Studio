@@ -1,5 +1,25 @@
 import { Server } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import type { Health } from './BackendHealthIndicator'
+import { useBackendStatusStore } from './backendStatusStore'
+
+export function BackendRailStatusButton({ className }: { className?: string }) {
+  const active = useBackendStatusStore(state => state.active)
+  const health = useBackendStatusStore(state => state.health)
+  const label = useBackendStatusStore(state => state.label)
+  const openPanel = useBackendStatusStore(state => state.openPanel)
+  if (!active || !openPanel) return null
+  return <button
+    type="button"
+    className={cn(className || 'workspace-icon', 'backend-rail-trigger')}
+    title={`后端状态：${label}`}
+    aria-label={`打开后端管理，后端状态：${label}`}
+    onClick={openPanel}
+  >
+    <Server size={18} aria-hidden="true" />
+    <span className={`backend-rail-dot backend-dot-${health}`} aria-hidden="true" />
+  </button>
+}
 
 export default function BackendStatusButton({ health, label, onClick }: {
   health: Health

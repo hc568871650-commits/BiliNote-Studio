@@ -72,9 +72,146 @@ def _sections(text):
             for j in range(0, len(body), CHUNK_SIZE)]
 
 
-def _cached_sections(note_id, versions):
+def _spans_text(spans):
+    if not isinstance(spans, list):
+        return ''
+    return ''.join(str(s.get('text') or '') for s in spans if isinstance(s, dict)).strip()
+
+
+def _structured_sections(doc):
+    """Build retrieval sections directly from StructuredNoteDocument preserving real section_id and time_ranges."""
+    if not isinstance(doc, dict) or not isinstance(doc.get('sections'), list):
+        return None
+    output = []
+    for idx, sec in enumerate(doc['sections'], 1):
+        if not isinstance(sec, dict):
+            continue
+        sec_id = str(sec.get('id') or f'sec-{idx}').strip() or f'sec-{idx}'
+        title = str(sec.get('title') or f'章节 {idx}').strip()[:300]
+        ranges = [
+            {'start': r.get('start', 0), 'end': r.get('end', r.get('start', 0)), 'label': str(r.get('label') or '')}
+            for r in (sec.get('time_ranges') or [])
+            if isinstance(r, dict)
+        ]
+        parts = [f'## {title}']
+        categories = set()
+
+        for tk in sec.get('core_takeaways') or []:
+            txt = _spans_text(tk.get('spans') if isinstance(tk, dict) else None)
+            if txt:
+                categories.add('core_takeaways')
+                parts.append(txt)
+
+        for blk in sec.get('blocks') or []:
+            if not isinstance(blk, dict):
+                continue
+            btype = blk.get('type')
+            if btype == 'paragraph':
+                txt = _spans_text(blk.get('spans'))
+                if txt:
+                    categories.add('body')
+                    parts.append(txt)
+            elif btype == 'flow_chain':
+                steps = [_spans_text(step) for step in blk.get('steps') or []]
+                steps = [s for s in steps if s]
+                if steps:
+                    categories.add('body')
+                    parts.append(' → '.join(steps))
+            elif btype == 'list':
+                lines = [_spans_text(item) for item in blk.get('items') or []]
+                lines = [s for s in lines if s]
+                if lines:
+                    categories.add('body')
+                    parts.append('\n'.join(lines))
+            elif btype == 'checklist':
+                items = [_spans_text(item.get('spans') if isinstance(item, dict) else None) for item in blk.get('items') or []]
+                items = [s for s in items if s]
+                if items:
+                    categories.add('checklist')
+                    prefix = str(blk.get('title') or '').strip()
+                    if prefix:
+                        parts.append(prefix)
+                    parts.append('\n'.join(items))
+            elif btype == 'table':
+                cols = [str(c) for c in (blk.get('columns') or [])]
+                row_lines = []
+                for row in blk.get('rows') or []:
+                    if isinstance(row, list):
+                        row_lines.append(' | '.join(_spans_text(cell) for cell in row))
+                if cols or row_lines:
+                    categories.add('table')
+                    if cols:
+                        parts.append(' | '.join(cols))
+                    parts.extend(row_lines)
+            elif btype == 'code_block' and blk.get('code'):
+                categories.add('code')
+                parts.append(str(blk.get('code')))
+
+        for anno in sec.get('annotations') or []:
+            if not isinstance(anno, dict):
+                continue
+            kind = str(anno.get('kind') or 'why')
+            detail = str(anno.get('full_detail') or anno.get('short_hint') or '').strip()
+            if detail:
+                categories.add(f'annotation:{kind}')
+                hint = str(anno.get('short_hint') or '').strip()
+                parts.append(f'[{kind}] {hint} {detail}'.strip())
+
+        quiz = sec.get('quiz')
+        if isinstance(quiz, dict) and quiz.get('full_question'):
+            categories.add('quiz')
+            q_lines = [str(quiz.get('full_question') or '')]
+            for opt in quiz.get('options') or []:
+                if isinstance(opt, dict) and opt.get('text'):
+                    q_lines.append(f"{opt.get('key', '')}. {opt.get('text')}")
+            if quiz.get('explanation'):
+                q_lines.append(str(quiz['explanation']))
+            parts.append('\n'.join(q_lines))
+
+        body = '\n\n'.join(p for p in parts if p)
+        cat_list = sorted(categories)
+        if len(body) <= CHUNK_SIZE:
+            output.append({
+                'section_id': sec_id,
+                'section_title': title,
+                'text': body,
+                'time_ranges': ranges,
+                'content_categories': cat_list,
+                'structured': True,
+            })
+        else:
+            for c_idx, offset in enumerate(range(0, len(body), CHUNK_SIZE), 1):
+                output.append({
+                    'section_id': f'{sec_id}-c{c_idx}',
+                    'canonical_section_id': sec_id,
+                    'section_title': title,
+                    'text': body[offset:offset + CHUNK_SIZE],
+                    'time_ranges': ranges,
+                    'content_categories': cat_list,
+                    'structured': True,
+                })
+    return output or None
+
+
+def _load_structured_file(folder, version_id, version_obj=None):
+    path = folder / 'versions' / (version_id + '.json')
+    note_storage._inside(path, note_storage.ROOT)
+    if path.is_symlink():
+        raise ValueError('Linked structured version')
+    if path.is_file():
+        data = json.loads(path.read_text(encoding='utf-8'))
+        if isinstance(data, dict) and isinstance(data.get('sections'), list):
+            return data
+    if isinstance(version_obj, dict) and isinstance(version_obj.get('structured'), dict):
+        return version_obj['structured']
+    return None
+
+
+def _cached_sections(note_id, versions, structured_versions=None):
     global _CACHE_BYTES
-    fingerprint = hashlib.sha256(json.dumps(versions, ensure_ascii=False,
+    structured_versions = structured_versions or {}
+    cache_payload = {'versions': versions, 'structured': structured_versions}
+    fingerprint = hashlib.sha256(json.dumps(cache_payload, ensure_ascii=False,
                                             sort_keys=True).encode('utf-8')).hexdigest()
     key = (str(note_storage.ROOT.resolve()), note_id)
     with _LOCK:
@@ -84,7 +221,11 @@ def _cached_sections(note_id, versions):
             return found[1]
         if found:
             _CACHE_BYTES -= _CACHE.pop(key)[2]
-        sections = {v: _sections(content) for v, content in versions.items()}
+        sections = {}
+        for v, content in versions.items():
+            s_doc = structured_versions.get(v)
+            parsed = _structured_sections(s_doc) if s_doc else None
+            sections[v] = parsed if parsed is not None else _sections(content)
         size = len(json.dumps(sections, ensure_ascii=False).encode('utf-8'))
         if size <= CACHE_MAX_BYTES:
             _CACHE[key] = (fingerprint, sections, size)
@@ -108,6 +249,7 @@ def _load(folder, note_id, metadata_only=False):
         return {'id': note_id, 'title': str((task.get('audioMeta') or {}).get('title') or note_id)[:300],
                 'archived': bool(task.get('archived_at')), 'versions': {}, 'transcript': {}, 'version_id': current}
     versions = {}
+    structured_versions = {}
     markdown = task.get('markdown') or ''
     if isinstance(markdown, str):
         versions['legacy'] = markdown
@@ -122,13 +264,16 @@ def _load(folder, note_id, metadata_only=False):
             if not isinstance(content, str):
                 raise ValueError('Invalid content')
             versions[version_id] = content
+            structured_doc = _load_structured_file(folder, version_id, version)
+            if structured_doc is not None:
+                structured_versions[version_id] = structured_doc
     else:
         raise ValueError('Invalid versions')
     transcript = task.get('transcript') or {}
     if not isinstance(transcript, dict):
         raise ValueError('Invalid transcript')
     return {'id': note_id, 'title': str((task.get('audioMeta') or {}).get('title') or note_id)[:300],
-            'archived': bool(task.get('archived_at')), 'versions': _cached_sections(note_id, versions),
+            'archived': bool(task.get('archived_at')), 'versions': _cached_sections(note_id, versions, structured_versions),
             'transcript': transcript}
 
 
@@ -352,6 +497,65 @@ def _direct_source(task):
             'video_id': str(audio.get('video_id') or '')[:300], 'url': public_url}
 
 
+def _direct_structured_meta(folder, version_id, task, matched_section_title, terms):
+    markdown = task.get('markdown')
+    if not isinstance(markdown, list) or not markdown:
+        return None
+    current = next((v for v in markdown if isinstance(v, dict) and v.get('ver_id') == version_id), markdown[0])
+    s_path = folder / 'versions' / (version_id + '.json')
+    info = _direct_stat(s_path)
+    doc = None
+    if info is not None and stat.S_ISREG(info.st_mode):
+        try:
+            doc = json.loads(s_path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            doc = None
+    if doc is None and isinstance(current, dict) and isinstance(current.get('structured'), dict):
+        doc = current['structured']
+    if not isinstance(doc, dict) or not isinstance(doc.get('sections'), list):
+        return None
+    clean_title = re.sub(
+        r'\s*(?:\[原片\s*@[^\]]+\]\([^)]+\)|\(\d+:\d{2}(?::\d{2})?\)|Content-\[[^\]]+\])'
+        r'(?:\s*·\s*(?:\[原片\s*@[^\]]+\]\([^)]+\)|\(\d+:\d{2}(?::\d{2})?\)|Content-\[[^\]]+\]))*\s*$',
+        '',
+        matched_section_title or '',
+    ).strip()
+    target = next((s for s in doc['sections'] if isinstance(s, dict) and str(s.get('title') or '').strip() == clean_title), None)
+    if target is None:
+        return None
+    sec_id = str(target.get('id') or '').strip()
+    ranges = [
+        {'start': r.get('start', 0), 'end': r.get('end', r.get('start', 0)), 'label': str(r.get('label') or '')}
+        for r in (target.get('time_ranges') or [])
+        if isinstance(r, dict)
+    ]
+    category = 'body'
+    if any(all(t in _normalize(_spans_text(tk.get('spans'))) for t in terms) for tk in target.get('core_takeaways') or [] if isinstance(tk, dict)):
+        category = 'core_takeaways'
+    else:
+        for anno in target.get('annotations') or []:
+            if isinstance(anno, dict):
+                a_text = _normalize(f"{anno.get('short_hint') or ''} {anno.get('full_detail') or ''}")
+                if all(t in a_text for t in terms):
+                    category = f"annotation:{anno.get('kind') or 'why'}"
+                    break
+        else:
+            quiz = target.get('quiz')
+            if isinstance(quiz, dict):
+                q_blob = _normalize(
+                    f"{quiz.get('full_question') or ''} {quiz.get('explanation') or ''} "
+                    + ' '.join(str(o.get('text') or '') for o in (quiz.get('options') or []) if isinstance(o, dict))
+                )
+                if all(t in q_blob for t in terms):
+                    category = 'quiz'
+    return {
+        'section_id': sec_id,
+        'section_title': str(target.get('title') or clean_title)[:300],
+        'time_ranges': ranges,
+        'content_category': category,
+    }
+
+
 def search_notes(query, scope='all', folder_id=None, offset=0, limit=20):
     """Literal desktop search, independent of the assistant's query rewriting."""
     _paging(offset, limit, 30)
@@ -413,24 +617,34 @@ def search_notes(query, scope='all', folder_id=None, offset=0, limit=20):
             excerpt_end = min(len(matched_text), max(end + 100, excerpt_start + EXCERPT_SIZE))
             excerpt = matched_text[excerpt_start:excerpt_end]
             section, cursor = {'section_id': 'metadata', 'section_title': '笔记标题'}, 0
+            structured_hit = None
             if match_kind == 'body':
                 for current in _sections(body):
                     if cursor + len(current['text']) > start:
                         section = current
                         break
                     cursor += len(current['text'])
+                structured_hit = _direct_structured_meta(folder, version_id, task, section['section_title'], terms)
+            effective_section_id = (structured_hit['section_id'] if structured_hit and structured_hit.get('section_id') else section['section_id'])
+            effective_section_title = (structured_hit['section_title'] if structured_hit and structured_hit.get('section_title') else section['section_title'])
             assigned = folders['assignments'].get(note_id, note_folders.DEFAULT_ID)
             note = {'id': note_id, 'title': title, 'archived': bool(task.get('archived_at')), 'folder_id': assigned}
-            result = _source(note, version_id, {'section_id': section['section_id'],
-                'section_title': section['section_title'], 'text': excerpt})
+            result = _source(note, version_id, {'section_id': effective_section_id,
+                'section_title': effective_section_title, 'text': excerpt})
+            locator = {'version_id': version_id, 'section_id': effective_section_id,
+                       'section_title': effective_section_title, 'char_offset': start,
+                       'match_text': matched_text[start:end], 'match_kind': match_kind}
+            if structured_hit:
+                locator['time_ranges'] = structured_hit['time_ranges']
+                locator['content_category'] = structured_hit['content_category']
+                result['time_ranges'] = structured_hit['time_ranges']
+                result['content_category'] = structured_hit['content_category']
             result.update(folder_name=folder_names.get(assigned, '默认文件夹'), excerpt=excerpt,
                 excerpt_start=excerpt_start, match_kind=match_kind, match_start=start, match_end=end,
                 match_start_utf16=len(matched_text[:start].encode('utf-16-le')) // 2,
                 match_end_utf16=len(matched_text[:end].encode('utf-16-le')) // 2,
                 match_text=matched_text[start:end], source=_direct_source(task),
-                locator={'version_id': version_id, 'section_id': section['section_id'],
-                         'section_title': section['section_title'], 'char_offset': start,
-                         'match_text': matched_text[start:end], 'match_kind': match_kind})
+                locator=locator)
             results.append(result)
         except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError):
             warnings.append({'note_id': note_id, 'code': 'unreadable_note',

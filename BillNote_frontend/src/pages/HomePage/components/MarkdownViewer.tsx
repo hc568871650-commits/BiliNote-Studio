@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef, useMemo, useCallback, memo, FC } from 'react'
+import { useState, useEffect, useMemo, useCallback, memo, FC } from 'react'
 import { useSourceNavigationStore } from '@/store/sourceNavigationStore'
 import { resolveQuoteTargets } from '@/utils/quoteSource'
 import { renderedNoteMarkdown, resolveSearchTarget, scrollToSearchMatch } from '@/utils/searchLocation'
 import ReactMarkdown from 'react-markdown'
-import { Button } from '@/components/ui/button.tsx'
-import { Copy, Download, ArrowRight, Play, ExternalLink } from 'lucide-react'
+import { Copy, Play, ExternalLink, Sparkles, Loader2 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+import { getNoteLearningState, updateNoteLearningState, upgradeNoteStructured } from '@/services/note'
+import { usePurposeModelStore } from '@/store/purposeModelStore'
 import Idle from '@/components/Lottie/Idle.tsx'
 import GenerationProgress from './GenerationProgress'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -21,22 +22,27 @@ import 'katex/dist/katex.min.css'
 import 'github-markdown-css/github-markdown-light.css'
 import { useTaskStore } from '@/store/taskStore'
 import { noteStyles } from '@/constant/note.ts'
+import { noteStyleLabel } from '@/utils/noteGeneration'
 import { MarkdownHeader } from '@/pages/HomePage/components/MarkdownHeader.tsx'
 import TranscriptViewer from '@/pages/HomePage/components/transcriptViewer.tsx'
 import MarkmapEditor from '@/pages/HomePage/components/MarkmapComponent.tsx'
 import ChatPanel from '@/pages/HomePage/components/ChatPanel.tsx'
-import AnimatedPanel from '@/components/AnimatedPanel'
 import { scrollMotion } from '@/utils/motion'
 import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
 import ReaderPane from '@/pages/HomePage/components/ReaderPane'
 import { rehypeNoteOutline, resolveChapter, scrollToChapter } from '@/utils/noteOutline'
 import ReadingSelection, { rehypeReadingBlocks } from './ReadingSelection'
 import RefineNoteDialog from './RefineNoteDialog'
-import { useReadingAssistantStore, permanentSessionKey, temporarySessionKey, type ReadingAttachment } from '@/store/readingAssistantStore'
+import { useReadingAssistantStore, permanentSessionKey, type ReadingAttachment } from '@/store/readingAssistantStore'
+import { resolveStructuredNote, structuredNoteToMindmapMarkdown, type StructuredNoteDocument } from '@/types/structuredNote'
+import { useWorkspaceTopbar } from '@/layouts/WorkspaceTopbarContext'
+import StructuredNoteReader from './StructuredNoteReader/StructuredNoteReader'
+import type { QuizAnswerPayload, QuizAskPayload } from './StructuredNoteReader/MorphingQuizCapsule'
 
 interface VersionNote {
   ver_id: string
   content: string
+  structured?: StructuredNoteDocument
   style: string
   model_name: string
   created_at?: string
@@ -214,7 +220,7 @@ function createMarkdownComponents(baseURL: string, resourceBase?: string) {
     ),
     blockquote: ({ children, ...props }: any) => (
       <blockquote
-        className="border-primary/20 text-muted-foreground mt-6 border-l-4 pl-4 italic"
+        className="mt-6 rounded-xl border border-[var(--surface-hairline)] bg-[var(--surface-panel)]/75 px-4 py-3 text-muted-foreground"
         // Pipeline notice for chunked long videos; kept in the DOM so search offsets stay valid.
         hidden={plainText(children).trim() === SEGMENT_NOTICE || undefined}
         {...props}
@@ -271,15 +277,15 @@ function createMarkdownComponents(baseURL: string, resourceBase?: string) {
       )
     },
     table: ({ children, ...props }: any) => (
-      <div className="my-6 w-full overflow-y-auto">
-        <table className="w-full border-collapse text-sm" {...props}>
+      <div className="note-legacy-table-wrap my-6 w-full overflow-x-auto">
+        <table className="note-legacy-table w-full border-collapse text-sm" {...props}>
           {children}
         </table>
       </div>
     ),
     th: ({ children, ...props }: any) => (
       <th
-        className="border-muted-foreground/20 border px-4 py-2 text-left font-medium [&[align=center]]:text-center [&[align=right]]:text-right"
+        className="border-muted-foreground/20 border px-4 py-2 text-left font-medium whitespace-nowrap [&[align=center]]:text-center [&[align=right]]:text-right"
         {...props}
       >
         {children}
@@ -310,12 +316,10 @@ const MarkdownContent = memo(function MarkdownContent({ content, components }: {
 
 const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const source = useSourceNavigationStore(state => state.source)
-  const [copied, setCopied] = useState(false)
   const [versionSelection, setVersionSelection] = useState({ taskId: '', versionId: '' })
-  const [refinement, setRefinement] = useState<{ taskId: string; versionId: string; texts: string[] } | null>(null)
+  const [refinement, setRefinement] = useState<{ taskId: string; versionId: string; texts: string[]; sectionIds?: string[] } | null>(null)
   // 确保baseURL没有尾部斜杠
   const baseURL = (String(import.meta.env.VITE_API_BASE_URL || '').replace('/api','') || '').replace(/\/$/, '')
-  const getCurrentTask = useTaskStore.getState().getCurrentTask
   const currentTask = useTaskStore(state => state.getCurrentTask())
   const currentTaskId = currentTask?.id || ''
   const currentVerId = source?.note_id === currentTaskId ? source.version_id || ''
@@ -330,51 +334,148 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const selectedVersion = currentTask && Array.isArray(currentTask.markdown) ? currentTask.markdown.find(v => v.ver_id === currentVerId) || currentTask.markdown[0] : null
   const activeVersionId = selectedVersion?.ver_id || ''
   const selectedContent = typeof currentTask?.markdown === 'string' ? currentTask.markdown : selectedVersion?.content || ''
+  const structuredNote = useMemo(
+    () => resolveStructuredNote(selectedVersion, selectedContent),
+    [selectedVersion, selectedContent],
+  )
+  const mindmapMarkdown = useMemo(
+    () => (structuredNote ? structuredNoteToMindmapMarkdown(structuredNote) : selectedContent),
+    [structuredNote, selectedContent],
+  )
+  const workspaceTopbar = useWorkspaceTopbar()
+  const viewerActive = !workspaceTopbar || workspaceTopbar.active
   const modelName = selectedVersion?.model_name || currentTask?.formData?.model_name || ''
   const refinementProvider = selectedVersion?.provider_id || currentTask?.formData?.provider_id || ''
   const style = selectedVersion?.style || currentTask?.formData?.style || ''
+  const styleLabel = noteStyles.find(v => v.value === style)?.label || (style ? noteStyleLabel(style) : '')
   const createTime = selectedVersion?.created_at || currentTask?.createdAt || ''
   const resourceBase = selectedVersion?.resource_base || currentTask?.resource_base
-  const [showTranscribe, setShowTranscribe] = useState(false)
-  const [showChat, setShowChat] = useState<false | 'half' | 'full'>(false)
-  const [temporaryOpen, setTemporaryOpen] = useState(false)
+  const [rightDockTab, setRightDockTab] = useState<'chat' | 'transcript' | null>(null)
+  const [chatLayoutMode, setChatLayoutMode] = useState<'half' | 'full'>('half')
+  const [transcriptJumpTime, setTranscriptJumpTime] = useState<number | null>(null)
+  const [upgradingStructured, setUpgradingStructured] = useState(false)
+  const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({})
+  const defaultGenerationModel = usePurposeModelStore(state => state.defaults.generation)
+
+  useEffect(() => {
+    if (!currentTaskId) { setQuizAnswers({}); return }
+    let active = true
+    void getNoteLearningState(currentTaskId)
+      .then(state => {
+        if (!active || !state?.quiz_attempts) return
+        const mapped: Record<string, string> = {}
+        for (const [secId, record] of Object.entries(state.quiz_attempts)) {
+          if (record?.picked_key) mapped[secId] = record.picked_key
+        }
+        setQuizAnswers(mapped)
+      })
+      .catch(() => { if (active) setQuizAnswers({}) })
+    return () => { active = false }
+  }, [currentTaskId])
+
+  const handleAnswerQuiz = useCallback((payload: QuizAnswerPayload) => {
+    if (!currentTaskId) return
+    setQuizAnswers(prev => ({ ...prev, [payload.sectionId]: payload.pickedKey }))
+    void updateNoteLearningState(currentTaskId, {
+      quiz_attempts: {
+        [payload.sectionId]: {
+          picked_key: payload.pickedKey,
+          correct_key: payload.correctKey,
+          is_correct: payload.isCorrect,
+          question: payload.question,
+          section_title: payload.sectionTitle,
+          explanation: payload.explanation,
+        },
+      },
+    }).catch(() => undefined)
+  }, [currentTaskId])
+
+  const handleUpgradeStructured = async () => {
+    if (!currentTask || upgradingStructured) return
+    const targetProvider = defaultGenerationModel?.provider_id || refinementProvider
+    const targetModel = defaultGenerationModel?.model_name || modelName
+    setUpgradingStructured(true)
+    try {
+      const updated = await upgradeNoteStructured(currentTask.id, {
+        provider_id: targetProvider || undefined,
+        model_name: targetModel || undefined,
+        style: style === 'knowledge' ? 'knowledge' : 'tutorial',
+      })
+      useTaskStore.setState(state => ({
+        tasks: state.tasks.map(task => (task.id === updated.id ? updated : task)),
+      }))
+      if (Array.isArray(updated.markdown) && updated.markdown[0]?.ver_id) {
+        setCurrentVerId(updated.markdown[0].ver_id)
+      }
+      toast.success('已升级为结构化笔记新版本，原有版本已保留')
+    } catch (error) {
+      const e = error as { msg?: string; message?: string }
+      toast.error(e?.msg || e?.message || '升级失败，请检查模型配置或缓存字幕')
+    } finally {
+      setUpgradingStructured(false)
+    }
+  }
+  const showTranscribe = rightDockTab === 'transcript'
+  const showChat: false | 'half' | 'full' = rightDockTab === 'chat' ? chatLayoutMode : false
+  const layoutMode: 'closed' | 'half' | 'full' =
+    rightDockTab === null ? 'closed' : rightDockTab === 'chat' ? chatLayoutMode : 'half'
+  const setShowTranscribe = useCallback((open: boolean) => {
+    if (open) {
+      setChatLayoutMode(prev => (prev === 'full' ? 'half' : prev))
+      setRightDockTab('transcript')
+    } else {
+      setRightDockTab(prev => (prev === 'transcript' ? null : prev))
+    }
+  }, [])
+  const setShowChat = useCallback((next: false | 'half' | 'full') => {
+    if (!next) {
+      setRightDockTab(prev => (prev === 'chat' ? null : prev))
+      return
+    }
+    setChatLayoutMode(next)
+    setRightDockTab('chat')
+  }, [])
+  useEffect(() => {
+    if (!viewerActive || !currentTask) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.shiftKey) return
+      if ((event.ctrlKey || event.metaKey) && event.key === '.') {
+        if (document.querySelector('[role="dialog"], .fixed.z-40[aria-label="笔记阅读器"]')) return
+        event.preventDefault()
+        setRightDockTab(prev => (prev === 'chat' ? null : 'chat'))
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [viewerActive, currentTask])
   const imageChatTarget = useMemo<NoteImageChatTarget | null>(() => {
     if (!currentTask) return null
     const taskId = currentTask.id
-    const sessionKey = temporaryOpen ? temporarySessionKey(taskId) : permanentSessionKey(taskId)
+    const sessionKey = permanentSessionKey(taskId)
     return { identity: `${taskId}:${activeVersionId}:${sessionKey}`, taskId, versionId: activeVersionId,
       title: currentTask.audioMeta?.title || '笔记', attach: attachment => {
         if (useTaskStore.getState().currentTaskId !== taskId) throw new Error('已切换笔记，请重新选择图片')
         useReadingAssistantStore.getState().attach(sessionKey, [attachment])
-        if (!temporaryOpen) setShowChat(value => value || 'half')
+        setRightDockTab('chat')
       } }
-  }, [currentTask, activeVersionId, temporaryOpen])
-  const addQuotes = (quotes: ReadingAttachment[], temporary: boolean) => {
+  }, [currentTask, activeVersionId])
+  const addQuotes = (quotes: ReadingAttachment[], openChat = true) => {
     if (!currentTask) return false
     if (quotes.some(q => (q.text?.length || 0) > 50000)) { toast.error('单次引用最多 5 万字，请减少选中内容'); return false }
-    const key = temporary ? temporarySessionKey(currentTask.id) : permanentSessionKey(currentTask.id)
+    const key = permanentSessionKey(currentTask.id)
     const current = useReadingAssistantStore.getState().sessions[key]?.attachments || []
     if (current.length + quotes.length > 8) { toast.error('每条消息最多 8 份引用或附件，每次选段合为 1 份'); return false }
     useReadingAssistantStore.getState().attach(key, quotes)
-    if (temporary) setTemporaryOpen(true)
-    else setShowChat('half')
+    if (openChat) {
+      setRightDockTab('chat')
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-reading-chat-panel] textarea')?.focus())
+    } else {
+      toast.success('已加入对话引用')
+    }
     return true
   }
-  const closeTemporary = () => { if (currentTask) useReadingAssistantStore.getState().remove(temporarySessionKey(currentTask.id)); setTemporaryOpen(false) }
-  useEffect(() => {
-    setTemporaryOpen(false)
-    const id = currentTask?.id
-    return () => { if (id) useReadingAssistantStore.getState().remove(temporarySessionKey(id)) }
-  }, [currentTask?.id])
   const [viewMode, setViewMode] = useState<'map' | 'preview'>('preview')
   const readerIdentity = `${currentTaskId}:${activeVersionId}`
-  const [compactSelection, setCompactSelection] = useState({ readerIdentity: '', compact: false })
-  const readerCompact = compactSelection.readerIdentity === readerIdentity && compactSelection.compact
-  const setReaderCompact = useCallback((compact: boolean) => {
-    setCompactSelection(previous => previous.readerIdentity === readerIdentity && previous.compact === compact
-      ? previous : { readerIdentity, compact })
-  }, [readerIdentity])
-  const svgRef = useRef<SVGSVGElement>(null)
 
   // 缓存 ReactMarkdown components，仅在 baseURL 变化时重建
   const markdownComponents = useMemo(() => createMarkdownComponents(baseURL, resourceBase), [baseURL, resourceBase])
@@ -395,8 +496,13 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     }
     if (source.metadata_only) { clear(); return }
     setViewMode('preview')
-    if (source.start_time != null) setShowTranscribe(true)
-    else setShowTranscribe(false)
+    if (source.start_time != null) {
+      setTranscriptJumpTime(source.start_time)
+      setChatLayoutMode(prev => (prev === 'full' ? 'half' : prev))
+      setRightDockTab('transcript')
+    } else if (rightDockTab === 'chat' && chatLayoutMode === 'full') {
+      setChatLayoutMode('half')
+    }
     let inner = 0
     const outer = requestAnimationFrame(() => { inner = requestAnimationFrame(() => {
       let target: HTMLElement | undefined
@@ -432,163 +538,189 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         highlights.forEach(el => el.classList.add('reading-block--flash'))
         setTimeout(()=>highlights.forEach(el=>el.classList.remove('reading-block--flash')),2400)
       }
-      else toast(source.image_source ? '原图位置已变化，附件中的图片仍保留' : source.search_match ? '正文位置已变化，请重新查找' : source.quote_parts ? '原文位置可能已变化，可用引用旁的小箭头查看保留内容' : '已打开来源笔记，片段位置可能已变化，请参照对话中的原文核对')
+      else toast(source.image_source ? '原图位置已变化，附件中的图片仍保留' : source.search_match ? '正文位置已变化，请重新查找' : source.quote_parts ? '原文位置可能已变化，请检查对应笔记版本' : '已打开来源笔记，片段位置可能已变化，请参照对话中的原文核对')
       clear()
     }) })
     return () => { cancelAnimationFrame(outer); cancelAnimationFrame(inner) }
-  }, [source, currentTask?.id, currentVerId, selectedContent, showTranscribe, viewMode, setCurrentVerId])
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(selectedContent)
-      setCopied(true)
-      toast.success('已复制到剪贴板')
-      setTimeout(() => setCopied(false), 2000)
-    } catch (e) {
-      toast.error('复制失败')
-    }
-  }
-  const alertButton = {
-    id: 'alert',
-    title: '测试警告',
-    content: '⚠️',
-    onClick: () => alert('你点击了自定义按钮！'),
-  }
-  const exportButton = {
-    id: 'export',
-    title: '导出思维导图',
-    content: '⤓',
-    onClick: () => {
-      const svgEl = svgRef.current
-      if (!svgEl) return
-      // 同上面的序列化逻辑
-      const serializer = new XMLSerializer()
-      const source = serializer.serializeToString(svgEl)
-      const blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>', source], {
-        type: 'image/svg+xml;charset=utf-8',
-      })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'mindmap.svg'
-      a.click()
-      URL.revokeObjectURL(url)
-    },
-  }
-  const handleDownload = () => {
-    const task = getCurrentTask()
-    const name = task?.audioMeta.title || 'note'
-    const blob = new Blob([selectedContent], { type: 'text/markdown;charset=utf-8' })
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = `${name}.md`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
-
-  if ((status === 'loading' || status === 'failed') && currentTask) {
-    return <GenerationProgress key={currentTask.id} task={currentTask} onResume={async () => {
-      try { await useTaskStore.getState().resumeSubmission(currentTask.id) }
-      catch (error) { const e = error as { msg?: string; message?: string }; toast.error(e.msg || e.message || '提交结果仍未确认，请等待自动核对') }
-    }} onRetry={async () => {
-      try { await retryTask(currentTask.id) }
-      catch (error) { const e = error as { msg?: string; message?: string }; toast.error(e.msg || e.message || '提交失败，请稍后检查任务状态') }
-    }} />
-  }
-
+  }, [source, currentTask?.id, currentVerId, selectedContent, rightDockTab, chatLayoutMode, viewMode, setCurrentVerId])
   if (status === 'idle') {
     return (
-      <div className="flex h-full min-h-0 w-full flex-col items-center justify-center space-y-3 text-neutral-500 dark:text-muted-foreground">
+      <div className="flex h-full min-h-0 w-full flex-col items-center justify-center space-y-3 text-muted-foreground">
         <Idle />
         <div className="text-center">
-          <p className="text-lg font-bold">输入视频链接并点击"生成笔记"</p>
-          <p className="mt-2 text-xs text-neutral-500 dark:text-muted-foreground">支持哔哩哔哩、YouTube、快手及本地视频</p>
+          <p className="text-base font-medium text-foreground">输入视频链接并点击“生成笔记”</p>
+          <p className="mt-1.5 text-xs text-muted-foreground">支持哔哩哔哩、YouTube、快手及本地视频</p>
         </div>
       </div>
     )
   }
 
-  return (
-    <ReadingChatLayout mode={showChat || 'closed'} onCloseChat={() => setShowChat(false)} reader={
-      <div className="reading-note-column flex min-h-0 min-w-0 flex-1 flex-col">
-      <MarkdownHeader
-        key={readerIdentity}
-        compact={readerCompact && viewMode === 'preview' && showChat !== 'full'}
-        currentTask={currentTask}
-        isMultiVersion={isMultiVersion}
-        currentVerId={activeVersionId}
-        setCurrentVerId={setCurrentVerId}
-        modelName={modelName}
-        style={style}
-        noteStyles={noteStyles}
-        onCopy={handleCopy}
-        onDownload={handleDownload}
-        createAt={createTime}
-        showTranscribe={showTranscribe}
-        setShowTranscribe={setShowTranscribe}
-        showChat={showChat}
-        setShowChat={setShowChat}
-        viewMode={viewMode}
-        setViewMode={setViewMode}
-      />
+  const askQuizAssistant = (payload: QuizAskPayload) => {
+    if (!currentTask) return
+    const optionsText = payload.quiz.options.map(opt => `${opt.key}. ${opt.text}`).join('\n')
+    const picked = payload.quiz.options.find(opt => opt.key === payload.pickedKey)
+    const contextText = [
+      `【章节自测：${payload.sectionTitle}】`,
+      `题目：${payload.quiz.full_question}`,
+      `选项：\n${optionsText}`,
+      `我的选择：${payload.pickedKey}${picked ? `（${picked.text}）` : ''}（${payload.pickedKey === payload.quiz.correct_key ? '已答对' : `正确答案为 ${payload.quiz.correct_key}`}）`,
+      `参考解析：${payload.quiz.explanation}`,
+      payload.sectionSummary ? `所在章节核心内容：\n${payload.sectionSummary}` : '',
+    ].filter(Boolean).join('\n\n')
+    const attachment: ReadingAttachment = {
+      id: crypto.randomUUID(),
+      type: 'quote',
+      name: `${currentTask.audioMeta?.title || '笔记'} · ${payload.sectionTitle} 自测`,
+      text: contextText,
+      taskId: currentTask.id,
+      versionId: activeVersionId,
+    }
+    addQuotes([attachment], true)
+  }
 
-      {viewMode === 'map' ? (
-        <div className="flex w-full flex-1 overflow-hidden bg-background">
-          <div className={'w-full'}>
-            <MarkmapEditor
-              value={selectedContent}
-              onChange={() => {}}
-              height="100%" // 根据需求可以设定百分比或固定高度
-              title={currentTask?.audioMeta?.title || '思维导图'}
-            />
+  const jumpNoteTime = (seconds: number, originUrl: string | null) => {
+    if (!currentTask) return
+    const hasTranscriptMatch = (currentTask.transcript?.segments || []).some(seg => seg.end >= seconds)
+    if (hasTranscriptMatch || !originUrl) {
+      setTranscriptJumpTime(seconds)
+      setShowTranscribe(true)
+      useSourceNavigationStore.getState().open({
+        note_id: currentTask.id,
+        version_id: activeVersionId,
+        start_time: seconds,
+      })
+      return
+    }
+    window.open(originUrl, '_blank', 'noopener,noreferrer')
+  }
+
+  const hasReadableBody = Boolean((selectedContent && selectedContent !== 'loading' && selectedContent !== 'empty') || structuredNote)
+
+  return (
+    <MarkdownHeader
+      key={readerIdentity}
+      currentTask={currentTask}
+      isMultiVersion={isMultiVersion}
+      currentVerId={activeVersionId}
+      setCurrentVerId={setCurrentVerId}
+      modelName={modelName}
+      title={currentTask?.audioMeta?.title || '笔记'}
+      showTranscribe={showTranscribe}
+      setShowTranscribe={setShowTranscribe}
+      showChat={showChat}
+      setShowChat={setShowChat}
+      viewMode={viewMode}
+      setViewMode={setViewMode}
+    >
+      <ReadingChatLayout mode={layoutMode} onCloseChat={() => setRightDockTab(null)} reader={
+        <div className="reading-note-column flex min-h-0 min-w-0 flex-1 flex-col">
+        {viewMode === 'map' ? (
+          <div className="flex w-full flex-1 overflow-hidden bg-background">
+            <div className={'w-full'}>
+              <MarkmapEditor
+                value={mindmapMarkdown}
+                onChange={() => {}}
+                height="100%"
+                title={currentTask?.audioMeta?.title || '思维导图'}
+              />
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="flex flex-1 overflow-hidden bg-background pb-2">
-          {selectedContent && selectedContent !== 'loading' && selectedContent !== 'empty' ? (
-            <>
-              <ReaderPane key={`${currentTask?.id}:${activeVersionId}`} taskId={currentTask?.id || ''} versionId={activeVersionId} content={selectedContent} title={currentTask?.audioMeta?.title || '笔记'} onCompactChange={setReaderCompact} chatOpen={Boolean(showChat)} onToggleChat={() => setShowChat(showChat ? false : 'half')}>
-                <div className="px-2">
-                  <VideoBanner
-                    audioMeta={currentTask?.audioMeta}
-                    videoUrl={currentTask?.formData?.video_url}
-                  />
-                </div>
+        ) : (
+          <div className="flex flex-1 overflow-hidden bg-background">
+            {hasReadableBody ? (
+              <ReaderPane key={`${currentTask?.id}:${activeVersionId}`} taskId={currentTask?.id || ''} versionId={activeVersionId} content={selectedContent || structuredNote?.title || ''} title={currentTask?.audioMeta?.title || '笔记'}>
+                <VideoBanner
+                  audioMeta={currentTask?.audioMeta}
+                  videoUrl={currentTask?.formData?.video_url}
+                  modelName={modelName}
+                  styleLabel={styleLabel}
+                  createdAt={createTime}
+                />
+                {!structuredNote && currentTask && !currentTask.archived_at && (
+                  <div className="legacy-upgrade-bar">
+                    <span>当前版本为旧版纯文本笔记，可基于已有缓存字幕免重跑升级。</span>
+                    <button
+                      type="button"
+                      className="legacy-upgrade-btn"
+                      disabled={upgradingStructured}
+                      onClick={() => void handleUpgradeStructured()}
+                    >
+                      {upgradingStructured ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} strokeWidth={1.7} />}
+                      <span>{upgradingStructured ? '正在升级结构化…' : '一键升级结构化笔记'}</span>
+                    </button>
+                  </div>
+                )}
                 <NoteImageChatContext.Provider value={imageChatTarget}>
                 <ReadingSelection key={`${currentTask?.id}:${activeVersionId}`} taskId={currentTask?.id || ''} versionId={activeVersionId} title={currentTask?.audioMeta?.title || '笔记'} onQuote={addQuotes} onRefine={currentTask && !currentTask.archived_at ? texts => setRefinement({ taskId: currentTask.id, versionId: activeVersionId, texts }) : undefined}>
                 <div className={'markdown-body select-text w-full px-2'}>
-                  <MarkdownContent content={selectedContent} components={markdownComponents} />
+                  {structuredNote ? (
+                    <StructuredNoteReader
+                      doc={structuredNote}
+                      baseURL={baseURL}
+                      resourceBase={resourceBase}
+                      videoUrl={currentTask?.formData?.video_url}
+                      platform={currentTask?.audioMeta?.platform || currentTask?.formData?.platform}
+                      videoId={currentTask?.audioMeta?.video_id}
+                      checklistScopeKey={currentTask ? `${currentTask.id}:${activeVersionId}` : undefined}
+                      initialQuizAnswers={quizAnswers}
+                      onJumpTime={jumpNoteTime}
+                      onAskAssistant={askQuizAssistant}
+                      onAnswerQuiz={handleAnswerQuiz}
+                      onRefineSection={
+                        currentTask && !currentTask.archived_at
+                          ? sectionId => setRefinement({ taskId: currentTask.id, versionId: activeVersionId, texts: [], sectionIds: [sectionId] })
+                          : undefined
+                      }
+                    />
+                  ) : (
+                    <MarkdownContent content={selectedContent} components={markdownComponents} />
+                  )}
                 </div>
                 </ReadingSelection>
                 </NoteImageChatContext.Provider>
               </ReaderPane>
-              <AnimatedPanel open={showTranscribe} className="reading-transcript-dock">
-                  <TranscriptViewer />
-              </AnimatedPanel>
-            </>
-          ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <div className="w-[300px] flex-col justify-items-center">
-                <div className="bg-primary-light mb-4 flex h-16 w-16 items-center justify-center rounded-full">
-                  <ArrowRight className="text-primary h-8 w-8" />
-                </div>
-                <p className="mb-2 text-neutral-600 dark:text-muted-foreground">输入视频链接并点击"生成笔记"按钮</p>
-                <p className="text-xs text-neutral-500 dark:text-muted-foreground">支持哔哩哔哩、YouTube等视频网站</p>
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+                <p className="text-sm font-medium text-foreground">暂无可读笔记内容</p>
+                <p className="text-xs">输入视频链接并点击“生成笔记”，支持哔哩哔哩、YouTube、快手及本地视频</p>
               </div>
+            )}
+          </div>
+        )}
+        </div>}
+        chat={currentTask && (
+          <div className="reading-dock-panes">
+            <div className="reading-dock-pane" hidden={rightDockTab !== 'chat'}>
+              <ChatPanel
+                key={currentTask.id}
+                taskId={currentTask.id}
+                active={rightDockTab === 'chat'}
+                mode={chatLayoutMode}
+                onModeChange={next => {
+                  setChatLayoutMode(next)
+                  setRightDockTab('chat')
+                }}
+                onClose={() => setRightDockTab(null)}
+              />
             </div>
-          )}
-        </div>
-      )}
-      </div>}
-      chat={currentTask && <ChatPanel key={currentTask.id} taskId={currentTask.id} active={Boolean(showChat)} mode={showChat || 'half'} onModeChange={setShowChat} onClose={() => setShowChat(false)} />}>
-      {refinement && currentTask && refinement.taskId === currentTask.id && refinement.versionId === (selectedVersion?.ver_id || currentVerId) && <RefineNoteDialog key={`${refinement.taskId}:${refinement.versionId}`} task={currentTask} versionId={refinement.versionId} texts={refinement.texts} originalProtocol={selectedVersion?.protocol} originalModel={modelName && refinementProvider ? { provider_id: refinementProvider, model_name: modelName } : null} onClose={() => setRefinement(null)} onApplied={updated => {
-        useTaskStore.setState(state => ({ tasks: state.tasks.map(task => task.id === updated.id ? updated : task) }))
-        if (Array.isArray(updated.markdown)) setCurrentVerId(updated.markdown[0]?.ver_id || '')
-        setRefinement(null)
-        toast.success('已采纳修订稿并保存为新版本，原版本保留')
-      }} />}
-      {temporaryOpen && currentTask && <div className="reading-temporary-dock"><ChatPanel taskId={currentTask.id} mode="half" onModeChange={() => {}} temporary onClose={closeTemporary} onTransfer={() => { try { useReadingAssistantStore.getState().transfer(temporarySessionKey(currentTask.id), permanentSessionKey(currentTask.id)); setTemporaryOpen(false); setShowChat('half'); toast.success('已转入常驻对话，临时窗口已关闭') } catch(e) { toast.error((e as Error).message) } }} /></div>}
-    </ReadingChatLayout>
+            <div className="reading-dock-pane" hidden={rightDockTab !== 'transcript'}>
+              <TranscriptViewer
+                taskId={currentTask.id}
+                baseURL={baseURL}
+                highlightTime={transcriptJumpTime}
+                onClose={() => setRightDockTab(null)}
+              />
+            </div>
+          </div>
+        )}>
+        {refinement && currentTask && refinement.taskId === currentTask.id && refinement.versionId === (selectedVersion?.ver_id || currentVerId) && <RefineNoteDialog key={`${refinement.taskId}:${refinement.versionId}:${(refinement.sectionIds || []).join(',')}`} task={currentTask} versionId={refinement.versionId} texts={refinement.texts} sectionIds={refinement.sectionIds} originalProtocol={selectedVersion?.protocol} originalModel={modelName && refinementProvider ? { provider_id: refinementProvider, model_name: modelName } : null} onClose={() => setRefinement(null)} onApplied={updated => {
+          useTaskStore.setState(state => ({ tasks: state.tasks.map(task => task.id === updated.id ? updated : task) }))
+          if (Array.isArray(updated.markdown)) setCurrentVerId(updated.markdown[0]?.ver_id || '')
+          setRefinement(null)
+          toast.success('已采纳修订稿并保存为新版本，原版本保留')
+        }} />}
+      </ReadingChatLayout>
+    </MarkdownHeader>
   )
 })
 

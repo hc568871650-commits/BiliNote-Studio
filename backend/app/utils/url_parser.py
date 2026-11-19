@@ -1,16 +1,106 @@
 import re
 from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import requests
+
+_URL_IN_TEXT_RE = re.compile(r"https?://[^\s<>'\"`\]\[(){}\u3000-\u303f\uff00-\uffef]+", re.IGNORECASE)
+_BARE_BV_RE = re.compile(r"(?<![0-9A-Za-z])(BV[0-9A-Za-z]{10,12})(?![0-9A-Za-z])")
+_TRAILING_PUNCT = ".,;:!?。，；：！？、）)】】》」』\"'"
+_TRACKING_PARAM_EXACT = {
+    "spm_id_from",
+    "vd_source",
+    "from_spmid",
+    "share_source",
+    "share_medium",
+    "share_plat",
+    "share_session_id",
+    "share_from",
+    "share_tag",
+    "bbid",
+    "ts",
+    "buvid",
+    "is_story_h5",
+    "mid",
+    "p_type",
+    "up_id",
+    "si",
+    "feature",
+    "pp",
+    "ab_channel",
+    "fbclid",
+    "gclid",
+    "igsh",
+    "unique_k",
+}
+
+
+def _strip_tracking_params(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc or not parsed.query:
+        return url
+    filtered = [
+        (k, v)
+        for k, v in parse_qsl(parsed.query, keep_blank_values=False)
+        if k.lower() not in _TRACKING_PARAM_EXACT and not k.lower().startswith("utm_")
+    ]
+    new_query = urlencode(filtered, doseq=True)
+    return urlunparse(parsed._replace(query=new_query))
+
+
+def extract_url_from_share_text(raw: str) -> str:
+    """从分享口令/混合文本中提取首个有效 URL 或裸 BV 号，剥离多余文案与追踪后缀。"""
+    if not isinstance(raw, str):
+        return ""
+    text = raw.strip()
+    if not text:
+        return ""
+
+    match = _URL_IN_TEXT_RE.search(text)
+    if match:
+        candidate = match.group(0).rstrip(_TRAILING_PUNCT)
+        return _strip_tracking_params(candidate)
+
+    # 无 http 链接但包含裸 BV 号（避免误把本地文件路径当成网络口令）
+    if not re.match(r"^[a-zA-Z]:[\\/]", text) and not text.startswith(("/", "\\", "./", "../")):
+        bv_match = _BARE_BV_RE.search(text)
+        if bv_match:
+            return f"https://www.bilibili.com/video/{bv_match.group(1)}"
+
+    return text
+
+
+def detect_video_platform(raw_url: str) -> Optional[str]:
+    """根据链接或分享口令自动识别视频平台。"""
+    cleaned = extract_url_from_share_text(raw_url)
+    if not cleaned:
+        return None
+    parsed = urlparse(cleaned)
+    host = (parsed.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+
+    if host in ("bilibili.com", "m.bilibili.com", "b23.tv") or host.endswith(".bilibili.com"):
+        return "bilibili"
+    if host in ("youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be") or host.endswith(".youtube.com"):
+        return "youtube"
+    if host in ("kuaishou.com", "v.kuaishou.com", "gifshow.com") or host.endswith(".kuaishou.com") or host.endswith(".gifshow.com"):
+        return "kuaishou"
+    if host in ("douyin.com", "v.douyin.com", "iesdouyin.com") or host.endswith(".douyin.com"):
+        return "douyin"
+    if _BARE_BV_RE.search(cleaned) and not parsed.scheme:
+        return "bilibili"
+    return None
 
 
 def extract_video_id(url: str, platform: str) -> Optional[str]:
     """
     从视频链接中提取视频 ID
 
-    :param url: 视频链接
-    :param platform: 平台名（bilibili / youtube / douyin）
+    :param url: 视频链接或分享口令
+    :param platform: 平台名（bilibili / youtube / douyin / kuaishou）
     :return: 提取到的视频 ID 或 None
     """
+    url = extract_url_from_share_text(url)
     if platform == "bilibili":
         # 如果是短链接，则解析真实链接
         if "b23.tv" in url:
@@ -23,8 +113,8 @@ def extract_video_id(url: str, platform: str) -> Optional[str]:
         return f"BV{match.group(1)}" if match else None
 
     elif platform == "youtube":
-        # 匹配 v=xxxxx、youtu.be/xxxxx 或 shorts/xxxxx，ID 长度通常为 11
-        match = re.search(r"(?:v=|youtu\.be/|shorts/)([0-9A-Za-z_-]{11})", url)
+        # 匹配 v=xxxxx、youtu.be/xxxxx、shorts/xxxxx、live/xxxxx 或 embed/xxxxx，ID 长度通常为 11
+        match = re.search(r"(?:[?&]v=|youtu\.be/|(?:shorts|live|embed)/)([0-9A-Za-z_-]{11})", url)
         return match.group(1) if match else None
 
     elif platform == "douyin":
@@ -32,30 +122,41 @@ def extract_video_id(url: str, platform: str) -> Optional[str]:
         match = re.search(r"/video/(\d+)", url)
         return match.group(1) if match else None
 
+    elif platform == "kuaishou":
+        match = re.search(r"(?:/short-video/|/fw/photo/|/f/|v\.kuaishou\.com/)([0-9A-Za-z_-]+)", url)
+        return match.group(1) if match else None
+
     return None
 
 
 def normalize_video_url(url: str) -> str:
     """
-    将任意包含 BV 号的 B 站链接规范化为标准视频链接。
+    提取并规范化视频链接（支持分享口令、裸 BV 号、移动版与短链）。
 
-    支持稍后再看（/list/watchlater/?bvid=BV...）、收藏夹播放页（/list/mlXXX?bvid=BV...）、
-    带追踪参数的分享链接等。保留分 P 参数，丢弃其余查询参数。
-
-    b23.tv 短链与无 BV 号的链接原样返回（后者交由校验器拒绝）。
+    - B 站含 BV 号链接（含 m.bilibili.com、稍后再看、收藏夹、带追踪参数）规范化为标准 /video/BVxxx(?p=N)。
+    - b23.tv 短链保留短链主体并剥离多余追踪参数。
+    - YouTube / 快手 / 其他网络链接提取首个有效 URL 并剥离无关追踪参数。
     """
-    if "b23.tv" in url:
-        return url
+    cleaned = extract_url_from_share_text(url)
+    if not cleaned:
+        return cleaned
 
-    match = re.search(r"BV([0-9A-Za-z]+)", url)
-    if not match:
-        return url
+    parsed = urlparse(cleaned)
+    host = (parsed.hostname or "").lower()
+    if host == "b23.tv":
+        return cleaned
 
-    normalized = f"https://www.bilibili.com/video/BV{match.group(1)}"
-    p = extract_bilibili_p_number(url)
-    if p:
-        normalized += f"?p={p}"
-    return normalized
+    if host in ("bilibili.com", "www.bilibili.com", "m.bilibili.com") or host.endswith(".bilibili.com"):
+        match = re.search(r"BV([0-9A-Za-z]+)", cleaned)
+        if not match:
+            return cleaned
+        normalized = f"https://www.bilibili.com/video/BV{match.group(1)}"
+        p = extract_bilibili_p_number(cleaned)
+        if p:
+            normalized += f"?p={p}"
+        return normalized
+
+    return cleaned
 
 
 def resolve_bilibili_short_url(short_url: str) -> Optional[str]:

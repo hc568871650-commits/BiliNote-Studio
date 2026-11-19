@@ -205,6 +205,26 @@ class GeminiClient:
         self.url = gemini_base_url(base_url)
         self.client = http_client or httpx.Client(timeout=120.0, proxy=proxy)
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+        self.models = SimpleNamespace(list=self.list_models)
+
+    def list_models(self):
+        response = self.client.get(self.url + '/models', headers=self.headers())
+        response.raise_for_status()
+        data = json_response(response)
+        items = data.get('models') if isinstance(data, dict) else []
+        normalized = []
+        for item in items or []:
+            if not isinstance(item, dict) or not item.get('name'):
+                continue
+            mid = str(item['name']).removeprefix('models/').strip()
+            if mid:
+                normalized.append({
+                    'id': mid,
+                    'object': 'model',
+                    'owned_by': 'google',
+                    'display_name': item.get('displayName'),
+                })
+        return SimpleNamespace(data=normalized)
 
     def endpoint(self, model, *, stream=False):
         model = str(model).removeprefix('models/')

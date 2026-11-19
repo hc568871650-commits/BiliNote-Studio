@@ -1,7 +1,8 @@
 """Durable, task-owned notes. Legacy flat files are read only until imported."""
 
-import json
 import hashlib
+import importlib.util
+import json
 import os
 import re
 import shutil
@@ -17,6 +18,27 @@ ROOT = Path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
 TASK_ID = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
 IMAGE_LINK = re.compile(r"(!\[[^\]]*\]\()([^\s)]+)(\))")
 LOCK = threading.RLock()
+_STRUCTURED_MODULE = None
+
+
+def _structured_module():
+    global _STRUCTURED_MODULE
+    if _STRUCTURED_MODULE is not None:
+        return _STRUCTURED_MODULE
+    try:
+        from app.models import structured_note as mod
+        _STRUCTURED_MODULE = mod
+        return mod
+    except ImportError:
+        path = Path(__file__).resolve().parents[1] / "models" / "structured_note.py"
+        if path.is_file():
+            spec = importlib.util.spec_from_file_location("_bilinote_structured_note", path)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                _STRUCTURED_MODULE = mod
+                return mod
+    return None
 
 
 def _diagnostic(task_id, event, **fields):
@@ -229,27 +251,44 @@ def _image_source(url, staging):
     return None
 
 
+def _copy_image_asset(url, folder, version_id, staging=None, version=False):
+    source = _image_source(url, staging)
+    if source is None:
+        return url
+    if not source.is_file():
+        if staging and source.is_relative_to((Path(staging) / "images").resolve()):
+            raise FileNotFoundError(f"Missing generated image: {source}")
+        return url
+    suffix = source.suffix.lower()
+    if suffix not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+        raise ValueError("Unsupported note image")
+    name = f"{version_id}_{uuid.uuid5(uuid.NAMESPACE_URL, str(source)).hex[:16]}{suffix}"
+    target = folder / "images" / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        shutil.copy2(source, target)
+    return ("../images/" if version else "images/") + name
+
+
 def _copy_images(markdown, folder, version_id, staging=None, version=False):
     def replace(match):
         url = match.group(2)
-        source = _image_source(url, staging)
-        if source is None:
-            return match.group(0)
-        if not source.is_file():
-            if staging and source.is_relative_to((Path(staging) / "images").resolve()):
-                raise FileNotFoundError(f"Missing generated image: {source}")
-            return match.group(0)
-        suffix = source.suffix.lower()
-        if suffix not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
-            raise ValueError("Unsupported note image")
-        name = f"{version_id}_{uuid.uuid5(uuid.NAMESPACE_URL, str(source)).hex[:16]}{suffix}"
-        target = folder / "images" / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.exists():
-            shutil.copy2(source, target)
-        relative = ("../images/" if version else "images/") + name
-        return match.group(1) + relative + match.group(3)
+        updated = _copy_image_asset(url, folder, version_id, staging, version=version)
+        return match.group(1) + updated + match.group(3)
     return IMAGE_LINK.sub(replace, markdown)
+
+
+def _copy_structured_images(structured, folder, version_id, staging=None, version=True):
+    copied = json.loads(json.dumps(structured))
+    for section in copied.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        for block in section.get("blocks") or []:
+            if isinstance(block, dict) and block.get("type") == "screenshot" and block.get("image_url"):
+                block["image_url"] = _copy_image_asset(
+                    str(block["image_url"]), folder, version_id, staging, version=version
+                )
+    return copied
 
 
 def _version_id(value):
@@ -305,12 +344,47 @@ def save_task(task, staging=None, import_legacy=False, recoverable=False):
                           "created_at": datetime.now(timezone.utc).isoformat()}] if incoming else [])
         known = {v["ver_id"] for v in versions}
         pending_version_files = []
+        pending_structured_files = []
+        helper = _structured_module()
+        audio_meta = task.get("audioMeta") or (previous or {}).get("audioMeta") or {}
+        form_data = task.get("formData") or (previous or {}).get("formData") or {}
         for item in reversed(incoming):
             ver = dict(item)
             ver_id = _version_id(ver.get("ver_id"))
             if ver_id in known:
                 continue
-            content = _copy_images(ver.get("content") or "", folder, ver_id, staging, version=True)
+            raw_content = ver.get("content") or ""
+            structured = ver.get("structured") if isinstance(ver.get("structured"), dict) else None
+            if helper is not None:
+                if structured is not None:
+                    structured = helper.normalize_structured_note(
+                        structured,
+                        fallback_title=title,
+                        default_style=ver.get("style") or form_data.get("style") or "tutorial",
+                        source_url=str(form_data.get("video_url") or ""),
+                        platform=str(audio_meta.get("platform") or form_data.get("platform") or ""),
+                        video_id=str(audio_meta.get("video_id") or ""),
+                    )
+                elif isinstance(raw_content, str) and raw_content.strip():
+                    structured = helper.extract_structured_note_json(
+                        raw_content,
+                        fallback_title=title,
+                        default_style=ver.get("style") or form_data.get("style") or "tutorial",
+                        source_url=str(form_data.get("video_url") or ""),
+                        platform=str(audio_meta.get("platform") or form_data.get("platform") or ""),
+                        video_id=str(audio_meta.get("video_id") or ""),
+                    )
+            if structured is not None and helper is not None:
+                structured = _copy_structured_images(structured, folder, ver_id, staging, version=True)
+                md_text = helper.serialize_structured_note_to_markdown(structured)
+                content = _copy_images(md_text, folder, ver_id, staging, version=True)
+                ver["structured"] = structured
+                structured_path = folder / "versions" / f"{ver_id}.json"
+                structured_path.parent.mkdir(parents=True, exist_ok=True)
+                pending_structured_files.append((structured_path, structured))
+            else:
+                ver.pop("structured", None)
+                content = _copy_images(raw_content, folder, ver_id, staging, version=True)
             if isinstance(ver.get('evidence'), dict):
                 ver['evidence'] = _publish_evidence(ver['evidence'], folder, ver_id, staging)
             ver.update(ver_id=ver_id, content=content)
@@ -341,6 +415,8 @@ def save_task(task, staging=None, import_legacy=False, recoverable=False):
             })
         for version_path, content in pending_version_files:
             _atomic_text(version_path, content)
+        for structured_path, structured_doc in pending_structured_files:
+            _atomic_json(structured_path, structured_doc)
         if recoverable and versions:
             _diagnostic(task_id, 'content_saved', target='content')
         if versions:
@@ -427,6 +503,16 @@ def _verified_versions(folder, versions, allow_missing_ids=()):
             return False
         if path.read_text(encoding='utf-8') != content:
             return False
+        if isinstance(version.get('structured'), dict):
+            json_path = _inside(folder / 'versions' / (version['ver_id'] + '.json'), folder)
+            if json_path.is_file():
+                try:
+                    if json.loads(json_path.read_text(encoding='utf-8')) != version['structured']:
+                        return False
+                except ValueError:
+                    return False
+            elif version['ver_id'] not in allow_missing_ids:
+                return False
     return True
 
 
@@ -518,6 +604,10 @@ def retry_saved_result(task_id):
             path = _inside(folder / 'versions' / (version['ver_id'] + '.md'), folder)
             if not path.is_file():
                 _atomic_text(path, version['content'])
+            if isinstance(version.get('structured'), dict):
+                json_path = _inside(folder / 'versions' / (version['ver_id'] + '.json'), folder)
+                if not json_path.is_file():
+                    _atomic_json(json_path, version['structured'])
         _atomic_text(folder / '笔记.md', current.replace('../images/', 'images/'))
         _atomic_json(folder / '_meta' / 'result.json', {
             'markdown': current, 'transcript': candidate.get('transcript') or {}, 'audio_meta': candidate.get('audioMeta') or {},

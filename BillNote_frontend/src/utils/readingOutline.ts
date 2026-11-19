@@ -3,6 +3,9 @@ export interface ReadingOutlineHeading {
   text: string
   level: number
   time?: number
+  times?: number[]
+  ranges?: { start: number; end: number }[]
+  annoTimes?: number[]
 }
 
 export interface ReadingOutlineGroup {

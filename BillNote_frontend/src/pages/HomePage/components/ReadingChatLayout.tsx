@@ -11,7 +11,7 @@ type ReadingChatLayoutProps = {
   mode: 'closed' | 'half' | 'full'
   reader: ReactNode
   chat: ReactNode
-  onCloseChat: () => void
+  onCloseChat?: () => void
   children?: ReactNode
 }
 
@@ -21,11 +21,12 @@ function localStorageOrUndefined() {
 
 const resizeKeys = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End'])
 
-export default function ReadingChatLayout({ mode, reader, chat, onCloseChat, children }: ReadingChatLayoutProps) {
+export default function ReadingChatLayout({ mode, reader, chat, children }: ReadingChatLayoutProps) {
   const root = useRef<HTMLDivElement>(null)
   const group = useRef<ImperativePanelGroupHandle>(null)
   const preferred = useRef(readReaderPreference(localStorageOrUndefined()))
   const [width, setWidth] = useState(0)
+  const [dragging, setDragging] = useState(false)
   const id = useId()
   const { narrow, minReader, maxReader } = readingChatConstraints(width)
   const split = mode === 'half' && !narrow
@@ -75,7 +76,7 @@ export default function ReadingChatLayout({ mode, reader, chat, onCloseChat, chi
   }
   const hideReader = mode === 'full' || (mode === 'half' && narrow)
 
-  return <div ref={root} className="reading-workspace reading-chat-layout" data-chat-layout-mode={mode} data-chat-layout-narrow={narrow}>
+  return <div ref={root} className="reading-workspace reading-chat-layout" data-chat-layout-mode={mode} data-chat-layout-narrow={narrow} data-chat-dragging={dragging}>
     <ResizablePanelGroup ref={group} direction="horizontal" className="reading-chat-layout-group" keyboardResizeBy={2}>
       <ResizablePanel id={`${id}-reader`} order={1} defaultSize={preferred.current} minSize={minReader} maxSize={maxReader}
         className="reading-chat-layout-reader" data-reading-reader-panel aria-hidden={hideReader} inert={hideReader}>
@@ -84,13 +85,12 @@ export default function ReadingChatLayout({ mode, reader, chat, onCloseChat, chi
       <ResizableHandle id={`${id}-separator`} className="reading-chat-layout-handle" disabled={!split} tabIndex={split ? 0 : -1}
         aria-label="阅读与聊天宽度" aria-keyshortcuts="ArrowLeft ArrowRight Home End Enter"
         title="拖动或方向键调整宽度；Enter / 双击恢复默认"
-        onDragging={dragging => { if (!dragging) rememberLayout() }}
+        onDragging={active => { setDragging(active); if (!active) rememberLayout() }}
         onKeyUp={event => { if (resizeKeys.has(event.key)) rememberLayout() }}
         onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); reset() } }}
         onDoubleClick={reset} />
       <ResizablePanel id={`${id}-chat`} order={2} defaultSize={100 - preferred.current} minSize={100 - maxReader} maxSize={100 - minReader}
         className="reading-chat-layout-chat" data-reading-chat-panel aria-hidden={mode === 'closed'} inert={mode === 'closed'}>
-        {narrow && mode === 'half' && <div className="reading-chat-layout-narrow-bar"><span>窗口较窄</span><button type="button" onClick={onCloseChat}>返回阅读</button></div>}
         <div className="reading-chat-layout-chat-content">{chat}</div>
       </ResizablePanel>
     </ResizablePanelGroup>

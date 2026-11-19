@@ -27,7 +27,7 @@ from app.services import note_storage
 from app.services import note_diagnostics
 from app.services.task_serial_executor import task_serial_executor
 from app.utils.response import ResponseWrapper as R
-from app.utils.url_parser import extract_video_id, normalize_video_url
+from app.utils.url_parser import detect_video_platform, extract_video_id, normalize_video_url
 from app.validators.video_url_validator import is_supported_video_url
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
@@ -50,7 +50,7 @@ class RecordRequest(BaseModel):
 
 class VideoRequest(BaseModel):
     video_url: str
-    platform: str
+    platform: Optional[str] = None
     quality: DownloadQuality
     screenshot: Optional[bool] = False
     link: Optional[bool] = False
@@ -75,10 +75,18 @@ class VideoRequest(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def normalize_url(cls, data):
-        # 稍后再看/收藏夹/带追踪参数的 B 站链接先规范化成标准 /video/BVxxx 形式，
-        # 后续校验和 yt-dlp 下载拿到的都是干净链接
-        if isinstance(data, dict) and data.get("platform") == "bilibili" and data.get("video_url"):
-            data["video_url"] = normalize_video_url(str(data["video_url"]))
+        # 自动从分享口令/混合文案提取首个有效 URL 或裸 BV 号，剥离追踪参数并自动纠偏平台。
+        if isinstance(data, dict) and data.get("video_url"):
+            raw_url = str(data["video_url"])
+            raw_platform = str(data.get("platform") or "").strip().lower()
+            cleaned = normalize_video_url(raw_url)
+            detector = globals().get("detect_video_platform")
+            detected = detector(cleaned) if callable(detector) else None
+            if detected:
+                data["video_url"] = cleaned
+                data["platform"] = detected
+            elif raw_platform != "local":
+                data["video_url"] = cleaned
         return data
 
     @field_validator("video_url")
@@ -670,6 +678,134 @@ def _poll_result(task):
             "transcript": task.get("transcript") or {},
             "audio_meta": task.get("audioMeta") or {},
             "resource_base": task.get("resource_base")}
+
+
+class UpgradeStructuredRequest(BaseModel):
+    provider_id: str = Field(min_length=1, max_length=100)
+    model_name: str = Field(min_length=1, max_length=200)
+    protocol: Optional[Literal['openai-chat', 'openai-responses', 'anthropic', 'gemini']] = None
+    style: Optional[Literal['tutorial', 'knowledge']] = None
+    extras: Optional[str] = None
+    generation_options: Optional[GenerationOptions] = None
+
+
+@router.post("/notes/{task_id}/upgrade-structured")
+def upgrade_note_structured(task_id: str, data: UpgradeStructuredRequest):
+    from app.services.note_upgrade import upgrade_note_to_structured
+    from app.utils.ai_errors import SafeAIError
+    try:
+        note_storage.valid_id(task_id)
+        with _active_lock:
+            if task_id in _active_tasks:
+                return R.error("此笔记正在生成，请等待完成后再升级结构化版本", code=409)
+            _active_tasks.add(task_id)
+        try:
+            updated = upgrade_note_to_structured(
+                task_id,
+                provider_id=data.provider_id,
+                model_name=data.model_name,
+                protocol=data.protocol,
+                style=data.style,
+                extras=data.extras,
+                generation_options=data.generation_options,
+            )
+            return R.success(updated)
+        finally:
+            with _active_lock:
+                _active_tasks.discard(task_id)
+    except SafeAIError as exc:
+        return R.error(str(exc), code=502, data={'details': exc.details})
+    except (ValueError, FileNotFoundError) as exc:
+        return R.error(str(exc), code=400)
+    except Exception:
+        logger.exception("存量笔记升级结构化版本失败 task_id=%s", task_id)
+        return R.error("升级未完成，原笔记内容未修改，请检查模型配置后重试", code=500)
+
+
+class LearningStateUpdateRequest(BaseModel):
+    quiz_attempts: Optional[dict] = None
+    pinned_annotations: Optional[dict] = None
+    checklist_states: Optional[dict] = None
+
+
+@router.get("/notes/{task_id}/media")
+def stream_note_media(task_id: str, request: Request):
+    from app.services import media_stream
+    try:
+        media_path = media_stream.resolve_note_media_path(task_id)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    file_size = media_path.stat().st_size
+    media_type = media_stream.guess_media_type(media_path)
+    range_header = request.headers.get("range")
+    if range_header:
+        try:
+            byte_range = media_stream.parse_http_range(range_header, file_size)
+        except ValueError:
+            return Response(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{file_size}", "Accept-Ranges": "bytes"},
+            )
+        start, end = byte_range
+        content_length = end - start + 1
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(content_length),
+            "X-Content-Type-Options": "nosniff",
+        }
+        return StreamingResponse(
+            media_stream.iter_file_range(media_path, start, end),
+            status_code=206,
+            media_type=media_type,
+            headers=headers,
+        )
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(file_size),
+        "X-Content-Type-Options": "nosniff",
+    }
+    return StreamingResponse(
+        media_stream.iter_file_range(media_path, 0, max(0, file_size - 1)),
+        status_code=200,
+        media_type=media_type,
+        headers=headers,
+    )
+
+
+@router.get("/notes/{task_id}/learning-state")
+def get_note_learning_state(task_id: str):
+    from app.services import learning_state
+    try:
+        return R.success(learning_state.get_learning_state(task_id))
+    except FileNotFoundError as exc:
+        return R.error(str(exc), code=404)
+    except ValueError as exc:
+        return R.error(str(exc), code=400)
+
+
+@router.put("/notes/{task_id}/learning-state")
+@router.post("/notes/{task_id}/learning-state")
+def save_note_learning_state(task_id: str, data: LearningStateUpdateRequest):
+    from app.services import learning_state
+    try:
+        payload = data.model_dump(exclude_none=True)
+        return R.success(learning_state.update_learning_state(task_id, payload))
+    except FileNotFoundError as exc:
+        return R.error(str(exc), code=404)
+    except ValueError as exc:
+        return R.error(str(exc), code=400)
+
+
+@router.get("/learning/review-bank")
+def get_learning_review_bank(kind: str = "all", limit: int = 100, include_archived: bool = False):
+    from app.services import learning_state
+    try:
+        return R.success(learning_state.query_review_bank(kind=kind, limit=limit, include_archived=include_archived))
+    except ValueError as exc:
+        return R.error(str(exc), code=400)
 
 
 @router.get("/image_proxy")

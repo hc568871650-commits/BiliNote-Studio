@@ -4,6 +4,7 @@ import { BrowserRouter, HashRouter, Navigate, Routes, Route, Link } from 'react-
 import { useTaskPolling } from '@/hooks/useTaskPolling.ts'
 import { useCheckBackend } from '@/hooks/useCheckBackend.ts'
 import { systemCheck } from '@/services/system.ts'
+import { usePurposeModelStore } from '@/store/purposeModelStore'
 import BackendInitDialog from '@/components/BackendInitDialog'
 import StartupBanner from '@/components/SystemDiagnostic/StartupBanner'
 import BackendHealthIndicator from '@/components/BackendHealth/BackendHealthIndicator'
@@ -34,7 +35,6 @@ const Downloader = lazy(() => import('@/pages/SettingPage/Downloader.tsx'))
 const DownloaderForm = lazy(() => import('@/components/Form/DownloaderForm/Form.tsx'))
 const TranscriberPage = lazy(() => import('@/pages/SettingPage/transcriber.tsx'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
-const PurposeModels = lazy(() => import('@/pages/SettingPage/Purposes'))
 const Appearance = lazy(() => import('@/pages/SettingPage/Appearance'))
 const OrganizerPage = lazy(() => import('@/pages/OrganizerPage'))
 const SettingsLanding = lazy(() => import('@/pages/SettingPage/SettingsLanding'))
@@ -43,10 +43,11 @@ function App() {
   useTaskPolling(3000) // 每 3 秒轮询一次
   const { loading, initialized, failed, lastError, retry } = useCheckBackend()
 
-  // 在后端初始化完成后执行系统检查
+  // 在后端初始化完成后执行系统检查并同步默认用途偏好
   useEffect(() => {
     if (initialized) {
       systemCheck()
+      void usePurposeModelStore.getState().syncFromServer()
     }
   }, [initialized])
 
@@ -84,7 +85,7 @@ function App() {
               <Route path="settings" element={<SettingPage />}>
                 <Route index element={<SettingsLanding />} />
                 <Route path="general" element={<General />} />
-                <Route path="purposes" element={<PurposeModels />} />
+                <Route path="purposes" element={<Navigate to="/settings/model" replace />} />
                 <Route path="appearance" element={<Appearance />} />
                 <Route path="model" element={<Model />}>
                   <Route path="new" element={<ProviderForm isCreate />} />

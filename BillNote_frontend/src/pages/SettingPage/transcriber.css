@@ -6,13 +6,14 @@
 .transcriber-field:last-child { margin-bottom:0; }
 .transcriber-field > label { font-weight:500; }
 .transcriber-field .choice-trigger { width:100%; min-width:0; }
-.transcriber-field > input,.transcriber-key > input { width:100%; min-width:0; height:36px; border:1px solid var(--border); border-radius:8px; background:var(--background); font-size:inherit; }
+.transcriber-field > input,.transcriber-key > input { width:100%; min-width:0; height:36px; padding:0 11px; border:1px solid var(--surface-border); border-radius:10px; background:var(--surface-input); font-size:inherit; transition:background-color 160ms var(--ease-apple), border-color 160ms var(--ease-apple), box-shadow 160ms var(--ease-apple); }
+.transcriber-field > input:hover:not(:disabled):not(:focus),.transcriber-key > input:hover:not(:disabled):not(:focus) { border-color:var(--surface-border-strong); }
+.transcriber-field > input:focus,.transcriber-key > input:focus { background:var(--surface-raised); border-color:color-mix(in srgb,var(--focus-ring,var(--primary)) 55%,var(--surface-border)); box-shadow:0 0 0 3px color-mix(in srgb,var(--focus-ring,var(--primary)) 14%,transparent); outline:none; }
 .transcriber-engine { grid-template-columns:86px minmax(0,1fr) auto; }
-.transcriber-field .transcriber-enabled { display:flex; align-items:center; gap:6px; white-space:nowrap; font-size:12px; font-weight:400; color:var(--muted-foreground); cursor:pointer; }
-.transcriber-enabled input { accent-color:var(--primary); }
+.transcriber-field .transcriber-enabled { display:flex; align-items:center; gap:7px; white-space:nowrap; font-size:12px; font-weight:400; color:var(--muted-foreground); cursor:pointer; }
 .transcriber-key { display:flex; gap:8px; align-items:center; min-width:0; }
-.transcriber-key > button { display:flex; align-items:center; justify-content:center; width:30px; height:34px; flex-shrink:0; color:var(--muted-foreground); border-radius:6px; }
-.transcriber-key > button:hover { background:var(--muted); color:var(--foreground); }
+.transcriber-key > button { display:flex; align-items:center; justify-content:center; width:32px; height:34px; flex-shrink:0; color:var(--muted-foreground); border-radius:8px; transition:background-color 140ms var(--ease-apple), color 140ms var(--ease-apple); }
+.transcriber-key > button:hover { background:var(--surface-hover); color:var(--foreground); }
 .transcriber-key > button:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
 .transcriber-field-note { grid-column:2 / -1; color:var(--muted-foreground); font-size:11px; line-height:1.5; }
 .transcriber-hint { margin:2px 0 0 100px; color:var(--muted-foreground); font-size:12px; line-height:1.65; }

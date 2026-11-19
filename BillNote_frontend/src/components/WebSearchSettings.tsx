@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import ChoiceSelect from '@/components/ChoiceSelect'
 import { Switch } from '@/components/ui/switch'
 import request from '@/utils/request'
@@ -75,23 +74,19 @@ export default function WebSearchSettings() {
     setMessage('')
   }
 
-  return <section className="settings-card settings-card-spaced search-settings">
-    <div className="settings-row search-settings-heading">
-      <div><h2>联网搜索</h2><p>新模型优先使用已配置的外部检索；按模型记住选择。</p></div>
-      <Link className="settings-link" to="/settings/model">检测联网能力 →</Link>
-    </div>
+  return <div className="search-settings">
     <div className="settings-row search-settings-option">
-      <div><h2>外部检索</h2><p>{settings ? `当前服务：${names[settings.provider]}` : '读取配置中'} · 模型按需调用</p></div>
+      <div><h2>外部检索</h2><p>{settings ? `当前服务：${names[settings.provider]}` : '读取配置中'} · 联网搜索按需调用</p></div>
       <Switch aria-label="外部检索总开关" checked={settings?.enabled || false} disabled={disabled} onCheckedChange={enabled => setSelection({ enabled })} />
     </div>
     {settings && tavily && <TavilyUsage key={usageRevision} configured={!!settings.profiles.tavily.api_key} />}
     <details className="settings-search-advanced">
-      <summary>服务配置<span className="search-settings-state">切换仅查看</span></summary>
+      <summary>检索服务配置<span className="search-settings-state">{names[selected]}</span></summary>
       <form autoComplete="off" onSubmit={event => { event.preventDefault(); saveProfile() }}>
         <fieldset disabled={disabled}>
           <div className="settings-row search-settings-option">
-            <span>查看服务</span>
-            <ChoiceSelect label="查看服务" value={selected} onChange={provider => { setSelected(provider as SearchProvider); setMessage('') }} disabled={disabled}
+            <span>检索服务</span>
+            <ChoiceSelect label="检索服务" className="settings-fixed-control" value={selected} onChange={provider => { setSelected(provider as SearchProvider); setMessage('') }} disabled={disabled}
               options={(['tavily', 'searxng'] as SearchProvider[]).map(provider => ({ value: provider, label: names[provider] }))} />
           </div>
           {!tavily && <div className="settings-field">
@@ -105,7 +100,7 @@ export default function WebSearchSettings() {
           </div>
           {tavily && <p className="settings-footnote search-settings-cost">基础搜索每次 1 点；读取网页不消耗 Tavily 点数。<a className="settings-link" href="https://app.tavily.com" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a><br />每月 1,000 免费点数，以账户实际额度为准。</p>}
           <div className="search-settings-actions">
-            <button type="submit" className="settings-button" disabled={disabled || !dirty}>保存配置</button>
+            <button type="submit" className="settings-button is-primary" disabled={disabled || !dirty}>保存配置</button>
             <button type="button" className="settings-button" disabled={disabled || dirty || current} title={dirty ? '请先保存配置' : undefined} onClick={() => setSelection({ provider: selected })}>{current ? '当前使用' : '设为当前服务'}</button>
             {dirty && <span className="search-settings-unsaved">未保存</span>}
           </div>
@@ -113,5 +108,5 @@ export default function WebSearchSettings() {
       </form>
     </details>
     {message && <p className="search-settings-message" role="status">{message}</p>}
-  </section>
+  </div>
 }

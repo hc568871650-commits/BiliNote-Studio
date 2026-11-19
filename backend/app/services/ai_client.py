@@ -29,7 +29,7 @@ def close_client(client):
             get_logger(__name__).warning('阅读模型客户端释放失败')
 
 
-def get_client(provider_id, model_name, protocol='openai-chat', *, native_search=False):
+def get_client(provider_id, model_name, protocol=None, *, native_search=False):
     from app.gpt.gpt_factory import GPTFactory
     from app.models.model_config import ModelConfig
     from app.services.provider import ProviderService
@@ -42,6 +42,7 @@ def get_client(provider_id, model_name, protocol='openai-chat', *, native_search
         raise ValueError('所选供应商已禁用')
     if not provider.get('api_key'):
         raise ValueError('所选供应商未配置 API Key')
+    protocol = (protocol or provider.get('protocol') or 'openai-chat').strip() or 'openai-chat'
     requested_protocol = protocol
     native_base = _deepseek_search_base(provider['base_url'], model_name) if native_search else None
     if native_base and protocol in ('openai-chat', 'openai-responses'):

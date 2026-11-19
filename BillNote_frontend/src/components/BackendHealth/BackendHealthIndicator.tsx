@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useBackendEvents } from './useBackendEvents'
 import BackendLogPanel from './BackendLogPanel'
 import BackendStatusButton from './BackendStatusButton'
+import { useBackendStatusStore } from './backendStatusStore'
 import './backend-health.css'
 
 export type Health = 'green' | 'yellow' | 'red' | 'unknown'
@@ -69,13 +70,26 @@ const BackendHealthIndicator = () => {
     void ping()
     return () => { mounted = false; clearTimeout(pollTimer); controller?.abort() }
   }, [isTauri, status])
-  if (!isTauri) return null
   const health: Health = status === 'terminated' || failures >= 3 ? 'red'
     : status === 'restarting' || restarting ? 'unknown'
       : lastOk === true ? dependencyWarning ? 'yellow' : 'green' : lastOk === false ? 'yellow' : 'unknown'
   const fullStatus = health === 'green' ? detail : health === 'yellow' ? dependencyWarning && lastOk ? detail.replace(/^已连接 · /, '依赖待检查：') : `连接异常：${detail}` : health === 'red' ? status === 'terminated' ? `后端已退出（code=${exitCode ?? 'unknown'}）` : `后端无响应：${detail}` : restarting || status === 'restarting' ? '后端正在重启' : detail
+  useEffect(() => {
+    if (!isTauri) {
+      useBackendStatusStore.getState().reset()
+      return
+    }
+    useBackendStatusStore.getState().setStatus({
+      active: true,
+      health,
+      label: fullStatus,
+      openPanel: () => setOpen(true),
+    })
+  }, [isTauri, health, fullStatus])
+  useEffect(() => () => useBackendStatusStore.getState().reset(), [])
+  if (!isTauri) return null
   return <>
-    <BackendStatusButton health={health} label={fullStatus} onClick={() => setOpen(true)} />
+    {health !== 'green' && <BackendStatusButton health={health} label={fullStatus} onClick={() => setOpen(true)} />}
     {open && <BackendLogPanel status={status} exitCode={exitCode} logs={logs} health={health}
       restarting={restarting} checking={checking} checkedAt={checkedAt} detail={detail}
       onCheck={() => checkRef.current()} onRestart={async () => { await restart(); await checkRef.current() }}

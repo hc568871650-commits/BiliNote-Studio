@@ -6,6 +6,7 @@ import { Toolbar } from 'markmap-toolbar'
 import 'markmap-toolbar/dist/style.css'
 import JSZip from 'jszip'
 import type { INode } from 'markmap-common'
+import { Copy, FileCode2, Globe, ImageDown, Loader2, Maximize2, Minimize2, Network } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import './reader.css'
 import ChoiceSelect from '@/components/ChoiceSelect'
@@ -643,7 +644,25 @@ export default function MarkmapEditor({
     }
     const observer = new MutationObserver(() => { applyMotionPreference(); void mm.renderData() })
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-accent', 'data-reduced-motion'] })
-    return () => { motionQuery.removeEventListener('change', applyMotionPreference); toggleDoubleZoom.current = () => {}; resetDoubleZoom.current = () => {}; mm.zoom.on('zoom.bilinote-toggle', null); contentObserver.disconnect(); observer.disconnect(); mm.destroy(); mmRef.current = undefined }
+    let lastWidth = 0
+    let lastHeight = 0
+    let fitFrame = 0
+    const resizeObserver = new ResizeObserver(entries => {
+      const rect = entries[0]?.contentRect
+      if (!rect || rect.width < 40 || rect.height < 40) return
+      const becameVisible = lastWidth < 40 || lastHeight < 40
+      const widthShifted = Math.abs(rect.width - lastWidth) > 24
+      lastWidth = rect.width
+      lastHeight = rect.height
+      if (becameVisible || widthShifted) {
+        cancelAnimationFrame(fitFrame)
+        fitFrame = requestAnimationFrame(() => {
+          if (mmRef.current?.state.data) void mmRef.current.fit()
+        })
+      }
+    })
+    resizeObserver.observe(svgRef.current)
+    return () => { cancelAnimationFrame(fitFrame); resizeObserver.disconnect(); motionQuery.removeEventListener('change', applyMotionPreference); toggleDoubleZoom.current = () => {}; resetDoubleZoom.current = () => {}; mm.zoom.on('zoom.bilinote-toggle', null); contentObserver.disconnect(); observer.disconnect(); mm.destroy(); mmRef.current = undefined }
   }, [])
 
   // 当 value 变化时，重新渲染数据
@@ -675,65 +694,40 @@ export default function MarkmapEditor({
 
   return (
     <div className={`mindmap-reader relative flex h-full min-h-0 flex-col bg-background ${selectable ? 'mindmap-selectable' : ''}`}>
-      <div className="reader-tools mindmap-chapter-bar"><div className="reader-tools-content">
-        <ChoiceSelect label="思维导图目录" value="" className="reader-chapter-choice" onChange={value => { if (value === '') return; const node = chapters[Number(value)]; if (node) void focusNode(node) }} options={[{ value:'', label:`目录 · ${chapters.length} 个章节` }, ...chapters.map((chapter, index) => ({ value:String(index), label:plainText(chapter.content) }))]} />
-        <span className="mindmap-hint" title={selectable ? '文字选择已开启 · 右键可恢复拖动' : '拖动查看 · 双击放大/还原 · 滚轮缩放'}>{selectable ? '文字选择已开启 · 右键可恢复拖动' : '拖动查看 · 双击放大/还原 · 滚轮缩放'}</span>
-      </div></div>
-      {/* 全屏/退出全屏 按钮 */}
-      <div className="absolute top-12 right-2 z-20 flex space-x-2">
-        <button
-          onClick={exportXMind}
-          className="rounded p-1 hover:bg-accent"
-          title="导出XMind格式"
-        >
-          🧠
-        </button>
-        <button
-          onClick={exportSvg}
-          className="rounded p-1 hover:bg-accent"
-          title="导出SVG矢量图（可无限放大）"
-        >
-          📐
-        </button>
-        <button
-          onClick={exportPng}
-          className="rounded p-1 hover:bg-accent"
-          title="导出PNG图片"
-          disabled={pngAction !== 'idle'}
-        >
-          {pngAction === 'exporting' ? '⏳' : '🖼️'}
-        </button>
-        <button
-          onClick={copyPng}
-          className="rounded p-1 hover:bg-accent"
-          title="复制PNG图片"
-          disabled={pngAction !== 'idle'}
-        >
-          {pngAction === 'copying' ? '⏳' : '📋'}
-        </button>
-        <button
-          onClick={exportHtml}
-          className="rounded p-1 hover:bg-accent"
-          title="导出HTML（可交互）"
-        >
-          💾
-        </button>
-        {isFullscreen ? (
-          <button
-            onClick={exitFullscreen}
-            className="rounded p-1 hover:bg-accent"
-            title="退出全屏"
-          >
-            🗗
+      <div className="reader-tools mindmap-chapter-bar">
+        <div className="reader-tools-content">
+          <ChoiceSelect label="思维导图目录" value="" className="reader-chapter-choice" onChange={value => { if (value === '') return; const node = chapters[Number(value)]; if (node) void focusNode(node) }} options={[{ value:'', label:`目录 · ${chapters.length} 个章节` }, ...chapters.map((chapter, index) => ({ value:String(index), label:plainText(chapter.content) }))]} />
+          <span className="mindmap-hint" title={selectable ? '文字选择已开启 · 右键可恢复拖动' : '拖动查看 · 双击放大/还原 · 滚轮缩放'}>{selectable ? '文字选择已开启 · 右键可恢复拖动' : '拖动查看 · 双击放大/还原 · 滚轮缩放'}</span>
+        </div>
+        <div className="mindmap-actions" role="toolbar" aria-label="思维导图导出与视图">
+          <button type="button" onClick={exportXMind} className="mindmap-action-btn" title="导出 XMind" aria-label="导出 XMind">
+            <Network className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
-        ) : (
-          <button onClick={enterFullscreen} className="rounded p-1 hover:bg-accent" title="全屏">
-            🗖
+          <button type="button" onClick={exportSvg} className="mindmap-action-btn" title="导出 SVG 矢量图" aria-label="导出 SVG 矢量图">
+            <FileCode2 className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
-        )}
+          <button type="button" onClick={exportPng} className="mindmap-action-btn" title="导出高清 PNG" aria-label="导出高清 PNG" disabled={pngAction !== 'idle'}>
+            {pngAction === 'exporting' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <ImageDown className="h-3.5 w-3.5" aria-hidden="true" />}
+          </button>
+          <button type="button" onClick={copyPng} className="mindmap-action-btn" title="复制高清 PNG" aria-label="复制高清 PNG" disabled={pngAction !== 'idle'}>
+            {pngAction === 'copying' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+          </button>
+          <button type="button" onClick={exportHtml} className="mindmap-action-btn" title="导出交互式 HTML" aria-label="导出交互式 HTML">
+            <Globe className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+          {isFullscreen ? (
+            <button type="button" onClick={exitFullscreen} className="mindmap-action-btn" title="退出全屏" aria-label="退出全屏">
+              <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          ) : (
+            <button type="button" onClick={enterFullscreen} className="mindmap-action-btn" title="全屏查看" aria-label="全屏查看">
+              <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          )}
+        </div>
       </div>
       {pngMessage && (
-        <div className="absolute top-11 right-2 z-20 rounded bg-card/95 px-2 py-1 text-xs text-muted-foreground shadow">
+        <div role="status" className="absolute top-12 right-3 z-20 rounded-xl border border-[var(--surface-border)] bg-[var(--dialog-surface,var(--surface-raised))] px-3 py-1.5 text-xs text-muted-foreground shadow-md backdrop-blur-md">
           {pngMessage}
         </div>
       )}

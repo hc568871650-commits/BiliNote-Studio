@@ -1,5 +1,30 @@
+import importlib.util
+import json
 import re
+from pathlib import Path
 from urllib.parse import quote, urlencode
+
+_STRUCTURED_MODULE = None
+
+
+def _structured_module():
+    global _STRUCTURED_MODULE
+    if _STRUCTURED_MODULE is not None:
+        return _STRUCTURED_MODULE
+    try:
+        from app.models import structured_note as mod
+        _STRUCTURED_MODULE = mod
+        return mod
+    except ImportError:
+        path = Path(__file__).resolve().parents[1] / "models" / "structured_note.py"
+        if path.is_file():
+            spec = importlib.util.spec_from_file_location("_bilinote_structured_note", path)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                _STRUCTURED_MODULE = mod
+                return mod
+    return None
 
 
 def prepend_source_link(markdown: str | None, source_url: str) -> str | None:
@@ -10,6 +35,14 @@ def prepend_source_link(markdown: str | None, source_url: str) -> str | None:
         return None
 
     source = (source_url or "").strip()
+    mod = _structured_module()
+    if mod is not None and isinstance(markdown, str) and markdown.lstrip().startswith("{"):
+        doc = mod.extract_structured_note_json(markdown)
+        if doc is not None:
+            if source:
+                doc["source_url"] = source
+            return json.dumps(doc, ensure_ascii=False)
+
     if not source:
         return markdown
 

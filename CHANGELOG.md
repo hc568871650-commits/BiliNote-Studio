@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.0] — 2026-11-18
+
+自公开 `0.1.0-preview.31` 以来的首个正式里程碑版本，详见 [0.2.0 发布说明](docs/releases/0.2.0.md) 与 [0.2.0 验收记录](docs/releases/0.2.0-validation.md)。
+
+### Added
+
+- **结构化阅读器与高透毛玻璃详注**：支持结论高亮、下划线、动态强调色波浪线、防挤压对比表、因果链，以及句末 1:1 柔光锚点触发的悬停预览气泡与毛玻璃详注卡片。
+- **原位膨胀章节自测与复习本**：支持三级判题视觉层次、解析展开、核对清单、「去问助手」一键打包追问，新增 `/api/notes/{task_id}/learning-state` 与 `/api/learning/review-bank` 持久化及跨笔记错题/高频避坑回顾。
+- **已有笔记一键结构化升级**：新增 `/api/notes/{task_id}/upgrade-structured`，保留历史版本的同时升级为结构化阅读视图；支持本地视频 Range 媒体流回看。
+- **分用途默认模型与 Windows DPAPI 密钥加密**：新增 `/api/ai_purposes` 统一管理笔记生成、阅读问答、资料库助手默认模型；新增 `secret_store.py` 在 Windows 下通过系统 DPAPI 加密保护 API 密钥。
+
+### Changed
+
+- **工作台交互与动效全面打磨**：动态开合笔记本图标、宽屏防晃动侧栏开关、以按钮为中心的纯百分比放射性深浅模式切换、阅读助手更利落的开关阻尼、主导航与筛选动效、段落选块零占位重做以及顶部百分比防挤压预留宽度。
+- **新版带图文档**：新增 `doc/showcase/studio-0.2.0/` 5 张隔离预览实机配图，全面重写 `README.md`。
+
 ## [0.1.0-preview.31 预发行版] — 2026-10-31
 
 相对公开 preview.8 的累计更新，详见[预发行说明](docs/releases/0.1.0-preview.31.md)和[本次验收](docs/releases/0.1.0-preview.31-validation.md)。
