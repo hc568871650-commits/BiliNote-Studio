@@ -1,36 +1,28 @@
-import { useEffect, useRef, useState } from 'react'
+import { useMemo } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { HomePage } from '@/pages/HomePage/Home'
+import { WorkspaceShellContext, type WorkspaceRouteMode } from '@/layouts/WorkspaceShellContext'
+import DistillQueueHost from '@/components/DistillQueue/DistillQueueHost'
 
 const Index = () => {
   const location = useLocation()
-  const working = location.pathname === '/'
-  const wasWorkingRef = useRef(working)
-  const [enteringHome, setEnteringHome] = useState(false)
+  const routeMode: WorkspaceRouteMode = location.pathname === '/'
+    ? 'home'
+    : location.pathname.startsWith('/organizer')
+      ? 'organizer'
+      : 'settings'
 
-  useEffect(() => {
-    const returnedToHome = !wasWorkingRef.current && working
-    wasWorkingRef.current = working
-    if (!returnedToHome) {
-      if (!working) setEnteringHome(false)
-      return
-    }
-    setEnteringHome(true)
-    const timer = window.setTimeout(() => setEnteringHome(false), 260)
-    return () => window.clearTimeout(timer)
-  }, [working])
+  const outlet = routeMode === 'home' ? null : <Outlet />
+  const shellValue = useMemo(
+    () => ({ shared: true, routeMode, outlet }),
+    [routeMode, outlet],
+  )
 
   return (
-    <>
-      <div
-        className={enteringHome ? 'workspace-home-host is-entering' : 'workspace-home-host'}
-        style={{ display: working ? 'block' : 'none' }}
-        aria-hidden={!working}
-      >
-        <HomePage />
-      </div>
-      <Outlet />
-    </>
+    <WorkspaceShellContext.Provider value={shellValue}>
+      <HomePage />
+      <DistillQueueHost />
+    </WorkspaceShellContext.Provider>
   )
 }
 export default Index

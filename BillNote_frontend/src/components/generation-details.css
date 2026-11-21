@@ -1,6 +1,11 @@
 .generation-settings-fields {display:flex;flex-direction:column;gap:10px;font-size:12px;color:var(--foreground)}
 .generation-settings-fields details>summary,.generation-details-panel details>summary {cursor:pointer;font-size:12px;color:var(--muted-foreground);padding:6px 0}
 .generation-settings-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.generation-settings-grid--single {grid-template-columns:minmax(0,220px)}
+.generation-settings-fields--compact .generation-sub-details {border-top:1px solid var(--surface-hairline);padding-top:6px;margin-top:2px}
+.generation-settings-fields--compact .generation-sub-details > summary {font-size:11.5px;font-weight:500;color:var(--surface-description);transition:color 140ms var(--ease-apple)}
+.generation-settings-fields--compact .generation-sub-details > summary:hover {color:var(--surface-text)}
+.generation-settings-fields--compact .generation-sub-details[open] > summary {margin-bottom:8px}
 .generation-settings-grid label {display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--muted-foreground)}
 .generation-settings-grid input,.generation-comparison-model {min-width:0;width:100%;border:1px solid var(--surface-border);border-radius:8px;background:var(--surface-input);color:var(--foreground);padding:6px 9px;font-size:12px;transition:background-color 150ms var(--ease-apple),border-color 150ms var(--ease-apple),box-shadow 150ms var(--ease-apple)}
 .generation-settings-grid input:hover:not(:disabled):not(:focus) {border-color:var(--surface-border-strong)}

@@ -47,30 +47,102 @@
   transition:opacity 180ms var(--ease-apple), transform 240ms var(--ease-spring), visibility 0s;
 }
 .reader-tools .reader-outline-button[aria-pressed=true] { background:var(--muted); color:var(--foreground); box-shadow:inset 0 0 0 1px var(--border); }
-.reading-outline-rail { position:relative; flex:0 0 44px; width:44px; min-height:0; display:flex; align-items:center; z-index:21; }
-.reading-outline-rail-markers { width:100%; max-height:100%; overflow-y:auto; scrollbar-width:none; padding:10px 0; display:flex; flex-direction:column; gap:2px; }
+.reading-outline-rail { position:relative; flex:0 0 42px; width:42px; min-height:0; display:flex; align-items:center; z-index:21; }
+.reading-outline-rail-markers { width:100%; max-height:100%; overflow-y:auto; scrollbar-width:none; padding:10px 0; display:flex; flex-direction:column; gap:0; }
 .reading-outline-rail-markers::-webkit-scrollbar { display:none; }
-.reading-outline-rail-marker { width:100%; height:14px; margin:0; display:flex; gap:4px; align-items:center; justify-content:flex-start; padding:0 10px; border-radius:4px; cursor:pointer; }
-.reading-outline-rail-marker > span { display:block; height:2.5px; border-radius:999px; background:var(--muted-foreground); opacity:.26; transition:width 220ms var(--ease-spring), opacity 160ms var(--ease-apple), background-color 160ms var(--ease-apple), box-shadow 200ms var(--ease-apple); }
-.reading-outline-rail-markers:hover .reading-outline-rail-marker > span { opacity:.42; }
-.reading-outline-rail-marker[aria-current=location] > span { opacity:.95; background:var(--primary); box-shadow:0 0 8px color-mix(in srgb, var(--primary) 42%, transparent); }
-.reading-outline-rail-marker > span.is-emphasized { opacity:1; background:var(--text-emphasis); box-shadow:0 0 8px color-mix(in srgb, var(--text-emphasis) 24%, transparent); }
-.reading-outline-rail-marker[aria-current=location] > span.is-emphasized { background:var(--primary); box-shadow:0 0 10px color-mix(in srgb, var(--primary) 54%, transparent); }
-.reading-outline-bookmark-dot { display:block; width:4px; height:4px; flex:0 0 4px; border-radius:50%; background:var(--primary); opacity:.85; }
+.reading-outline-rail-marker { width:100%; height:13px; margin:0; display:flex; gap:4px; align-items:center; justify-content:flex-start; padding:0 10px; border-radius:4px; cursor:pointer; }
+.reading-outline-rail-marker > span { display:block; height:2.5px; border-radius:999px; background:var(--muted-foreground); opacity:.24; transition:width 220ms var(--ease-spring), opacity 150ms var(--ease-apple), background-color 150ms var(--ease-apple), box-shadow 180ms var(--ease-apple), transform 140ms var(--ease-spring); }
+.reading-outline-rail-markers:hover .reading-outline-rail-marker:not([aria-current=location]) > span:not(.is-emphasized) { opacity:.36; }
+.reading-outline-rail-marker:active > span { transform:scaleX(0.9); transform-origin:left center; }
+.reading-outline-rail-marker[aria-current=location] > span { opacity:1; background:var(--text-emphasis); box-shadow:0 0 8px color-mix(in srgb, var(--primary) 42%, transparent); }
+.reading-outline-rail-marker > span.is-emphasized { opacity:.96; background:var(--text-emphasis); box-shadow:0 0 7px color-mix(in srgb, var(--text-emphasis) 24%, transparent); }
+.reading-outline-rail-marker[aria-current=location] > span.is-emphasized { opacity:1; background:var(--primary); box-shadow:0 0 10px color-mix(in srgb, var(--primary) 54%, transparent); }
+.reading-outline-bookmark-dot { display:block; width:4px; height:4px; flex:0 0 4px; border-radius:50%; background:var(--primary); opacity:.9; }
 .reading-outline-rail-marker:focus-visible { outline:2px solid var(--primary); outline-offset:-2px; }
-.reading-outline-rail-preview { position:absolute; left:48px; width:252px; max-width:calc(100vw - 70px); padding:12px 14px; border:var(--glass-border); border-radius:15px; background:var(--glass-bg-strong); backdrop-filter:var(--glass-blur); -webkit-backdrop-filter:var(--glass-blur); color:var(--foreground); box-shadow:var(--glass-shadow), var(--glass-highlight); animation:outline-card-in 180ms var(--ease-spring) both; }
-.reading-outline-rail-preview::before { content:''; position:absolute; right:100%; top:0; width:6px; height:100%; }
-@keyframes outline-card-in { from { opacity:0; transform:translate3d(-5px, 0, 0) scale(0.97); } to { opacity:1; transform:translate3d(0, 0, 0) scale(1); } }
-.reading-outline-preview-heading { display:flex; align-items:flex-start; gap:8px; }
-.reading-outline-preview-heading strong { flex:1; min-width:0; }
-.reading-outline-bookmark { display:flex; flex:0 0 26px; width:26px; height:26px; align-items:center; justify-content:center; color:var(--muted-foreground); border-radius:5px; }
-.reading-outline-bookmark:hover { background:var(--accent); color:var(--foreground); }
-.reading-outline-bookmark[aria-pressed=true] { color:var(--foreground); }
+.reading-outline-rail-preview {
+  --preview-y: 8px;
+  position:absolute;
+  top:0;
+  left:48px;
+  width:258px;
+  max-width:calc(100vw - 70px);
+  display:flex;
+  align-items:flex-start;
+  flex-wrap:wrap;
+  gap:4px;
+  padding:6px 6px 6px 6px;
+  border:var(--glass-border);
+  border-radius:16px;
+  background:var(--glass-bg-strong);
+  backdrop-filter:var(--glass-blur);
+  -webkit-backdrop-filter:var(--glass-blur);
+  color:var(--foreground);
+  box-shadow:var(--glass-shadow), var(--glass-highlight);
+  transform-origin:left center;
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+  transform:translate3d(-6px, var(--preview-y), 0) scale(0.96);
+  transition:opacity 140ms var(--ease-exit), transform 160ms var(--ease-exit), visibility 0s 160ms;
+}
+.reading-outline-rail-preview.is-open {
+  opacity:1;
+  visibility:visible;
+  pointer-events:auto;
+  transform:translate3d(0, var(--preview-y), 0) scale(1);
+  transition:opacity 160ms var(--ease-apple), transform 220ms var(--ease-spring), visibility 0s;
+}
+@starting-style {
+  .reading-outline-rail-preview.is-open {
+    opacity:0;
+    transform:translate3d(-6px, var(--preview-y), 0) scale(0.96);
+  }
+}
+.reading-outline-rail-preview.is-open.is-sliding {
+  transition:opacity 140ms var(--ease-apple), transform 240ms var(--ease-spring), visibility 0s;
+}
+/* Generous invisible hover bridge so diagonal pointer travel from marker to card never drops. */
+.reading-outline-rail-preview::before { content:''; position:absolute; right:100%; top:-10px; bottom:-10px; width:16px; }
+.reading-outline-preview-main {
+  flex:1;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:3px;
+  padding:6px 8px;
+  border-radius:11px;
+  text-align:left;
+  cursor:pointer;
+  transition:background-color 140ms var(--ease-apple), transform 160ms var(--ease-spring);
+}
+.reading-outline-preview-main:hover { background:color-mix(in srgb, var(--surface-text) 6%, transparent); }
+.reading-outline-preview-main:active { transform:scale(0.985); }
+.reading-outline-preview-main:focus-visible { outline:2px solid var(--primary); outline-offset:1px; }
+.reading-outline-preview-main strong { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-size:13px; font-weight:600; line-height:1.5; color:var(--foreground); overflow-wrap:anywhere; }
+.reading-outline-preview-main span { display:block; color:var(--muted-foreground); font-size:11px; line-height:1.35; }
+.reading-outline-bookmark {
+  display:flex;
+  flex:0 0 30px;
+  width:30px;
+  height:30px;
+  margin-top:4px;
+  align-items:center;
+  justify-content:center;
+  color:var(--muted-foreground);
+  border-radius:9px;
+  cursor:pointer;
+  transition:background-color 140ms var(--ease-apple), color 160ms var(--ease-apple), transform 180ms var(--ease-spring);
+}
+.reading-outline-bookmark:hover { background:color-mix(in srgb, var(--surface-text) 7%, transparent); color:var(--foreground); }
+.reading-outline-bookmark:active { transform:scale(0.88); }
+.reading-outline-bookmark[aria-pressed=true] { color:var(--primary); background:color-mix(in srgb, var(--primary) 12%, transparent); }
+.reading-outline-bookmark[aria-pressed=true]:hover { background:color-mix(in srgb, var(--primary) 18%, transparent); }
+.reading-outline-bookmark.is-pop { animation:outline-bookmark-pop 240ms var(--ease-spring) both; }
+@keyframes outline-bookmark-pop { 0% { transform:scale(0.82); } 55% { transform:scale(1.16); } 100% { transform:scale(1); } }
 .reading-outline-bookmark:focus-visible { outline:2px solid var(--primary); outline-offset:1px; }
-.reading-outline-rail-preview > small { display:block; margin-top:5px; color:var(--destructive); }
-.reading-outline-rail-preview strong { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-size:13px; font-weight:600; line-height:1.6; overflow-wrap:anywhere; }
-.reading-outline-rail-preview > span { display:block; margin-top:5px; color:var(--muted-foreground); font-size:11px; }
-@media(prefers-reduced-motion:reduce) { .reading-outline-rail-marker > span { transition:none; } }
+.reading-outline-rail-preview > small { flex-basis:100%; display:block; padding:0 8px 4px; color:var(--destructive); font-size:11px; }
+@media(prefers-reduced-motion:reduce) { .reading-outline-rail-marker > span, .reading-outline-rail-preview, .reading-outline-preview-main, .reading-outline-bookmark { transition:none !important; animation:none !important; } }
 /* The reader owns navigation; keep generated anchors but avoid a second giant TOC. */
 .reader-content-layout .reader-body .markdown-body .note-outline { display:none; }
 .reading-outline-panel { width:100%; flex:1 1 auto; min-height:0; display:flex; flex-direction:column; background:transparent; border-right:0; font-size:12px; }
@@ -122,8 +194,8 @@ html[data-reduced-motion=true] .reading-outline-mode-indicator { transition:none
 .reading-navigation:not([data-animate=true]) .reading-outline-shell { transition:none; }
 html[data-reduced-motion=true] :is(.reading-navigation,.reading-navigation-rail),.reader-content-layout[data-reduced-motion=true] :is(.reading-navigation,.reading-navigation-rail,.reading-outline-shell) { transition:none; }
 @media(prefers-reduced-motion:reduce) { :is(.reading-navigation[data-animate=true],.reading-navigation-rail) { transition:none; } }
-html[data-reduced-motion=true] :is(.reading-outline-shell,.reading-outline-children,.reading-outline-toggle svg,.reading-outline-current-dot,.reading-outline-rail-preview,.reading-outline-rail-marker > span,.reader-outline-button::before,.reading-outline-modes button::before) { transition:none; animation:none; }
-@media(prefers-reduced-motion:reduce) { :is(.reading-outline-shell,.reading-outline-children,.reading-outline-toggle svg,.reading-outline-current-dot,.reading-outline-rail-preview,.reading-outline-rail-marker > span,.reader-outline-button::before,.reading-outline-modes button::before) { transition:none; animation:none; } }
+html[data-reduced-motion=true] :is(.reading-outline-shell,.reading-outline-children,.reading-outline-toggle svg,.reading-outline-current-dot,.reading-outline-rail-preview,.reading-outline-preview-main,.reading-outline-bookmark,.reading-outline-rail-marker > span,.reader-outline-button::before,.reading-outline-modes button::before) { transition:none; animation:none; }
+@media(prefers-reduced-motion:reduce) { :is(.reading-outline-shell,.reading-outline-children,.reading-outline-toggle svg,.reading-outline-current-dot,.reading-outline-rail-preview,.reading-outline-preview-main,.reading-outline-bookmark,.reading-outline-rail-marker > span,.reader-outline-button::before,.reading-outline-modes button::before) { transition:none; animation:none; } }
 .reader-body .markdown-body .note-outline { margin: 12px 0 24px; padding: 16px 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--muted); font-size: .9em; }
 .reader-body .markdown-body .note-outline-title { margin: 0 0 8px; font-size: 1em; font-weight: 600; }
 .reader-body .markdown-body .note-outline ul { list-style: none; margin: 0; padding: 0; }
@@ -149,15 +221,21 @@ html[data-reduced-motion=true] .reader-viewport { transition:none !important; }
 .mindmap-chapter-bar .reader-chapter-choice { min-width: 90px; width: auto; max-width: 220px; flex: 1; }
 .mindmap-reader .markmap {
   --markmap-text-color: var(--foreground);
-  --markmap-a-color: var(--primary);
-  --markmap-a-hover-color: var(--primary);
-  --markmap-code-bg: var(--muted);
+  --markmap-a-color: var(--reading-accent, var(--primary));
+  --markmap-a-hover-color: var(--reading-accent, var(--primary));
+  --markmap-code-bg: color-mix(in srgb, var(--surface-text) 6%, transparent);
   --markmap-code-color: var(--foreground);
-  --markmap-circle-open-bg: var(--background);
-  --markmap-highlight-bg: var(--primary-light);
-  --markmap-highlight-node-bg: color-mix(in srgb, var(--primary) 16%, transparent);
+  --markmap-circle-open-bg: var(--surface-page, var(--background));
+  --markmap-highlight-bg: color-mix(in srgb, var(--reading-accent, var(--primary)) 16%, transparent);
+  --markmap-highlight-node-bg: color-mix(in srgb, var(--reading-accent, var(--primary)) 15%, transparent);
+  --markmap-font: 400 14px/1.5 var(--ui-font, system-ui, -apple-system, sans-serif);
   cursor: grab;
   user-select: none;
+}
+.mindmap-reader .markmap-foreign code {
+  border-radius: 6px;
+  padding: 1px 5px;
+  font-size: 0.88em;
 }
 .mindmap-reader .markmap:active { cursor: grabbing; }
 .mindmap-reader .markmap-foreign { user-select: none; }

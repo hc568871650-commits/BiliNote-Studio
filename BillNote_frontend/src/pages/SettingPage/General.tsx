@@ -1,5 +1,7 @@
 import ChoiceSelect from '@/components/ChoiceSelect'
 import { useInterfaceStore } from '@/store/interfaceStore'
+import { useDistillQueueStore } from '@/store/distillQueueStore'
+import type { DistillNotificationMode } from '@/utils/distillNotifications'
 import { useEffect, useRef, useState } from 'react'
 import OrganizerRetentionDialog from '@/components/OrganizerRetentionDialog'
 import { getOrganizerRetention, previewOrganizerRetention, retentionFailure, setOrganizerRetention, listOrganizerSessions, type OrganizerRetentionPreview } from '@/services/organizer'
@@ -7,6 +9,8 @@ import { useOrganizerStore } from '@/store/organizerStore'
 import { isQuickEdition } from '@/utils/edition'
 export default function General() {
   const preferences = useInterfaceStore()
+  const notificationMode = useDistillQueueStore(state => state.notificationMode)
+  const setNotificationMode = useDistillQueueStore(state => state.setNotificationMode)
   const [limit, setLimit] = useState('10')
   const [savedLimit, setSavedLimit] = useState<number | null>(null)
   const [retentionBusy, setRetentionBusy] = useState(false)
@@ -39,6 +43,7 @@ export default function General() {
   return <article className="settings-page"><header className="settings-page-header"><h1>常规</h1></header>
     <h2 className="settings-section-title">工作区</h2><section className="settings-card"><div className="settings-row"><div><h2>启动页面</h2><p>下次打开应用时进入的页面</p></div><ChoiceSelect label="启动页面" value={preferences.startPage} onChange={value => preferences.update({ startPage: value as 'recent' | 'create' })} options={[{ value:'recent',label:'最近阅读' },{ value:'create',label:'新建笔记' }]} /></div>
       <div className="settings-row"><div><h2>自动恢复阅读位置</h2><p>关闭时从头打开，保留继续阅读入口</p></div><ChoiceSelect label="自动恢复阅读位置" value={preferences.restoreReadingPosition ? 'on' : 'off'} onChange={value => preferences.update({ restoreReadingPosition: value === 'on' })} options={[{ value: 'on', label: '开启' }, { value: 'off', label: '关闭' }]} /></div>
+      <div className="settings-row"><div><h2>蒸馏完成提醒</h2><p>与蒸馏队列头部快捷切换同步</p></div><ChoiceSelect label="蒸馏完成提醒" value={notificationMode} onChange={value => setNotificationMode(value as DistillNotificationMode)} options={[{ value: 'all_done', label: '全部完成后提醒（默认）' }, { value: 'each', label: '每完成一篇提醒' }, { value: 'off', label: '关闭提醒' }]} /></div>
       <div className="settings-row"><div><h2>切换时保留工作区</h2><p>阅读位置、筛选条件与新建草稿在进入设置后保留</p></div><span className="settings-status">已启用</span></div></section>
     <h2 className="settings-section-title">对话</h2><section className="settings-card"><div className="settings-row"><div><h2>发送快捷键</h2><p>{isQuickEdition ? '同时应用于阅读问答和临时聊天' : '同时应用于阅读问答、临时聊天和整理助手'}</p></div><ChoiceSelect label="发送快捷键" value={preferences.sendKey} onChange={value => preferences.update({ sendKey: value as 'enter' | 'mod-enter' })} options={[{ value:'enter',label:'Enter 发送' },{ value:'mod-enter',label:'Ctrl+Enter 发送' }]} /></div>
       <div className="settings-row"><div><h2>流式回复</h2><p>阅读助手和临时聊天边接收边显示</p></div><ChoiceSelect label="流式回复" value={preferences.streamReading ? 'on' : 'off'} onChange={value => preferences.update({ streamReading: value === 'on' })} options={[{ value: 'on', label: '开启' }, { value: 'off', label: '关闭' }]} /></div>

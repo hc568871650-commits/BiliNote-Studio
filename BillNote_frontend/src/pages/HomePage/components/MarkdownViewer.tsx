@@ -1,16 +1,17 @@
-import { useState, useEffect, useMemo, useCallback, memo, FC } from 'react'
+import { lazy, Suspense, useState, useEffect, useMemo, useCallback, memo, FC } from 'react'
 import { useSourceNavigationStore } from '@/store/sourceNavigationStore'
 import { resolveQuoteTargets } from '@/utils/quoteSource'
 import { renderedNoteMarkdown, resolveSearchTarget, scrollToSearchMatch } from '@/utils/searchLocation'
 import ReactMarkdown from 'react-markdown'
-import { Copy, Play, ExternalLink, Sparkles, Loader2 } from 'lucide-react'
+import { Play, ExternalLink, Sparkles, Loader2 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
-import { getNoteLearningState, updateNoteLearningState, upgradeNoteStructured } from '@/services/note'
+import { getNoteLearningState, getNoteMediaInfo, noteMediaStreamUrl, updateNoteLearningState, upgradeNoteStructured, type NoteMediaInfo } from '@/services/note'
+import { findSegmentIndexForTime, resolveOnlineVideoEmbed, resolveTimestampAction } from '@/utils/mediaTranscriptSync'
+import MiniMediaPlayer, { type MediaSeekCommand } from './MiniMediaPlayer'
+import { buildOriginTimeUrl } from '@/types/structuredNote'
 import { usePurposeModelStore } from '@/store/purposeModelStore'
-import Idle from '@/components/Lottie/Idle.tsx'
 import GenerationProgress from './GenerationProgress'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { atomDark as codeStyle } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import CodeBlock from '@/components/CodeBlock'
 import NoteImage from '@/components/NoteImage'
 import { NoteImageChatContext, type NoteImageChatTarget } from '@/components/NoteImageChatContext'
 import ReadingChatLayout from './ReadingChatLayout'
@@ -24,20 +25,22 @@ import { useTaskStore } from '@/store/taskStore'
 import { noteStyles } from '@/constant/note.ts'
 import { noteStyleLabel } from '@/utils/noteGeneration'
 import { MarkdownHeader } from '@/pages/HomePage/components/MarkdownHeader.tsx'
-import TranscriptViewer from '@/pages/HomePage/components/transcriptViewer.tsx'
-import MarkmapEditor from '@/pages/HomePage/components/MarkmapComponent.tsx'
-import ChatPanel from '@/pages/HomePage/components/ChatPanel.tsx'
 import { scrollMotion } from '@/utils/motion'
 import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
 import ReaderPane from '@/pages/HomePage/components/ReaderPane'
 import { rehypeNoteOutline, resolveChapter, scrollToChapter } from '@/utils/noteOutline'
 import ReadingSelection, { rehypeReadingBlocks } from './ReadingSelection'
-import RefineNoteDialog from './RefineNoteDialog'
 import { useReadingAssistantStore, permanentSessionKey, type ReadingAttachment } from '@/store/readingAssistantStore'
 import { resolveStructuredNote, structuredNoteToMindmapMarkdown, type StructuredNoteDocument } from '@/types/structuredNote'
 import { useWorkspaceTopbar } from '@/layouts/WorkspaceTopbarContext'
-import StructuredNoteReader from './StructuredNoteReader/StructuredNoteReader'
+import StructuredNoteReader, { type StructuredFocusAnchor } from './StructuredNoteReader/StructuredNoteReader'
 import type { QuizAnswerPayload, QuizAskPayload } from './StructuredNoteReader/MorphingQuizCapsule'
+
+const Idle = lazy(() => import('@/components/Lottie/Idle.tsx'))
+const MarkmapEditor = lazy(() => import('@/pages/HomePage/components/MarkmapComponent.tsx'))
+const RefineNoteDialog = lazy(() => import('./RefineNoteDialog'))
+const ChatPanel = lazy(() => import('@/pages/HomePage/components/ChatPanel.tsx'))
+const TranscriptViewer = lazy(() => import('@/pages/HomePage/components/transcriptViewer.tsx'))
 
 interface VersionNote {
   ver_id: string
@@ -192,7 +195,7 @@ function createMarkdownComponents(baseURL: string, resourceBase?: string) {
         {children}
       </strong>
     ),
-    li: ({ children, ...props }: any) => {
+    li: ({ children, ordered: _ordered, index: _index, node: _node, ...props }: any) => {
       const rawText = String(children)
       const isFakeHeading = /^(\*\*.+\*\*)$/.test(rawText.trim())
 
@@ -208,12 +211,12 @@ function createMarkdownComponents(baseURL: string, resourceBase?: string) {
         </li>
       )
     },
-    ul: ({ children, ...props }: any) => (
+    ul: ({ children, ordered: _ordered, depth: _depth, node: _node, ...props }: any) => (
       <ul className="my-6 ml-6 list-disc [&>li]:mt-2" {...props}>
         {children}
       </ul>
     ),
-    ol: ({ children, ...props }: any) => (
+    ol: ({ children, ordered: _ordered, depth: _depth, node: _node, ...props }: any) => (
       <ol className="my-6 ml-6 list-decimal [&>li]:mt-2" {...props}>
         {children}
       </ol>
@@ -233,38 +236,7 @@ function createMarkdownComponents(baseURL: string, resourceBase?: string) {
       const codeContent = String(children).replace(/\n$/, '')
 
       if (!inline && match) {
-        return (
-          <div className="group bg-muted relative my-6 overflow-hidden rounded-lg border shadow-sm">
-            <div className="bg-muted text-muted-foreground flex items-center justify-between px-4 py-1.5 text-sm font-medium">
-              <div>{match[1].toUpperCase()}</div>
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(codeContent)
-                  toast.success('代码已复制')
-                }}
-                className="bg-background/80 hover:bg-background flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors"
-              >
-                <Copy className="h-3.5 w-3.5" />
-                复制
-              </button>
-            </div>
-            <SyntaxHighlighter
-              style={codeStyle}
-              language={match[1]}
-              PreTag="div"
-              className="!bg-muted !m-0 !p-0"
-              customStyle={{
-                margin: 0,
-                padding: '1rem',
-                background: 'transparent',
-                fontSize: '0.9rem',
-              }}
-              {...props}
-            >
-              {codeContent}
-            </SyntaxHighlighter>
-          </div>
-        )
+        return <CodeBlock language={match[1]} code={codeContent} />
       }
 
       return (
@@ -283,7 +255,7 @@ function createMarkdownComponents(baseURL: string, resourceBase?: string) {
         </table>
       </div>
     ),
-    th: ({ children, ...props }: any) => (
+    th: ({ children, isHeader: _isHeader, node: _node, ...props }: any) => (
       <th
         className="border-muted-foreground/20 border px-4 py-2 text-left font-medium whitespace-nowrap [&[align=center]]:text-center [&[align=right]]:text-right"
         {...props}
@@ -291,7 +263,7 @@ function createMarkdownComponents(baseURL: string, resourceBase?: string) {
         {children}
       </th>
     ),
-    td: ({ children, ...props }: any) => (
+    td: ({ children, isHeader: _isHeader, node: _node, ...props }: any) => (
       <td
         className="border-muted-foreground/20 border px-4 py-2 text-left [&[align=center]]:text-center [&[align=right]]:text-right"
         {...props}
@@ -353,9 +325,34 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const [rightDockTab, setRightDockTab] = useState<'chat' | 'transcript' | null>(null)
   const [chatLayoutMode, setChatLayoutMode] = useState<'half' | 'full'>('half')
   const [transcriptJumpTime, setTranscriptJumpTime] = useState<number | null>(null)
+  const [mediaInfo, setMediaInfo] = useState<NoteMediaInfo | null>(null)
+  const [miniPlayerOpen, setMiniPlayerOpen] = useState(false)
+  const [mediaSeekCommand, setMediaSeekCommand] = useState<MediaSeekCommand | null>(null)
+  const [playbackTime, setPlaybackTime] = useState<number | null>(null)
+  const [structuredAnchor, setStructuredAnchor] = useState<StructuredFocusAnchor | null>(null)
   const [upgradingStructured, setUpgradingStructured] = useState(false)
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({})
   const defaultGenerationModel = usePurposeModelStore(state => state.defaults.generation)
+
+  useEffect(() => {
+    setMiniPlayerOpen(false)
+    setMediaSeekCommand(null)
+    setPlaybackTime(null)
+    setTranscriptJumpTime(null)
+    if (!currentTaskId) {
+      setMediaInfo(null)
+      return
+    }
+    let active = true
+    void getNoteMediaInfo(currentTaskId)
+      .then(info => {
+        if (active) setMediaInfo(info)
+      })
+      .catch(() => {
+        if (active) setMediaInfo({ available: false, media_type: null, size: 0, url: null })
+      })
+    return () => { active = false }
+  }, [currentTaskId])
 
   useEffect(() => {
     if (!currentTaskId) { setQuizAnswers({}); return }
@@ -475,6 +472,14 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     return true
   }
   const [viewMode, setViewMode] = useState<'map' | 'preview'>('preview')
+  const [mountedDockTabs, setMountedDockTabs] = useState<{ chat: boolean; transcript: boolean }>({ chat: false, transcript: false })
+  useEffect(() => {
+    if (rightDockTab === 'chat') {
+      setMountedDockTabs(prev => (prev.chat ? prev : { ...prev, chat: true }))
+    } else if (rightDockTab === 'transcript') {
+      setMountedDockTabs(prev => (prev.transcript ? prev : { ...prev, transcript: true }))
+    }
+  }, [rightDockTab])
   const readerIdentity = `${currentTaskId}:${activeVersionId}`
 
   // 缓存 ReactMarkdown components，仅在 baseURL 变化时重建
@@ -496,6 +501,19 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     }
     if (source.metadata_only) { clear(); return }
     setViewMode('preview')
+    if ((source.section_id || source.quiz_id || source.annotation_id) && structuredNote) {
+      if (rightDockTab === 'chat' && chatLayoutMode === 'full') {
+        setChatLayoutMode('half')
+      }
+      setStructuredAnchor({
+        sectionId: source.section_id,
+        quizId: source.quiz_id,
+        annotationId: source.annotation_id,
+        nonce: Date.now(),
+      })
+      clear()
+      return
+    }
     if (source.start_time != null) {
       setTranscriptJumpTime(source.start_time)
       setChatLayoutMode(prev => (prev === 'full' ? 'half' : prev))
@@ -546,7 +564,9 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   if (status === 'idle') {
     return (
       <div className="flex h-full min-h-0 w-full flex-col items-center justify-center space-y-3 text-muted-foreground">
-        <Idle />
+        <Suspense fallback={<div className="h-[180px]" aria-hidden="true" />}>
+          <Idle />
+        </Suspense>
         <div className="text-center">
           <p className="text-base font-medium text-foreground">输入视频链接并点击“生成笔记”</p>
           <p className="mt-1.5 text-xs text-muted-foreground">支持哔哩哔哩、YouTube、快手及本地视频</p>
@@ -578,10 +598,47 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     addQuotes([attachment], true)
   }
 
-  const jumpNoteTime = (seconds: number, originUrl: string | null) => {
+  const mediaAvailable = Boolean(mediaInfo?.available)
+  const onlineEmbed = useMemo(() => {
+    if (!currentTask) return null
+    return resolveOnlineVideoEmbed({
+      platform: currentTask.audioMeta?.platform || currentTask.formData?.platform,
+      videoId: currentTask.audioMeta?.video_id,
+      videoUrl: currentTask.formData?.video_url,
+    })
+  }, [currentTask])
+  const playerAvailable = mediaAvailable || Boolean(onlineEmbed)
+  const mediaSrc = currentTaskId && mediaAvailable
+    ? (mediaInfo?.synthetic ? 'preview-synthetic-video' : noteMediaStreamUrl(baseURL, currentTaskId))
+    : ''
+
+  const seekLocalMedia = useCallback((seconds: number, autoPlay = true) => {
+    if (!playerAvailable) return
+    setMiniPlayerOpen(true)
+    setMediaSeekCommand({ seconds: Math.max(0, seconds), autoPlay, nonce: Date.now() })
+    setPlaybackTime(Math.max(0, seconds))
+  }, [playerAvailable])
+
+  const jumpNoteTime = useCallback((seconds: number, originUrl: string | null) => {
     if (!currentTask) return
-    const hasTranscriptMatch = (currentTask.transcript?.segments || []).some(seg => seg.end >= seconds)
-    if (hasTranscriptMatch || !originUrl) {
+    const segments = currentTask.transcript?.segments || []
+    const hasTranscriptMatch = findSegmentIndexForTime(segments, seconds) >= 0
+    const action = resolveTimestampAction({
+      mediaAvailable,
+      embedAvailable: Boolean(onlineEmbed),
+      hasTranscriptMatch,
+      originUrl,
+    })
+
+    if (action === 'play_local' || action === 'play_embed') {
+      seekLocalMedia(seconds, true)
+      if (hasTranscriptMatch) {
+        setTranscriptJumpTime(seconds)
+      }
+      return
+    }
+
+    if (action === 'transcript_only') {
       setTranscriptJumpTime(seconds)
       setShowTranscribe(true)
       useSourceNavigationStore.getState().open({
@@ -591,8 +648,22 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
       })
       return
     }
-    window.open(originUrl, '_blank', 'noopener,noreferrer')
-  }
+
+    if (action === 'open_external' && originUrl) {
+      window.open(originUrl, '_blank', 'noopener,noreferrer')
+    }
+  }, [activeVersionId, currentTask, mediaAvailable, onlineEmbed, seekLocalMedia, setShowTranscribe])
+
+  const playerExternalUrl = useMemo(() => {
+    if (!currentTask) return null
+    const sec = Math.floor(playbackTime ?? mediaSeekCommand?.seconds ?? 0)
+    return buildOriginTimeUrl(
+      currentTask.audioMeta?.platform || currentTask.formData?.platform,
+      currentTask.audioMeta?.video_id,
+      currentTask.formData?.video_url,
+      sec,
+    )
+  }, [currentTask, playbackTime, mediaSeekCommand])
 
   const hasReadableBody = Boolean((selectedContent && selectedContent !== 'loading' && selectedContent !== 'empty') || structuredNote)
 
@@ -612,17 +683,19 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
       viewMode={viewMode}
       setViewMode={setViewMode}
     >
-      <ReadingChatLayout mode={layoutMode} onCloseChat={() => setRightDockTab(null)} reader={
-        <div className="reading-note-column flex min-h-0 min-w-0 flex-1 flex-col">
+      <ReadingChatLayout mode={layoutMode} dockKind={rightDockTab === 'transcript' ? 'transcript' : 'chat'} onCloseChat={() => setRightDockTab(null)} reader={
+        <div className="reading-note-column relative flex min-h-0 min-w-0 flex-1 flex-col">
         {viewMode === 'map' ? (
           <div className="flex w-full flex-1 overflow-hidden bg-background">
             <div className={'w-full'}>
-              <MarkmapEditor
-                value={mindmapMarkdown}
-                onChange={() => {}}
-                height="100%"
-                title={currentTask?.audioMeta?.title || '思维导图'}
-              />
+              <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">正在加载思维导图…</div>}>
+                <MarkmapEditor
+                  value={mindmapMarkdown}
+                  onChange={() => {}}
+                  height="100%"
+                  title={currentTask?.audioMeta?.title || '思维导图'}
+                />
+              </Suspense>
             </div>
           </div>
         ) : (
@@ -663,6 +736,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
                       videoId={currentTask?.audioMeta?.video_id}
                       checklistScopeKey={currentTask ? `${currentTask.id}:${activeVersionId}` : undefined}
                       initialQuizAnswers={quizAnswers}
+                      focusAnchor={structuredAnchor}
                       onJumpTime={jumpNoteTime}
                       onAskAssistant={askQuizAssistant}
                       onAnswerQuiz={handleAnswerQuiz}
@@ -687,38 +761,81 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
             )}
           </div>
         )}
+        <MiniMediaPlayer
+          open={miniPlayerOpen && playerAvailable}
+          src={mediaSrc}
+          mediaType={mediaInfo?.media_type}
+          synthetic={Boolean(mediaInfo?.synthetic)}
+          onlineEmbed={mediaAvailable ? null : onlineEmbed}
+          transcriptSegments={currentTask?.transcript?.segments || []}
+          durationHint={currentTask?.audioMeta?.duration || 0}
+          seekCommand={mediaSeekCommand}
+          externalUrl={playerExternalUrl}
+          onTimeUpdate={setPlaybackTime}
+          onUnavailable={() => {
+            setMediaInfo({ available: false, media_type: null, size: 0, url: null })
+            if (!onlineEmbed) {
+              setMiniPlayerOpen(false)
+            }
+          }}
+          onClose={() => setMiniPlayerOpen(false)}
+        />
         </div>}
         chat={currentTask && (
           <div className="reading-dock-panes">
             <div className="reading-dock-pane" hidden={rightDockTab !== 'chat'}>
-              <ChatPanel
-                key={currentTask.id}
-                taskId={currentTask.id}
-                active={rightDockTab === 'chat'}
-                mode={chatLayoutMode}
-                onModeChange={next => {
-                  setChatLayoutMode(next)
-                  setRightDockTab('chat')
-                }}
-                onClose={() => setRightDockTab(null)}
-              />
+              {(rightDockTab === 'chat' || mountedDockTabs.chat) && (
+                <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-muted-foreground">正在加载阅读助手…</div>}>
+                  <ChatPanel
+                    key={currentTask.id}
+                    taskId={currentTask.id}
+                    active={rightDockTab === 'chat'}
+                    mode={chatLayoutMode}
+                    onModeChange={next => {
+                      setChatLayoutMode(next)
+                      setRightDockTab('chat')
+                    }}
+                    onClose={() => setRightDockTab(null)}
+                  />
+                </Suspense>
+              )}
             </div>
             <div className="reading-dock-pane" hidden={rightDockTab !== 'transcript'}>
-              <TranscriptViewer
-                taskId={currentTask.id}
-                baseURL={baseURL}
-                highlightTime={transcriptJumpTime}
-                onClose={() => setRightDockTab(null)}
-              />
+              {(rightDockTab === 'transcript' || mountedDockTabs.transcript) && (
+                <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-muted-foreground">正在加载原文参照…</div>}>
+                  <TranscriptViewer
+                    taskId={currentTask.id}
+                    baseURL={baseURL}
+                    highlightTime={transcriptJumpTime}
+                    playbackTime={playbackTime}
+                    mediaAvailable={playerAvailable}
+                    playerOpen={miniPlayerOpen}
+                    onSeekTime={(sec) => {
+                      if (playerAvailable) {
+                        seekLocalMedia(sec, true)
+                      }
+                    }}
+                    onTogglePlayer={() => {
+                      if (!playerAvailable) return
+                      setMiniPlayerOpen(open => !open)
+                    }}
+                    onClose={() => setRightDockTab(null)}
+                  />
+                </Suspense>
+              )}
             </div>
           </div>
         )}>
-        {refinement && currentTask && refinement.taskId === currentTask.id && refinement.versionId === (selectedVersion?.ver_id || currentVerId) && <RefineNoteDialog key={`${refinement.taskId}:${refinement.versionId}:${(refinement.sectionIds || []).join(',')}`} task={currentTask} versionId={refinement.versionId} texts={refinement.texts} sectionIds={refinement.sectionIds} originalProtocol={selectedVersion?.protocol} originalModel={modelName && refinementProvider ? { provider_id: refinementProvider, model_name: modelName } : null} onClose={() => setRefinement(null)} onApplied={updated => {
-          useTaskStore.setState(state => ({ tasks: state.tasks.map(task => task.id === updated.id ? updated : task) }))
-          if (Array.isArray(updated.markdown)) setCurrentVerId(updated.markdown[0]?.ver_id || '')
-          setRefinement(null)
-          toast.success('已采纳修订稿并保存为新版本，原版本保留')
-        }} />}
+        {refinement && currentTask && refinement.taskId === currentTask.id && refinement.versionId === (selectedVersion?.ver_id || currentVerId) && (
+          <Suspense fallback={null}>
+            <RefineNoteDialog key={`${refinement.taskId}:${refinement.versionId}:${(refinement.sectionIds || []).join(',')}`} task={currentTask} versionId={refinement.versionId} texts={refinement.texts} sectionIds={refinement.sectionIds} originalProtocol={selectedVersion?.protocol} originalModel={modelName && refinementProvider ? { provider_id: refinementProvider, model_name: modelName } : null} onClose={() => setRefinement(null)} onApplied={updated => {
+              useTaskStore.setState(state => ({ tasks: state.tasks.map(task => task.id === updated.id ? updated : task) }))
+              if (Array.isArray(updated.markdown)) setCurrentVerId(updated.markdown[0]?.ver_id || '')
+              setRefinement(null)
+              toast.success('已采纳修订稿并保存为新版本，原版本保留')
+            }} />
+          </Suspense>
+        )}
       </ReadingChatLayout>
     </MarkdownHeader>
   )

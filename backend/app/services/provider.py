@@ -11,7 +11,6 @@ from app.db.provider_dao import (
     update_provider,
     delete_provider, get_enabled_providers,
 )
-from app.gpt.gpt_factory import GPTFactory
 from app.models.model_config import ModelConfig
 from app.utils.secret_store import decrypt_secret, encrypt_secret
 

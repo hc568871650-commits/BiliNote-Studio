@@ -5,13 +5,16 @@ import hashlib
 import subprocess
 import tempfile
 import threading
-from PIL import Image, ImageChops, ImageStat
+
+from app.core.lazy import lazy_import
 
 OPERATION = re.compile(r"点击|菜单|参数|设置|调整|输入|修改|选择|打开|数值|click|menu|parameter|change|set\b", re.I)
 
 
 def frame_metrics(previous, current):
     """Global/local changes plus their spatial extent, normalized to [0,1]."""
+    ImageChops = lazy_import("PIL.ImageChops", feature_hint="动态关键帧视觉分析")
+    ImageStat = lazy_import("PIL.ImageStat", feature_hint="动态关键帧视觉分析")
     diff = ImageChops.difference(previous, current)
     global_change = ImageStat.Stat(diff).mean[0] / 255
     w, h = diff.size
@@ -40,6 +43,7 @@ def scan_video(video_path, duration, sample_fps=2, start_time=0, end_time=None,
                max_samples=20000, scan_timeout=600):
     """Decode once with real source PTS, limited measurements and wall-clock time."""
     from ffmpeg_helper import find_ffmpeg_binary
+    Image = lazy_import("PIL.Image", feature_hint="动态关键帧视觉分析")
     plan = scan_plan(duration, start_time, end_time, sample_fps, max_samples)
     if not math.isfinite(scan_timeout) or scan_timeout <= 0:
         raise ValueError('Invalid scan timeout')

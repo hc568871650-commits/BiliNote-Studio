@@ -30,6 +30,13 @@ interface AnnotationEntry {
   item: StructuredAnnotation
 }
 
+export interface StructuredFocusAnchor {
+  sectionId?: string
+  quizId?: string
+  annotationId?: string
+  nonce: number
+}
+
 interface Props {
   doc: StructuredNoteDocument
   baseURL: string
@@ -39,6 +46,7 @@ interface Props {
   videoId?: string
   checklistScopeKey?: string
   initialQuizAnswers?: Record<string, string>
+  focusAnchor?: StructuredFocusAnchor | null
   onJumpTime?: (seconds: number, originUrl: string | null) => void
   onAskAssistant: (payload: QuizAskPayload) => void
   onAnswerQuiz?: (payload: QuizAnswerPayload) => void
@@ -86,6 +94,26 @@ function readChecklistStorage(scopeKey?: string): Record<string, boolean> {
   return {}
 }
 
+function ReadingBlockPickIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={12}
+      height={12}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="reading-block-pick-icon"
+    >
+      <path className="pick-plus" d="M8 3.5v9M3.5 8h9" />
+      <path className="pick-check" d="M3.5 8.4 6.5 11.4 12.5 5" />
+    </svg>
+  )
+}
+
 export default function StructuredNoteReader({
   doc,
   baseURL,
@@ -95,6 +123,7 @@ export default function StructuredNoteReader({
   videoId,
   checklistScopeKey,
   initialQuizAnswers,
+  focusAnchor,
   onJumpTime,
   onAskAssistant,
   onAnswerQuiz,
@@ -311,6 +340,55 @@ export default function StructuredNoteReader({
     }
   }
 
+  // 响应复习本/全文搜索的跨路由精准锚点定位，自动滚动并触发 1.6s 动态强调色柔光脉冲
+  useEffect(() => {
+    if (!focusAnchor) return
+    const stage = stageRef.current
+    if (!stage) return
+
+    const timer = window.setTimeout(() => {
+      let targetEl: HTMLElement | null = null
+      const annoKey = focusAnchor.sectionId && focusAnchor.annotationId
+        ? `${focusAnchor.sectionId}:${focusAnchor.annotationId}`
+        : null
+
+      if (annoKey) {
+        targetEl = stage.querySelector<HTMLElement>(`[data-anno-id="${CSS.escape(annoKey)}"]`)
+      } else if (focusAnchor.annotationId) {
+        targetEl = stage.querySelector<HTMLElement>(`[data-annotation-id="${CSS.escape(focusAnchor.annotationId)}"]`)
+      } else if (focusAnchor.quizId) {
+        targetEl = stage.querySelector<HTMLElement>(`[data-quiz-id="${CSS.escape(focusAnchor.quizId)}"]`)
+      } else if (focusAnchor.sectionId) {
+        targetEl = stage.querySelector<HTMLElement>(`[data-section-id="${CSS.escape(focusAnchor.sectionId)}"]`)
+      }
+
+      if (!targetEl) return
+      const reduced = document.documentElement.dataset.reducedMotion === 'true'
+        || window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      targetEl.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'center' })
+
+      const highlightNode = targetEl.closest<HTMLElement>('.reading-block, .note-quiz-anchor, .note-section') || targetEl
+      highlightNode.classList.remove('anchor-pulse-highlight')
+      void highlightNode.offsetWidth
+      highlightNode.classList.add('anchor-pulse-highlight')
+      window.setTimeout(() => highlightNode.classList.remove('anchor-pulse-highlight'), 1650)
+
+      if (focusAnchor.annotationId) {
+        const key = targetEl.dataset.annoId || annoKey
+        if (key && annotationMap.has(key)) {
+          setExpandedQuizId(null)
+          setActiveAnnoKey(key)
+          window.requestAnimationFrame(() => positionPopoverNear(targetEl!))
+        }
+      } else if (focusAnchor.quizId) {
+        setActiveAnnoKey(null)
+        setExpandedQuizId(focusAnchor.quizId)
+      }
+    }, 80)
+
+    return () => window.clearTimeout(timer)
+  }, [focusAnchor, annotationMap, positionPopoverNear])
+
   const renderAnnoButton = (anno: StructuredAnnotation, sectionId: string, keyPrefix: string) => {
     const annoKey = `${sectionId}:${anno.id}`
     const isOpen = activeAnnoKey === annoKey
@@ -320,6 +398,7 @@ export default function StructuredNoteReader({
         type="button"
         className={`anno-dot${isOpen ? ' is-open' : ''}`}
         data-anno-id={annoKey}
+        data-annotation-id={anno.id}
         aria-label={`查看${KIND_LABELS[anno.kind]}`}
         aria-expanded={isOpen}
         onMouseDown={() => {
@@ -541,7 +620,7 @@ export default function StructuredNoteReader({
           aria-label="选择段落"
           title="选择段落，可加入 AI 问答"
         >
-          +
+          <ReadingBlockPickIcon />
         </button>
         {node}
       </div>
@@ -572,7 +651,7 @@ export default function StructuredNoteReader({
             const headingBlockId = `note-block-s-${blockCounter++}`
 
             return (
-              <section key={sectionId} className="note-section">
+              <section key={sectionId} className="note-section" data-section-id={sectionId}>
                 <div
                   id={headingBlockId}
                   className="reading-block"
@@ -586,7 +665,7 @@ export default function StructuredNoteReader({
                     aria-label={`选择章节 ${section.title}`}
                     title="选择章节，可加入 AI 问答"
                   >
-                    +
+                    <ReadingBlockPickIcon />
                   </button>
                   <div className="note-sec-head">
                     <HeadingTag
@@ -662,7 +741,7 @@ export default function StructuredNoteReader({
                         aria-label="选择核心结论"
                         title="选择段落，可加入 AI 问答"
                       >
-                        +
+                        <ReadingBlockPickIcon />
                       </button>
                       <p className="note-p is-takeaway">{renderSpans(tk.spans, sectionId, annoById, true)}</p>
                     </div>
@@ -672,24 +751,26 @@ export default function StructuredNoteReader({
                 {(section.blocks || []).map(block => renderBlock(block, section, sectionId, annoById))}
 
                 {section.quiz && (
-                  <MorphingQuizCapsule
-                    quiz={section.quiz}
-                    sectionId={sectionId}
-                    sectionTitle={section.title}
-                    sectionSummary={summary}
-                    expanded={expandedQuizId === sectionId}
-                    initialPickedKey={initialQuizAnswers?.[sectionId] ?? null}
-                    onExpandedChange={next => {
-                      if (next) {
-                        setActiveAnnoKey(null)
-                        setExpandedQuizId(sectionId)
-                      } else {
-                        setExpandedQuizId(current => (current === sectionId ? null : current))
-                      }
-                    }}
-                    onAskAssistant={onAskAssistant}
-                    onAnswer={onAnswerQuiz}
-                  />
+                  <div className="note-quiz-anchor" data-quiz-id={sectionId}>
+                    <MorphingQuizCapsule
+                      quiz={section.quiz}
+                      sectionId={sectionId}
+                      sectionTitle={section.title}
+                      sectionSummary={summary}
+                      expanded={expandedQuizId === sectionId}
+                      initialPickedKey={initialQuizAnswers?.[sectionId] ?? null}
+                      onExpandedChange={next => {
+                        if (next) {
+                          setActiveAnnoKey(null)
+                          setExpandedQuizId(sectionId)
+                        } else {
+                          setExpandedQuizId(current => (current === sectionId ? null : current))
+                        }
+                      }}
+                      onAskAssistant={onAskAssistant}
+                      onAnswer={onAnswerQuiz}
+                    />
+                  </div>
                 )}
               </section>
             )

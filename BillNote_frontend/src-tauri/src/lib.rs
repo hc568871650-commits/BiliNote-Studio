@@ -113,8 +113,10 @@ pub fn run() {
                 });
             }
 
-            // 检查 ffmpeg 是否在 PATH 中可用
-            check_ffmpeg_availability();
+            // 将 FFmpeg 可用性检测移入后台线程，避免阻塞窗口首帧与 sidecar 启动
+            std::thread::spawn(|| {
+                check_ffmpeg_availability();
+            });
 
             // 启动 Sidecar 并把 child handle 存到 state，方便后续 restart_backend_sidecar 使用
             let child = spawn_backend_sidecar(app.handle()).map_err(|e| {
@@ -231,7 +233,15 @@ fn enhance_path_variable(current_path: &str, additional_paths: &[String]) -> Str
 fn check_ffmpeg_availability() {
     use std::process::Command;
 
-    match Command::new("ffmpeg").arg("-version").output() {
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-version");
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+
+    match cmd.output() {
         Ok(output) => {
             if output.status.success() {
                 println!("✓ FFmpeg is available in PATH");

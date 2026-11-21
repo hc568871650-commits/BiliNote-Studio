@@ -224,6 +224,11 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
                 recorder.finish('cancelled')
             note_storage.write_status(task_id, 'FAILED', str(e), cancelled=True)
             note_diagnostics.record_event(task_id, 'generation_cancelled')
+            try:
+                from app.jobs.manager import get_job_manager
+                get_job_manager().sync_task_status(task_id, "CANCELLED", stage_message=str(e), cancelled=True)
+            except Exception:
+                pass
             return
         note_diagnostics.record_failure(task_id, e)
         if recorder:
@@ -403,7 +408,10 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
                 cached_transcript_ready = True
             except (OSError, ValueError, TypeError, KeyError, AttributeError):
                 pass
-        if not data.prefetched_transcript and not cached_transcript_ready:
+        from app.domains.ingestion.subtitle_parser import is_subtitle_path
+
+        local_subtitle_source = (data.platform == "local") and is_subtitle_path(data.video_url)
+        if not data.prefetched_transcript and not cached_transcript_ready and not local_subtitle_source:
             from app.services.transcriber_config_manager import TranscriberConfigManager
             readiness = TranscriberConfigManager().is_model_ready()
             if not readiness["ready"]:
@@ -452,6 +460,23 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
             temp.replace(admission_path)
             if data.prefetched_transcript:
                 _persist_prefetched_transcript(task_id, data.prefetched_transcript)
+            try:
+                from app.jobs.manager import get_job_manager
+                from app.jobs.models import JobKind, JobSpec
+
+                existing_title = ((existing or {}).get("audioMeta") or {}).get("title") or data.video_url
+                get_job_manager().register_external_job(
+                    JobSpec(
+                        task_id=task_id,
+                        kind=JobKind.REGENERATE if existing else JobKind.GENERATE,
+                        title=str(existing_title or task_id)[:160],
+                        model_name=data.model_name or "",
+                        provider_id=data.provider_id or "",
+                    ),
+                    on_cancel=lambda tid=task_id, rid=data.request_id: note_storage.request_cancellation(tid, rid),
+                )
+            except Exception:
+                pass
             background_tasks.add_task(run_note_task, task_id, data.video_url, data.platform, data.quality, data.link,
                                       data.screenshot, data.model_name, data.provider_id, data.format, data.style,
                                       data.extras, data.video_understanding, data.video_interval, data.grid_size, data.frame_mode,
@@ -699,6 +724,25 @@ def upgrade_note_structured(task_id: str, data: UpgradeStructuredRequest):
             if task_id in _active_tasks:
                 return R.error("此笔记正在生成，请等待完成后再升级结构化版本", code=409)
             _active_tasks.add(task_id)
+        job_rec = None
+        try:
+            from app.jobs.manager import get_job_manager
+            from app.jobs.models import JobKind, JobSpec, JobStatus
+
+            stored_task = note_storage.get_task(task_id) or {}
+            title = str(((stored_task.get("audioMeta") or {}).get("title")) or task_id)[:160]
+            job_rec = get_job_manager().register_external_job(
+                JobSpec(
+                    task_id=task_id,
+                    kind=JobKind.UPGRADE_STRUCTURED,
+                    title=title,
+                    model_name=data.model_name or "",
+                    provider_id=data.provider_id or "",
+                )
+            )
+            get_job_manager().update_job(job_rec.job_id, status=JobStatus.SUMMARIZING, progress=40, stage_message="正在升级为结构化笔记")
+        except Exception:
+            job_rec = None
         try:
             updated = upgrade_note_to_structured(
                 task_id,
@@ -709,7 +753,21 @@ def upgrade_note_structured(task_id: str, data: UpgradeStructuredRequest):
                 extras=data.extras,
                 generation_options=data.generation_options,
             )
+            if job_rec is not None:
+                try:
+                    from app.jobs.manager import get_job_manager
+                    get_job_manager().complete_job(job_rec.job_id, stage_message="结构化升级完成")
+                except Exception:
+                    pass
             return R.success(updated)
+        except Exception as upgrade_exc:
+            if job_rec is not None:
+                try:
+                    from app.jobs.manager import get_job_manager
+                    get_job_manager().fail_job(job_rec.job_id, error_summary=str(upgrade_exc))
+                except Exception:
+                    pass
+            raise
         finally:
             with _active_lock:
                 _active_tasks.discard(task_id)
@@ -722,90 +780,9 @@ def upgrade_note_structured(task_id: str, data: UpgradeStructuredRequest):
         return R.error("升级未完成，原笔记内容未修改，请检查模型配置后重试", code=500)
 
 
-class LearningStateUpdateRequest(BaseModel):
-    quiz_attempts: Optional[dict] = None
-    pinned_annotations: Optional[dict] = None
-    checklist_states: Optional[dict] = None
-
-
-@router.get("/notes/{task_id}/media")
-def stream_note_media(task_id: str, request: Request):
-    from app.services import media_stream
-    try:
-        media_path = media_stream.resolve_note_media_path(task_id)
-    except (ValueError, FileNotFoundError) as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-
-    file_size = media_path.stat().st_size
-    media_type = media_stream.guess_media_type(media_path)
-    range_header = request.headers.get("range")
-    if range_header:
-        try:
-            byte_range = media_stream.parse_http_range(range_header, file_size)
-        except ValueError:
-            return Response(
-                status_code=416,
-                headers={"Content-Range": f"bytes */{file_size}", "Accept-Ranges": "bytes"},
-            )
-        start, end = byte_range
-        content_length = end - start + 1
-        headers = {
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(content_length),
-            "X-Content-Type-Options": "nosniff",
-        }
-        return StreamingResponse(
-            media_stream.iter_file_range(media_path, start, end),
-            status_code=206,
-            media_type=media_type,
-            headers=headers,
-        )
-
-    headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Length": str(file_size),
-        "X-Content-Type-Options": "nosniff",
-    }
-    return StreamingResponse(
-        media_stream.iter_file_range(media_path, 0, max(0, file_size - 1)),
-        status_code=200,
-        media_type=media_type,
-        headers=headers,
-    )
-
-
-@router.get("/notes/{task_id}/learning-state")
-def get_note_learning_state(task_id: str):
-    from app.services import learning_state
-    try:
-        return R.success(learning_state.get_learning_state(task_id))
-    except FileNotFoundError as exc:
-        return R.error(str(exc), code=404)
-    except ValueError as exc:
-        return R.error(str(exc), code=400)
-
-
-@router.put("/notes/{task_id}/learning-state")
-@router.post("/notes/{task_id}/learning-state")
-def save_note_learning_state(task_id: str, data: LearningStateUpdateRequest):
-    from app.services import learning_state
-    try:
-        payload = data.model_dump(exclude_none=True)
-        return R.success(learning_state.update_learning_state(task_id, payload))
-    except FileNotFoundError as exc:
-        return R.error(str(exc), code=404)
-    except ValueError as exc:
-        return R.error(str(exc), code=400)
-
-
-@router.get("/learning/review-bank")
-def get_learning_review_bank(kind: str = "all", limit: int = 100, include_archived: bool = False):
-    from app.services import learning_state
-    try:
-        return R.success(learning_state.query_review_bank(kind=kind, limit=limit, include_archived=include_archived))
-    except ValueError as exc:
-        return R.error(str(exc), code=400)
+# 媒体流与学习状态路由已独立拆分至 app/domains/media/router.py 与 app/domains/learning/router.py，
+# 原路径（/api/notes/{task_id}/media、/api/notes/{task_id}/learning-state、/api/learning/review-bank）保持 100% 兼容。
+from app.domains.learning.router import LearningStateUpdateRequest  # noqa: E402,F401
 
 
 @router.get("/image_proxy")

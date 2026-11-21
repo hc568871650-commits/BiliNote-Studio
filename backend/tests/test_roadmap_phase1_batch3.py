@@ -182,13 +182,19 @@ class Phase1Batch3Tests(unittest.TestCase):
         self.assertEqual(bank['pit_annotations'][0]['annotation_id'], 'why-ctx')
         self.assertEqual(bank['pit_annotations'][1]['annotation_id'], 'pit-timeout')
 
-        # Re-answering correctly removes it from wrong_quizzes while incrementing attempt_count
+        # Re-answering correctly preserves ever_wrong for review until explicitly mastered
         corrected = learning_state.update_learning_state('note-learn-01', {
             'quiz_attempts': {'sec-pool': {'selected_key': 'B', 'correct_key': 'B'}},
         })
         self.assertTrue(corrected['quiz_attempts']['sec-pool']['is_correct'])
+        self.assertTrue(corrected['quiz_attempts']['sec-pool']['ever_wrong'])
         self.assertEqual(corrected['quiz_attempts']['sec-pool']['attempt_count'], 2)
-        bank_after = learning_state.query_review_bank(kind='wrong_quiz')
+        bank_pending = learning_state.query_review_bank(kind='wrong_quiz', status='pending')
+        self.assertEqual(bank_pending['counts']['wrong_quizzes'], 1)
+
+        # Marking mastered removes it from pending review bank
+        learning_state.record_quiz_practice('note-learn-01', 'sec-pool', mastered=True)
+        bank_after = learning_state.query_review_bank(kind='wrong_quiz', status='pending')
         self.assertEqual(bank_after['counts']['wrong_quizzes'], 0)
 
 

@@ -10,6 +10,13 @@ import { imageReaderContent } from './imageReaderFixture'
 import { diagnosticsEndpoint, diagnosticsPreview, diagnosticsTaskId } from './diagnosticsPreview'
 import { structuredPreviewDoc } from './structuredPreviewFixture'
 import { spansPlainText, type StructuredNoteDocument, type StructuredSection } from '@/types/structuredNote'
+import {
+  cancelPreviewJob,
+  clearPreviewFinishedJobs,
+  enqueuePreviewJob,
+  getPreviewJobsSnapshot,
+  retryPreviewJob,
+} from './previewJobsMock'
 
 const imageReaderPreview = new URLSearchParams(location.search).get('images') === '1'
 export const PREVIEW_STORAGE_KEY = diagnosticsPreview ? 'bilinote-diagnostics-synthetic-v1' : imageReaderPreview ? 'bilinote-image-reader-synthetic-v3' : generationScenario ? 'bilinote-generation-preview-synthetic-v1' : 'bilinote-ui-preview-synthetic-v3'
@@ -34,6 +41,7 @@ interface PreviewBody {
   version_id?: string; texts?: string[]; section_ids?: string[]; draft_id?: string; start_time?: number; end_time?: number; time_ranges?: { start: number; end: number }[]; use_video?: boolean;
   folder_id?: string; name?: string; changes?: Partial<NoteLibraryEntry>; provider_id?: string; model_name?: string; display_name?: string | null;
   id?: string; base_url?: string; api_key?: string; type?: string; logo?: string; enabled?: number | boolean; url?: string; cookie?: string;
+  section_id?: string; annotation_id?: string; selected_key?: string; mastered?: boolean;
   question?: string; context_mode?: string; attachments?: { type: string; name: string; text?: string; data_url?: string }[];
   tasks?: Task[]; video_url?: string; platform?: string; quality?: string; style?: string;
   transcriber_type?: string; groq_model?: string; groq_connection?: GroqConnection; whisper_model_size?: string; mlx_whisper_model_size?: string; model_size?: string; target?: string
@@ -103,6 +111,82 @@ interface PreviewRefinementDraft {
   protocol: string
 }
 const previewRefinementDrafts = new Map<string, PreviewRefinementDraft>()
+const previewQuizMastery = new Map<string, { selected_key: string; is_correct: boolean; mastered: boolean; review_count: number }>()
+const previewPitMastery = new Map<string, { mastered: boolean; review_count: number }>()
+const buildPreviewReviewBank = (reqKind: string, reqStatus: string) => {
+  const firstTask = state.tasks.find(t => t.id === 'ui-general-1') || state.tasks[0]
+  const taskId = firstTask?.id || 'ui-general-1'
+  const noteTitle = firstTask?.audioMeta?.title || structuredPreviewDoc.title || '示例笔记'
+  const wrongQuizzes: Array<Record<string, unknown>> = []
+  const pitAnnotations: Array<Record<string, unknown>> = []
+  let pendingTotal = 0
+  let masteredTotal = 0
+
+  for (const sec of structuredPreviewDoc.sections || []) {
+    if (sec.quiz) {
+      const qKey = `${taskId}:${sec.id}`
+      const saved = previewQuizMastery.get(qKey)
+      const isMastered = Boolean(saved?.mastered)
+      if (isMastered) masteredTotal += 1
+      else pendingTotal += 1
+      const matchStatus = reqStatus === 'all' || (reqStatus === 'mastered' ? isMastered : !isMastered)
+      if ((reqKind === 'all' || reqKind === 'wrong_quiz') && matchStatus) {
+        const wrongOpt = sec.quiz.options.find(o => o.key !== sec.quiz!.correct_key)?.key || 'A'
+        wrongQuizzes.push({
+          task_id: taskId,
+          version_id: 'preview-v1',
+          note_title: noteTitle,
+          section_id: sec.id,
+          quiz_id: sec.id,
+          section_title: sec.title,
+          short_prompt: sec.quiz.short_prompt,
+          full_question: sec.quiz.full_question,
+          options: sec.quiz.options,
+          selected_key: saved?.selected_key || wrongOpt,
+          correct_key: sec.quiz.correct_key,
+          explanation: sec.quiz.explanation,
+          mastered: isMastered,
+          review_count: saved?.review_count || 0,
+        })
+      }
+    }
+    for (const anno of sec.annotations || []) {
+      if (anno.kind !== 'pit') continue
+      const pKey = `${taskId}:${sec.id}:${anno.id}`
+      const saved = previewPitMastery.get(pKey)
+      const isMastered = Boolean(saved?.mastered)
+      if (isMastered) masteredTotal += 1
+      else pendingTotal += 1
+      const matchStatus = reqStatus === 'all' || (reqStatus === 'mastered' ? isMastered : !isMastered)
+      if ((reqKind === 'all' || reqKind === 'pit') && matchStatus) {
+        pitAnnotations.push({
+          task_id: taskId,
+          version_id: 'preview-v1',
+          note_title: noteTitle,
+          section_id: sec.id,
+          section_title: sec.title,
+          annotation_id: anno.id,
+          short_hint: anno.short_hint,
+          full_detail: anno.full_detail,
+          timestamp: anno.timestamp ?? null,
+          timestamp_label: anno.timestamp_label || '',
+          mastered: isMastered,
+          review_count: saved?.review_count || 0,
+        })
+      }
+    }
+  }
+  return {
+    wrong_quizzes: wrongQuizzes,
+    pit_annotations: pitAnnotations,
+    counts: {
+      wrong_quizzes: wrongQuizzes.length,
+      pit_annotations: pitAnnotations.length,
+      pending_total: pendingTotal,
+      mastered_total: masteredTotal,
+    },
+  }
+}
 const serializePreviewSection = (sec: StructuredSection): string => {
   const lines = [`${sec.level === 3 ? '###' : '##'} ${sec.title}`]
   for (const tk of sec.core_takeaways || []) {
@@ -186,7 +270,7 @@ const syntheticTask = (id: string, title: string, modelName = sampleModel): Task
   }
 }
 const initialState = (): PreviewState => ({
-  sample_version: 4,
+  sample_version: 5,
   tasks: new URLSearchParams(location.search).get('empty') === '1' ? [] : samples.map((sample, index) => ({ ...syntheticTask(`ui-general-${index + 1}`, sample.title), ...(index === 6 ? { status: 'FAILED', markdown: '' } : {}), archived_at: index === 7 ? '2026-10-01T00:00:00Z' : null })),
   folders: [{ id: 'default', name: '默认文件夹' }, { id: 'office', name: '办公效率' }, { id: 'learning', name: '学习方法' }],
   assignments: { 'ui-general-1': 'learning', 'ui-general-2': 'office', 'ui-general-9': 'office' },
@@ -209,13 +293,20 @@ try {
   }
 } catch { /* Corrupt preview state falls back to synthetic examples. */ }
 // Add the new fixture once, without replacing any existing notes, folders or settings.
-if (state.sample_version !== 4) {
+if (state.sample_version !== 5) {
   if (state.tasks.length && !state.tasks.some(task => task.id === 'ui-general-9')) {
     state.tasks.push(syntheticTask('ui-general-9', samples[8].title))
     state.assignments['ui-general-9'] = 'office'
     if (!state.entries['ui-general-2']) state.entries['ui-general-2'] = { ...blankEntry(), favorite: true }
   }
-  state.sample_version = 4
+  const firstTask = state.tasks.find(task => task.id === 'ui-general-1')
+  if (firstTask && !imageReaderPreview && Array.isArray(firstTask.markdown) && firstTask.markdown[0]) {
+    const firstVersion = firstTask.markdown[0] as { structured?: StructuredNoteDocument }
+    if ((firstVersion.structured?.sections?.length ?? 0) < structuredPreviewDoc.sections.length) {
+      firstVersion.structured = clone(structuredPreviewDoc)
+    }
+  }
+  state.sample_version = 5
   try { localStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(state)) } catch { /* Migration remains usable in this tab. */ }
 }
 const persist = () => { try { localStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(state)) } catch { /* This tab remains usable without persistence. */ } }
@@ -235,6 +326,41 @@ const refreshGenerationTasks = () => {
   if (changed) persist()
 }
 export const getPreviewTasks = () => { refreshGenerationTasks(); return clone(state.tasks) }
+export function enqueuePreviewDemoBatch(): void {
+  const demoTopics = [
+    { title: '高并发连接池压测与参数调优实战', fail: false, offsetMs: 0 },
+    { title: 'SQL 索引失效定位与执行计划拆解', fail: false, offsetMs: 950 },
+    { title: '浏览器渲染管线与毛玻璃合成层避坑', fail: false, offsetMs: 1900 },
+  ]
+  const batchId = `preview-batch-${Date.now()}`
+  for (const item of demoTopics) {
+    const id = `ui-generated-${crypto.randomUUID().slice(0, 8)}`
+    const task = syntheticTask(id, item.title, sampleModel)
+    task.status = 'QUEUED'
+    task.statusMessage = '排队等待中'
+    state.tasks = [task, ...state.tasks.filter(t => t.id !== id)]
+    enqueuePreviewJob({
+      taskId: id,
+      title: item.title,
+      modelName: sampleModel,
+      providerId: 'preview-1',
+      kind: 'batch_item',
+      batchId,
+      shouldFail: item.fail,
+      offsetMs: item.offsetMs,
+      onComplete: () => {
+        const target = state.tasks.find(t => t.id === id)
+        if (target) {
+          target.status = 'SUCCESS'
+          target.statusMessage = '生成完成'
+          target.finished_at = new Date().toISOString()
+          persist()
+        }
+      },
+    })
+  }
+  persist()
+}
 export const previewDefaultModels = { generation: { provider_id: 'preview-1', model_name: sampleModel }, reading: { provider_id: 'preview-2', model_name: sampleModel }, organizer: { provider_id: 'preview-3', model_name: sampleModel } }
 export async function resetPreviewData(clearPersistedSessions: () => Promise<void>) {
   // Clear only named business-store IndexedDB records through their store API.
@@ -716,8 +842,207 @@ export const previewAdapter: AxiosAdapter = async config => {
       }
     }
     else if (url === '/ai_purposes') data = previewDefaultModels
-    else if (url === '/learning/review-bank' && method === 'get') { const allItems = [{ kind: 'pit_annotation', task_id: state.tasks[0]?.id || 'ui-general-1', note_title: state.tasks[0]?.audioMeta?.title || '示例笔记', section_id: 'sec-1', section_title: '核心要点', hint: '高频避坑示例', detail: '生产环境请确保配置独立的超时边界与错误降级策略。' }]; const reqKind = String(config.params?.kind || 'all'); const items = reqKind === 'all' ? allItems : allItems.filter(i => reqKind === 'wrong_quiz' ? i.kind === 'wrong_quiz' : i.kind === 'pit_annotation'); data = { total: allItems.length, wrong_quiz_count: 0, pit_count: 1, items } }
+    else if (url === '/learning/review-bank' && method === 'get') {
+      const reqKind = String(config.params?.kind || 'all')
+      const reqStatus = String(config.params?.status || 'pending')
+      data = buildPreviewReviewBank(reqKind, reqStatus)
+    }
+    else if (url === '/learning/review-bank/practice' && method === 'post') {
+      const tid = String(body.task_id || 'ui-general-1')
+      const secId = String(body.section_id || '')
+      const sec = structuredPreviewDoc.sections.find(s => s.id === secId)
+      const correctKey = sec?.quiz?.correct_key || 'B'
+      const qKey = `${tid}:${secId}`
+      const prev = previewQuizMastery.get(qKey) || { selected_key: 'A', is_correct: false, mastered: false, review_count: 0 }
+      const picked = body.selected_key ? String(body.selected_key).toUpperCase() : prev.selected_key
+      const isCorrect = body.selected_key ? picked === correctKey : prev.is_correct
+      const mastered = typeof body.mastered === 'boolean' ? body.mastered : (body.selected_key && !isCorrect ? false : prev.mastered)
+      const next = { selected_key: picked, is_correct: isCorrect, mastered, review_count: prev.review_count + 1 }
+      previewQuizMastery.set(qKey, next)
+      data = { task_id: tid, section_id: secId, quiz_id: secId, correct_key: correctKey, explanation: sec?.quiz?.explanation || '', last_reviewed_at: new Date().toISOString(), ...next }
+    }
+    else if (url === '/learning/review-bank/pit-status' && method === 'post') {
+      const tid = String(body.task_id || 'ui-general-1')
+      const secId = String(body.section_id || '')
+      const annoId = String(body.annotation_id || '')
+      const pKey = `${tid}:${secId}:${annoId}`
+      const prev = previewPitMastery.get(pKey) || { mastered: false, review_count: 0 }
+      const next = { mastered: Boolean(body.mastered), review_count: prev.review_count + 1 }
+      previewPitMastery.set(pKey, next)
+      data = { task_id: tid, section_id: secId, annotation_id: annoId, ...next }
+    }
     else if (/^\/notes\/[^/]+\/learning-state$/.test(url)) { const tid = decodeURIComponent(url.split('/')[2]); data = { task_id: tid, quiz_attempts: {}, pinned_annotations: {}, checklist_states: {} } }
+    else if (url === '/upload' && method === 'post') {
+      const form = config.data instanceof FormData ? config.data : null
+      const file = form?.get('file')
+      const rawName = file instanceof File ? file.name : 'sample.srt'
+      const isSub = /\.(srt|vtt)$/i.test(rawName)
+      data = { url: `/uploads/${rawName}`, filename: rawName, is_subtitle: isSub }
+    }
+    else if (url === '/ingestion/resolve-collection' && method === 'post') {
+      const rawUrl = String((body as { url?: string }).url || 'https://www.bilibili.com/video/BV1xx411c7mD')
+      const existingFirst = state.tasks[0]
+      data = {
+        collection_title: '分布式系统与高并发架构实战（示例合集）',
+        platform: /youtube|youtu\.be/i.test(rawUrl) ? 'youtube' : 'bilibili',
+        source_url: rawUrl,
+        is_collection: true,
+        total_count: 4,
+        items: [
+          {
+            index: 1,
+            title: 'P1 连接池原理与 CPU 核数上限公式',
+            url: `${rawUrl.split('?')[0]}?p=1`,
+            video_id: 'demo_p1',
+            duration: 745,
+            platform: 'bilibili',
+            already_exists: Boolean(existingFirst),
+            existing_task_id: existingFirst?.id || null,
+          },
+          {
+            index: 2,
+            title: 'P2 慢查询与 B+Tree 索引失效定位',
+            url: `${rawUrl.split('?')[0]}?p=2`,
+            video_id: 'demo_p2',
+            duration: 920,
+            platform: 'bilibili',
+            already_exists: false,
+            existing_task_id: null,
+          },
+          {
+            index: 3,
+            title: 'P3 事务隔离级别与 MVCC 快照读',
+            url: `${rawUrl.split('?')[0]}?p=3`,
+            video_id: 'demo_p3',
+            duration: 815,
+            platform: 'bilibili',
+            already_exists: false,
+            existing_task_id: null,
+          },
+          {
+            index: 4,
+            title: 'P4 高可用限流、熔断与降级实战',
+            url: `${rawUrl.split('?')[0]}?p=4`,
+            video_id: 'demo_p4',
+            duration: 1080,
+            platform: 'bilibili',
+            already_exists: false,
+            existing_task_id: null,
+          },
+        ],
+      }
+    }
+    else if (url === '/ingestion/enqueue-batch' && method === 'post') {
+      const payload = body as {
+        items?: Array<{ title?: string; url?: string; platform?: string }>
+        model_name?: string
+        provider_id?: string
+        create_folder?: boolean
+        folder_name?: string
+      }
+      const items = payload.items || []
+      let targetFolder: { id: string; name: string } | null = null
+      if (payload.create_folder && payload.folder_name?.trim()) {
+        const cleanName = payload.folder_name.trim().slice(0, 60)
+        const existingFolder = state.folders.find(f => f.name.toLowerCase() === cleanName.toLowerCase())
+        if (existingFolder) {
+          targetFolder = existingFolder
+        } else {
+          targetFolder = { id: `folder-${crypto.randomUUID().slice(0, 8)}`, name: cleanName }
+          state.folders.push(targetFolder)
+        }
+      }
+      const batchId = `batch-${crypto.randomUUID().slice(0, 8)}`
+      const enqueued: Array<{ task_id: string; job_id: string; title: string; url: string; platform: string }> = []
+      items.forEach((item, idx) => {
+        const tid = `ui-generated-${crypto.randomUUID().slice(0, 8)}`
+        const title = item.title?.trim() || `合集分 P ${idx + 1}`
+        const task = syntheticTask(tid, title, payload.model_name || sampleModel)
+        task.status = 'QUEUED'
+        task.statusMessage = '排队等待中'
+        state.tasks = [task, ...state.tasks]
+        if (targetFolder) state.assignments[tid] = targetFolder.id
+        const job = enqueuePreviewJob({
+          taskId: tid,
+          title,
+          modelName: payload.model_name || sampleModel,
+          providerId: payload.provider_id || 'preview-1',
+          kind: 'batch_item',
+          batchId,
+          offsetMs: idx * 700,
+          onComplete: () => {
+            const target = state.tasks.find(t => t.id === tid)
+            if (target) {
+              target.status = 'SUCCESS'
+              target.statusMessage = '生成完成'
+              target.finished_at = new Date().toISOString()
+              persist()
+            }
+          },
+        })
+        enqueued.push({ task_id: tid, job_id: job.job_id, title, url: item.url || '', platform: item.platform || 'bilibili' })
+      })
+      data = { batch_id: batchId, folder: targetFolder, enqueued, skipped: [] }
+    }
+    else if (url === '/notes/batch-upgrade-structured' && method === 'post') {
+      const payload = body as { task_ids?: string[]; model_name?: string; provider_id?: string }
+      const taskIds = payload.task_ids || []
+      const batchId = `upgrade-${crypto.randomUUID().slice(0, 8)}`
+      const enqueued: Array<{ task_id: string; job_id: string; title: string }> = []
+      const skipped: Array<{ task_id: string; reason: string }> = []
+      taskIds.forEach((tid, idx) => {
+        const task = state.tasks.find(item => item.id === tid)
+        if (!task || task.archived_at) {
+          skipped.push({ task_id: tid, reason: '笔记不存在或已归档' })
+          return
+        }
+        const versions = Array.isArray(task.markdown) ? task.markdown : []
+        const latest = versions[0] as { structured?: StructuredNoteDocument; content?: string } | undefined
+        if (latest?.structured?.schema_version === 1 && (latest.structured.sections?.length || 0) > 0) {
+          skipped.push({ task_id: tid, reason: '已是结构化版本，已自动跳过' })
+          return
+        }
+        const hasContent = Boolean(latest?.content?.trim()) || Boolean(task.transcript?.segments?.length)
+        if (!hasContent) {
+          skipped.push({ task_id: tid, reason: '缺少可用正文或字幕缓存，已跳过' })
+          return
+        }
+        const title = task.audioMeta?.title || tid
+        const job = enqueuePreviewJob({
+          taskId: tid,
+          title: `升级：${title}`,
+          modelName: payload.model_name || sampleModel,
+          providerId: payload.provider_id || 'preview-1',
+          kind: 'upgrade_structured',
+          batchId,
+          offsetMs: idx * 650,
+          onComplete: () => {
+            const target = state.tasks.find(t => t.id === tid)
+            if (target) {
+              const upgradedDoc = clone(structuredPreviewDoc)
+              upgradedDoc.title = title
+              const existingVersions = Array.isArray(target.markdown) ? target.markdown : []
+              target.markdown = [
+                {
+                  ver_id: `preview-up-${crypto.randomUUID().slice(0, 8)}`,
+                  content: existingVersions[0]?.content || `# ${title}`,
+                  structured: upgradedDoc,
+                  style: 'knowledge',
+                  model_name: payload.model_name || sampleModel,
+                  provider_id: payload.provider_id || 'preview-1',
+                  created_at: new Date().toISOString(),
+                },
+                ...existingVersions,
+              ]
+              target.status = 'SUCCESS'
+              persist()
+            }
+          },
+        })
+        enqueued.push({ task_id: tid, job_id: job.job_id, title })
+      })
+      data = { batch_id: batchId, enqueued, skipped }
+    }
     else if (/^\/notes\/[^/]+\/upgrade-structured$/.test(url) && method === 'post') { const tid = decodeURIComponent(url.split('/')[2]); data = clone(state.tasks.find(item => item.id === tid) || state.tasks[0] || null) }
     else if (url.startsWith('/notes/')) {
       const [, , rawId, action] = url.split('/'); const id = decodeURIComponent(rawId)
@@ -846,10 +1171,49 @@ export const previewAdapter: AxiosAdapter = async config => {
       const title = `模拟生成笔记 ${state.tasks.filter(task => task.id.startsWith('ui-generated')).length + 1}`
       const task = syntheticTask(id, title, body.model_name)
       task.formData = { ...task.formData, request_id: body.request_id, video_url: body.video_url || '/sample.mp4', platform: body.platform || 'local', provider_id: body.provider_id!, quality: body.quality || 'medium', style: body.style || 'tutorial' }
-      if (generationScenario) startGenerationFixture(task, generationScenario, previous)
+      if (generationScenario) {
+        startGenerationFixture(task, generationScenario, previous)
+      } else {
+        task.status = 'QUEUED'
+        task.statusMessage = '排队等待中'
+        enqueuePreviewJob({
+          taskId: id,
+          title,
+          modelName: body.model_name || sampleModel,
+          providerId: body.provider_id || 'preview-1',
+          kind: previous ? 'regenerate' : 'generate',
+          onComplete: () => {
+            const target = state.tasks.find(item => item.id === id)
+            if (target) {
+              target.status = 'SUCCESS'
+              target.statusMessage = '生成完成'
+              target.finished_at = new Date().toISOString()
+              persist()
+            }
+          },
+        })
+      }
       state.tasks = [...state.tasks.filter(item => item.id !== id), task]
       if (generationScenario) { persist(); await fixtureDelay(2000, config.signal) }
       data = { task_id: id, request_id: body.request_id, status: 'PENDING', simulated: true }
+    } else if (url.startsWith('/media/') && url.endsWith('/info') && method === 'get') {
+      const taskId = decodeURIComponent(url.slice('/media/'.length, -'/info'.length))
+      const hasSyntheticMedia = taskId === 'ui-general-1'
+      data = hasSyntheticMedia
+        ? { available: true, media_type: 'video/mp4', size: 245760, url: `/api/media/${taskId}`, synthetic: true }
+        : { available: false, media_type: null, size: 0, url: null }
+    } else if (url === '/jobs' && method === 'get') {
+      data = getPreviewJobsSnapshot()
+    } else if (url === '/jobs/clear-finished' && method === 'post') {
+      data = { cleared: clearPreviewFinishedJobs() }
+    } else if (url.startsWith('/jobs/') && url.endsWith('/cancel') && method === 'post') {
+      const jobId = decodeURIComponent(url.slice('/jobs/'.length, -'/cancel'.length))
+      const ok = cancelPreviewJob(jobId)
+      if (!ok) throw { code: 409, msg: '任务不存在或已结束，无法取消' }
+      data = { job_id: jobId, cancelled: true }
+    } else if (url.startsWith('/jobs/') && url.endsWith('/retry') && method === 'post') {
+      const jobId = decodeURIComponent(url.slice('/jobs/'.length, -'/retry'.length))
+      data = retryPreviewJob(jobId)
     } else if (url.startsWith('/task_status/')) {
       const task = state.tasks.find(item => item.id === decodeURIComponent(url.split('/')[2]))
       if (!task) throw new Error('找不到模拟任务。')

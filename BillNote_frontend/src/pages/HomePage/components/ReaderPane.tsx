@@ -129,7 +129,19 @@ export default function ReaderPane({ taskId, versionId, content, title, children
     const element = viewport.current
     if (!element?.clientHeight) return
     const nodes = headingNodes.current
-    const top = element.getBoundingClientRect().top + 36
+    if (!nodes.length) { setActiveHeading(''); return }
+    const vpRect = element.getBoundingClientRect()
+    const maxScroll = element.scrollHeight - element.clientHeight
+    // When scrolled to the bottom of a note whose final section is shorter than the viewport,
+    // activate the last visible heading instead of getting stuck on the previous one.
+    if (maxScroll > 16 && maxScroll - element.scrollTop <= 16) {
+      const last = nodes[nodes.length - 1]
+      if (last.getBoundingClientRect().top < vpRect.bottom) {
+        setActiveHeading(last.id || '')
+        return
+      }
+    }
+    const top = vpRect.top + Math.min(vpRect.height * 0.16, 84)
     const current = nodes[Math.max(0, findReadingAnchor(nodes, top))]?.id || ''
     setActiveHeading(current)
   }, [])

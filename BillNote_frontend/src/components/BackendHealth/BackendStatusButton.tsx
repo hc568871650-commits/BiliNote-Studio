@@ -1,4 +1,4 @@
-import { Server } from 'lucide-react'
+import { BackendEngineIcon } from '@/components/AnimatedRailIcons'
 import { cn } from '@/lib/utils'
 import type { Health } from './BackendHealthIndicator'
 import { useBackendStatusStore } from './backendStatusStore'
@@ -16,8 +16,7 @@ export function BackendRailStatusButton({ className }: { className?: string }) {
     aria-label={`打开后端管理，后端状态：${label}`}
     onClick={openPanel}
   >
-    <Server size={18} aria-hidden="true" />
-    <span className={`backend-rail-dot backend-dot-${health}`} aria-hidden="true" />
+    <BackendEngineIcon health={health} size={17} />
   </button>
 }
 
@@ -35,7 +34,7 @@ export default function BackendStatusButton({ health, label, onClick }: {
     onClick={onClick}
   >
     <span className={`backend-dot backend-dot-${health}`} />
-    <Server size={14} />
+    <BackendEngineIcon health={health} size={14} showDot={false} />
     <span className="backend-status-name">后端</span>
     {visibleLabel && <span className="backend-status-label">{visibleLabel}</span>}
   </button>

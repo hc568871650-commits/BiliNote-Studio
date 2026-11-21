@@ -1,12 +1,16 @@
 export const READING_CHAT_LAYOUT_KEY = 'bilinote.reading-chat-layout.v1'
+export const READING_TRANSCRIPT_LAYOUT_KEY = 'bilinote.reading-transcript-layout.v1'
 export const DEFAULT_READER_PERCENT = 63
 export const SPLIT_HANDLE_WIDTH = 8
 export const MIN_READER_WIDTH = 360
 export const MIN_CHAT_WIDTH = 340
 
-export function readReaderPreference(storage?: Pick<Storage, 'getItem'>): number {
+export function readReaderPreference(
+  storage?: Pick<Storage, 'getItem'>,
+  key: string = READING_CHAT_LAYOUT_KEY,
+): number {
   try {
-    const raw = storage?.getItem(READING_CHAT_LAYOUT_KEY)
+    const raw = storage?.getItem(key)
     if (!raw || raw.length > 80) return DEFAULT_READER_PERCENT
     const value: unknown = JSON.parse(raw)
     return typeof value === 'number' && Number.isFinite(value) && value >= 20 && value <= 80
@@ -16,9 +20,13 @@ export function readReaderPreference(storage?: Pick<Storage, 'getItem'>): number
   }
 }
 
-export function saveReaderPreference(value: number, storage?: Pick<Storage, 'setItem'>): void {
+export function saveReaderPreference(
+  value: number,
+  storage?: Pick<Storage, 'setItem'>,
+  key: string = READING_CHAT_LAYOUT_KEY,
+): void {
   if (!Number.isFinite(value) || value < 20 || value > 80) return
-  try { storage?.setItem(READING_CHAT_LAYOUT_KEY, JSON.stringify(Math.round(value * 100) / 100)) } catch { /* Layout remains usable with unavailable storage. */ }
+  try { storage?.setItem(key, JSON.stringify(Math.round(value * 100) / 100)) } catch { /* Layout remains usable with unavailable storage. */ }
 }
 
 export function readingChatConstraints(width: number) {

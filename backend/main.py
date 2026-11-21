@@ -15,33 +15,22 @@ from app.exceptions.exception_handlers import register_exception_handlers
 # from app.db.provider_dao import init_provider_table
 from app.utils.logger import get_logger
 from app import create_app
+from app.core.runtime import get_runtime
 from app.services.transcriber_config_manager import TranscriberConfigManager
 from events import register_handler
-from ffmpeg_helper import ensure_ffmpeg_or_raise
 
 logger = get_logger(__name__)
 load_dotenv()
 
-# 读取 .env 中的路径
-static_path = os.getenv('STATIC', '/static')
-out_dir = os.getenv('OUT_DIR', './static/screenshots')
+runtime = get_runtime()
 
-# 自动创建本地目录（static 和 static/screenshots）
-static_dir = "static"
-uploads_dir = "uploads"
-if not os.path.exists(static_dir):
-    os.makedirs(static_dir)
-if not os.path.exists(uploads_dir):
-    os.makedirs(uploads_dir)
-
-if not os.path.exists(out_dir):
-    os.makedirs(out_dir)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动序列拆成 5 步、每步独立日志 + 异常时打明确的 [startup N/5 FAILED] 标记。
     # 目的：用户 docker logs 一眼能看出后端死在哪一步，避免「容器一直重启但看不出原因」。
     try:
+        get_runtime().ensure_dirs()
         logger.info("[startup 1/5] register_handler() — 注册事件处理器")
         register_handler()
 
@@ -107,19 +96,19 @@ app.add_middleware(
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 register_exception_handlers(app)
-app.mount(static_path, StaticFiles(directory=static_dir), name="static")
-app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
-
-
-
-
-
-
-
+app.mount(
+    runtime.static_url_path,
+    StaticFiles(directory=str(runtime.static_dir), check_dir=False),
+    name="static",
+)
+app.mount(
+    "/uploads",
+    StaticFiles(directory=str(runtime.uploads_dir), check_dir=False),
+    name="uploads",
+)
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("BACKEND_PORT", 8483))
-    host = os.getenv("BACKEND_HOST", "127.0.0.1")
-    logger.info(f"Starting server on {host}:{port}")
-    uvicorn.run(app, host=host, port=port, reload=False)
+    cfg = get_runtime()
+    logger.info(f"Starting server on {cfg.backend_host}:{cfg.backend_port}")
+    uvicorn.run(app, host=cfg.backend_host, port=cfg.backend_port, reload=False)

@@ -1,17 +1,45 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useForm, useWatch, type FieldErrors } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Check, Loader2, RefreshCw, UploadCloud } from 'lucide-react'
+import {
+  ArrowUp,
+  BookOpen,
+  Check,
+  ChevronDown,
+  FileAudio,
+  FileText,
+  Image as ImageIcon,
+  Layers,
+  Link2,
+  ListChecks,
+  Loader2,
+  RefreshCw,
+  ScanEye,
+  SlidersHorizontal,
+  Sparkles,
+  UploadCloud,
+  X,
+} from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { generateNote, get_task_status, type GenerateNotePayload } from '@/services/note'
+import {
+  enqueueBatch,
+  generateNote,
+  get_task_status,
+  resolveCollection,
+  type CollectionItem,
+  type CollectionResolution,
+  type GenerateNotePayload,
+} from '@/services/note'
 import { uploadFile } from '@/services/upload'
 import { useTaskStore, type Task } from '@/store/taskStore'
+import { useFolderStore } from '@/store/folderStore'
+import CollectionImportPanel from './CollectionImportPanel'
 import { useModelStore } from '@/store/modelStore'
 import { usePurposeModelStore } from '@/store/purposeModelStore'
 import { useCreateNoteDraftStore } from '@/store/createNoteDraftStore'
@@ -20,6 +48,7 @@ import { normalizeNoteStyle, normalizeNoteFormats } from '@/utils/noteGeneration
 import GenerationOptionsFields from '@/components/GenerationOptionsFields'
 import { normalizeGenerationOptions, readGenerationDefaults, saveGenerationDefaults } from '@/utils/generationOptions'
 import type { GenerationOptions } from '@/services/generationRuns'
+import { useDistillQueueStore } from '@/store/distillQueueStore'
 import './generation.css'
 
 const withScheme = (url: string) => /^[a-z][a-z\d+.-]*:\/\//i.test(url) ? url.trim() : `https://${url.trim()}`
@@ -60,6 +89,14 @@ const extractShareInput = (raw: string): { url: string; platform: string | null;
     return { url: cleaned, platform: 'bilibili', extracted: cleaned !== trimmed }
   }
   return { url: trimmed, platform: inferPlatform(trimmed), extracted: false }
+}
+
+const isSubtitleSourceName = (value: string): boolean => /\.(srt|vtt)(?:[?#].*)?$/i.test(value.trim())
+
+const looksLikeCollectionUrl = (value: string): boolean => {
+  const text = value.trim()
+  if (!text) return false
+  return /[?&]list=|\/playlist\b|\/medialist\b|collectiondetail|favlist|\/lists\/|[?&]p=\d+/i.test(text)
 }
 
 const platformLabels: Record<string, string> = { bilibili: '哔哩哔哩', youtube: 'YouTube', kuaishou: '快手' }
@@ -127,6 +164,11 @@ export default function NoteForm({ onSubmitted, creating = false }: { onSubmitte
   const setFileName = (value: string) => creating ? draft.update({ fileName: value }) : setLocalFileName(value)
   const [localNotice, setLocalNotice] = useState('')
   const [extractHint, setExtractHint] = useState('')
+  const [draggingFile, setDraggingFile] = useState(false)
+  const [collectionResolution, setCollectionResolution] = useState<CollectionResolution | null>(null)
+  const [resolvingCollection, setResolvingCollection] = useState(false)
+  const [batchSubmitting, setBatchSubmitting] = useState(false)
+  const collectionResolveSeq = useRef(0)
   const notice = creating ? draft.notice : localNotice
   const setNotice = useCallback((value: string) => creating ? updateDraft({ notice: value }) : setLocalNotice(value), [creating, updateDraft])
   const [localPending, setLocalPending] = useState<GenerateNotePayload | null>(null)
@@ -155,6 +197,8 @@ export default function NoteForm({ onSubmitted, creating = false }: { onSubmitte
   const vision = useWatch({ control: form.control, name: 'video_understanding' })
   const frameMode = useWatch({ control: form.control, name: 'frame_mode' })
   const modelName = useWatch({ control: form.control, name: 'model_name' })
+  const quality = useWatch({ control: form.control, name: 'quality' })
+  const extras = useWatch({ control: form.control, name: 'extras' })
   const editing = Boolean(currentTask)
   const generating = Boolean(currentTask && !['SUCCESS', 'FAILED'].includes(currentTask.status))
   const locked = submitting || checking || uploading || generating || Boolean(pending) || Boolean(currentTask?.archived_at)
@@ -229,8 +273,16 @@ export default function NoteForm({ onSubmitted, creating = false }: { onSubmitte
     const added = useTaskStore.getState().tasks.find(task => task.id === payload.task_id)
     if (payload.platform === 'local' && fileName && added) store.updateTaskContent(payload.task_id!, { audioMeta: { ...added.audioMeta, title: fileName } })
     if (creating) {
+      // 恢复用户原本阅读中的选中笔记，避免新建入队把侧边栏高亮切走
+      if (selectedBefore && selectedBefore !== payload.task_id) {
+        store.setCurrentTask(selectedBefore)
+      }
       if (alive.current) form.reset({ ...form.getValues(), video_url: '' })
       useCreateNoteDraftStore.getState().clearSource()
+      void useDistillQueueStore.getState().refresh()
+      toast.success('已加入蒸馏队列，可继续添加下一条')
+      setPending(null); setNotice('')
+      return
     }
     if (!alive.current) { store.setCurrentTask(selectedBefore); return }
     setPending(null); setNotice(''); onSubmitted?.()
@@ -287,8 +339,101 @@ export default function NoteForm({ onSubmitted, creating = false }: { onSubmitte
   const invalid = (errors: FieldErrors<FormInput>) => {
     setNotice(Object.values(errors).find(value => value?.message)?.message?.toString() || '请检查输入内容')
   }
-  const switchSource = (local: boolean) => { if (!editing && !locked) { setPathRequested(false); form.setValue('platform', local ? 'local' : 'bilibili'); form.setValue('video_url', ''); setFileName(''); setNotice('') } }
+  const switchSource = (local: boolean) => { if (!editing && !locked) { setPathRequested(false); setCollectionResolution(null); form.setValue('platform', local ? 'local' : 'bilibili'); form.setValue('video_url', ''); setFileName(''); setNotice('') } }
   const pickModel = (value: string) => { const [provider, model] = JSON.parse(value); setProviderId(provider); form.setValue('model_name', model, { shouldDirty: true, shouldValidate: true }) }
+
+  const triggerResolveCollection = useCallback(async (rawUrl: string, { silentSingle = false }: { silentSingle?: boolean } = {}) => {
+    const cleaned = extractShareInput(rawUrl).url.trim()
+    if (!cleaned || editing) return
+    const seq = ++collectionResolveSeq.current
+    setResolvingCollection(true)
+    setNotice('')
+    try {
+      const result = await resolveCollection(cleaned)
+      if (!alive.current || collectionResolveSeq.current !== seq) return
+      if (result.is_collection && result.items.length > 1) {
+        setCollectionResolution(result)
+      } else {
+        setCollectionResolution(null)
+        if (!silentSingle) {
+          toast('该链接为单个视频，可直接点击「开始生成」')
+        }
+      }
+    } catch (error) {
+      if (!alive.current || collectionResolveSeq.current !== seq) return
+      setCollectionResolution(null)
+      if (!silentSingle) {
+        setNotice(`合集解析失败：${errorText(error)}`)
+      }
+    } finally {
+      if (alive.current && collectionResolveSeq.current === seq) {
+        setResolvingCollection(false)
+      }
+    }
+  }, [editing, setNotice])
+
+  const handleBatchSubmit = async ({
+    selectedItems,
+    createFolder,
+    folderName,
+  }: {
+    selectedItems: CollectionItem[]
+    createFolder: boolean
+    folderName: string
+  }) => {
+    if (batchSubmitting || locked || !selectedItems.length) return
+    const values = form.getValues()
+    if (!modelList.some(model => model.model_name === values.model_name && model.provider_id === providerId)) {
+      setNotice('当前模型不可用，请先在下方选择可用模型')
+      return
+    }
+    setBatchSubmitting(true)
+    setNotice('')
+    try {
+      const result = await enqueueBatch({
+        items: selectedItems.map(item => ({
+          title: item.title,
+          url: item.url,
+          platform: item.platform,
+        })),
+        model_name: values.model_name,
+        provider_id: providerId,
+        quality: values.quality,
+        style: values.style,
+        format: normalizeNoteFormats(values.format),
+        extras: values.extras,
+        screenshot: values.format?.includes('screenshot') || false,
+        link: true,
+        video_understanding: Boolean(values.video_understanding),
+        video_interval: Number(values.video_interval) || 6,
+        grid_size: Array.isArray(values.grid_size) ? values.grid_size.map(Number) : [2, 2],
+        frame_mode: values.frame_mode || 'dynamic',
+        generation_options: normalizeGenerationOptions(generationOptions),
+        create_folder: createFolder,
+        folder_name: createFolder ? folderName : undefined,
+      })
+      void useDistillQueueStore.getState().refresh()
+      if (result.folder) {
+        void useFolderStore.getState().loadFolders().catch(() => undefined)
+      }
+      if (alive.current) {
+        setCollectionResolution(null)
+        form.reset({ ...form.getValues(), video_url: '' })
+        setExtractHint('')
+      }
+      if (creating) {
+        useCreateNoteDraftStore.getState().clearSource()
+      }
+      const folderTip = result.folder ? `，已归入「${result.folder.name}」` : ''
+      toast.success(`已将 ${result.enqueued.length} 集加入蒸馏队列${folderTip}`)
+    } catch (error) {
+      if (alive.current) {
+        setNotice(`批量入队失败：${errorText(error)}`)
+      }
+    } finally {
+      if (alive.current) setBatchSubmitting(false)
+    }
+  }
 
   const handleUrlInput = (raw: string, onChange: (value: string) => void) => {
     if (platform === 'local') {
@@ -298,69 +443,607 @@ export default function NoteForm({ onSubmitted, creating = false }: { onSubmitte
     }
     const { url, platform: detected, extracted } = extractShareInput(raw)
     onChange(url)
+    setCollectionResolution(null)
     if (detected) form.setValue('platform', detected)
     if (extracted) {
       setExtractHint(detected ? `已提取${platformLabels[detected] || ''}链接并自动识别平台` : '已从分享文本中提取纯净链接')
-    } else if (detected) {
-      setExtractHint('')
     } else {
       setExtractHint('')
     }
+    if (!editing && looksLikeCollectionUrl(url)) {
+      void triggerResolveCollection(url, { silentSingle: true })
+    }
   }
 
-  return <Form {...form}><form className="generation-form" onSubmit={form.handleSubmit(onSubmit, invalid)}>
-    <div className="generation-main">
-      <section className="generation-section generation-source">
-        <div className="generation-section-title"><h2>添加视频</h2><span className="generation-source-tabs" role="group" aria-label="视频来源"><button type="button" disabled={editing || locked} aria-pressed={platform !== 'local'} onClick={() => switchSource(false)}>视频链接</button><button type="button" disabled={editing || locked} aria-pressed={platform === 'local'} onClick={() => switchSource(true)}>本地文件</button></span></div>
-        {(platform !== 'local' || pathOpen) && <div className="generation-source-input">
-          {platform !== 'local' && <FormField control={form.control} name="platform" render={({ field }) => <FormItem><Select value={field.value} onValueChange={field.onChange} disabled={editing || locked}><SelectTrigger aria-label="视频平台"><SelectValue /></SelectTrigger><SelectContent>{platforms.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select></FormItem>} />}
-          {(platform !== 'local' || pathOpen) && <FormField control={form.control} name="video_url" render={({ field }) => <FormItem className="generation-url"><FormControl><Input {...field} disabled={editing || locked} aria-label={platform === 'local' ? '本地视频路径' : '视频链接'} placeholder={platform === 'local' ? '填写本地路径，或选择下方文件' : '粘贴视频链接、分享口令或 BV 号，自动提取识别'} onChange={event => handleUrlInput(event.target.value, field.onChange)} /></FormControl><FormMessage /></FormItem>} />}
-        </div>}
-        {extractHint && platform !== 'local' && <p className="generation-extract-hint" role="status">{extractHint}</p>}
-        {platform === 'local' && <><input ref={fileInput} type="file" accept="video/*,audio/*" hidden disabled={locked || editing} onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = '' }} /><button className="generation-upload" type="button" disabled={locked || editing} onClick={() => fileInput.current?.click()} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); if (event.dataTransfer.files[0]) void upload(event.dataTransfer.files[0]) }}><UploadCloud size={20} strokeWidth={1.6} /><strong>{uploading ? `正在上传${uploadProgress === null ? '…' : ` · ${uploadProgress}%`}` : fileName || '拖入视频，或点击选择文件'}</strong><span>{fileName && !uploading && uploadProgress === 100 ? '文件已就绪' : '支持常见音视频格式'}</span>{uploading && <progress max="100" value={uploadProgress ?? undefined} aria-label="文件上传进度" />}</button>{!pathOpen && <button type="button" className="generation-path-toggle" disabled={locked || editing} onClick={() => setPathRequested(true)}>或填写本地路径</button>}</>}
-      </section>
+  const isLocal = platform === 'local'
+  const isSubtitleSource = isLocal && (isSubtitleSourceName(fileName) || isSubtitleSourceName(videoUrl || ''))
+  const qualityOptions = [
+    { value: 'fast', label: '较小' },
+    { value: 'medium', label: '标准' },
+    { value: 'slow', label: '高清' },
+  ] as const
+  const qualityIndex = Math.max(0, qualityOptions.findIndex(item => item.value === quality))
+  const frameModeOptions = [
+    { value: 'dynamic', label: '动态关键帧' },
+    { value: 'fixed', label: '固定间隔' },
+  ] as const
+  const frameModeIndex = frameMode === 'fixed' ? 1 : 0
+  const reasoningLabels: Record<string, string> = {
+    auto: '思考自动',
+    none: '关闭思考',
+    low: '思考低',
+    medium: '思考中',
+    high: '思考高',
+    max: '思考最高',
+  }
+  const advancedSummary = [
+    !isLocal ? `${qualityOptions[qualityIndex]?.label || '标准'}画质` : null,
+    reasoningLabels[generationOptions.reasoning_effort] || '思考自动',
+    extras?.trim() ? '已填补充要求' : null,
+  ].filter(Boolean).join(' · ')
+  const currentModelMeta = modelList.find(model => model.provider_id === providerId && model.model_name === modelName)
+  const currentModelLabel = modelName
+    ? modelDisplayName(currentModelMeta || { model_name: modelName })
+    : (modelsLoading ? '加载模型…' : '选择模型')
 
-      <section className="generation-section generation-core-grid">
-        <div className="generation-core-block">
-          <div className="generation-section-title"><h2>笔记类型</h2></div>
-          <FormField control={form.control} name="style" render={({ field }) => <FormItem><div className="generation-types" role="group" aria-label="笔记类型">{[
-            { value: 'knowledge', title: '知识笔记', description: '打破时间流水账，按概念体系跨段重组' },
-            { value: 'tutorial', title: '教程笔记', description: '保留实操先后顺序，仅前置后文避坑' },
-          ].map(item => <button type="button" key={item.value} disabled={locked} aria-pressed={field.value === item.value} onClick={() => field.onChange(item.value)}><strong>{item.title}</strong><span>{item.description}</span>{field.value === item.value && <Check size={14} strokeWidth={1.8} className="generation-type-check" />}</button>)}</div><FormMessage /></FormItem>} />
-        </div>
+  return (
+    <Form {...form}>
+      <form className={`generation-form composer-form ${editing ? 'composer-form--editing' : ''}`} onSubmit={form.handleSubmit(onSubmit, invalid)}>
+        <div className="composer-card">
+          {editing ? (
+            <div className="composer-editing-source">
+              <span className="composer-editing-source-tag">
+                {isLocal ? <FileAudio size={13} strokeWidth={1.7} aria-hidden="true" /> : <Link2 size={13} strokeWidth={1.7} aria-hidden="true" />}
+                <span>{isLocal ? '本地文件' : (platformLabels[platform] || '视频链接')}</span>
+              </span>
+              <span className="composer-editing-source-value" title={videoUrl || ''}>
+                {videoUrl || '已关联原视频来源'}
+              </span>
+            </div>
+          ) : (
+            <>
+              <div className="composer-card-head">
+                <div
+                  className="codex-segmented composer-source-segmented"
+                  role="group"
+                  aria-label="视频来源"
+                  style={{ '--segment-count': 2, '--segment-index': isLocal ? 1 : 0 } as CSSProperties}
+                >
+                  <span className="codex-segmented-thumb" aria-hidden="true" />
+                  <button
+                    type="button"
+                    className={`codex-segmented-tab ${!isLocal ? 'is-active' : ''}`}
+                    disabled={locked}
+                    aria-pressed={!isLocal}
+                    onClick={() => switchSource(false)}
+                  >
+                    <Link2 size={13} strokeWidth={1.7} aria-hidden="true" />
+                    <span>视频链接</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`codex-segmented-tab ${isLocal ? 'is-active' : ''}`}
+                    disabled={locked}
+                    aria-pressed={isLocal}
+                    onClick={() => switchSource(true)}
+                  >
+                    <FileAudio size={13} strokeWidth={1.7} aria-hidden="true" />
+                    <span>本地文件</span>
+                  </button>
+                </div>
 
-        <div className="generation-core-block">
-          <div className="generation-section-title">
-            <h2>生成模型</h2>
-            <button type="button" className="generation-inline-refresh" disabled={modelsLoading || locked} onClick={() => void loadModels({ force: true })}><RefreshCw size={12} strokeWidth={1.6} className={modelsLoading ? 'generation-spin' : ''} />刷新</button>
+                {!isLocal ? (
+                  <div className="composer-platform-chip">
+                    <FormField
+                      control={form.control}
+                      name="platform"
+                      render={({ field }) => (
+                        <FormItem>
+                          <Select value={field.value} onValueChange={field.onChange} disabled={locked}>
+                            <SelectTrigger aria-label="视频平台" className="composer-mini-select rounded-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {platforms.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="composer-head-link"
+                    disabled={locked}
+                    onClick={() => setPathRequested(open => !open)}
+                  >
+                    {pathOpen ? '隐藏路径输入' : '填写本地路径'}
+                  </button>
+                )}
+              </div>
+
+              <div className="composer-card-body">
+                {!isLocal && (
+                  <FormField
+                    control={form.control}
+                    name="video_url"
+                    render={({ field }) => (
+                      <FormItem className="composer-url-field">
+                        <div className="composer-url-row">
+                          <FormControl>
+                            <Input
+                              {...field}
+                              className="composer-url-input"
+                              disabled={locked}
+                              aria-label="视频链接"
+                              autoCorrect="off"
+                              autoCapitalize="none"
+                              spellCheck={false}
+                              enterKeyHint="done"
+                              placeholder="粘贴视频链接、分享口令或 BV 号，自动识别平台…"
+                              onChange={event => handleUrlInput(event.target.value, field.onChange)}
+                            />
+                          </FormControl>
+                          {Boolean(field.value) && !locked && (
+                            <>
+                              <button
+                                type="button"
+                                className="composer-collection-trigger"
+                                disabled={resolvingCollection || batchSubmitting}
+                                title="解析多 P 合集或播放列表"
+                                onClick={() => void triggerResolveCollection(field.value || '')}
+                              >
+                                {resolvingCollection ? (
+                                  <Loader2 size={12} className="generation-spin" aria-hidden="true" />
+                                ) : (
+                                  <Layers size={12} strokeWidth={1.75} aria-hidden="true" />
+                                )}
+                                <span>{resolvingCollection ? '解析中…' : '解析合集'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="composer-url-clear"
+                                aria-label="清空链接"
+                                title="清空链接"
+                                onClick={() => { field.onChange(''); setExtractHint(''); setCollectionResolution(null) }}
+                              >
+                                <X size={13} strokeWidth={1.75} aria-hidden="true" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        {extractHint && <p className="composer-extract-hint" role="status"><Sparkles size={12} strokeWidth={1.7} aria-hidden="true" /><span>{extractHint}</span></p>}
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+
+                {!isLocal && collectionResolution && (
+                  <CollectionImportPanel
+                    resolution={collectionResolution}
+                    modelLabel={currentModelLabel}
+                    submitting={batchSubmitting}
+                    disabled={locked}
+                    onDismiss={() => setCollectionResolution(null)}
+                    onSubmitBatch={handleBatchSubmit}
+                  />
+                )}
+
+                {isLocal && (
+                  <div className="composer-local-stack">
+                    <input
+                      ref={fileInput}
+                      type="file"
+                      accept="video/*,audio/*,.srt,.vtt"
+                      hidden
+                      disabled={locked}
+                      onChange={event => {
+                        const file = event.target.files?.[0]
+                        if (file) void upload(file)
+                        event.target.value = ''
+                      }}
+                    />
+                    <button
+                      className={`composer-upload ${draggingFile ? 'is-dragging' : ''} ${fileName && !uploading && uploadProgress === 100 ? 'is-ready' : ''}`}
+                      type="button"
+                      disabled={locked}
+                      onClick={() => fileInput.current?.click()}
+                      onDragOver={event => { event.preventDefault(); if (!draggingFile) setDraggingFile(true) }}
+                      onDragLeave={() => setDraggingFile(false)}
+                      onDrop={event => {
+                        event.preventDefault()
+                        setDraggingFile(false)
+                        if (event.dataTransfer.files[0]) void upload(event.dataTransfer.files[0])
+                      }}
+                    >
+                      <span className="composer-upload-icon" aria-hidden="true">
+                        {uploading ? <Loader2 size={18} className="generation-spin" /> : isSubtitleSource ? <FileText size={18} strokeWidth={1.65} /> : <UploadCloud size={18} strokeWidth={1.65} />}
+                      </span>
+                      <span className="composer-upload-copy">
+                        <strong>{uploading ? `正在上传${uploadProgress === null ? '…' : ` · ${uploadProgress}%`}` : fileName || '拖入音视频或字幕文件，或点击选择'}</strong>
+                        <span>
+                          {isSubtitleSource
+                            ? '已识别字幕文件，将跳过转写直接生成'
+                            : fileName && !uploading && uploadProgress === 100
+                              ? '文件已就绪，可直接开始生成'
+                              : '支持 MP4、MKV、MOV、MP3、M4A、WAV、SRT、VTT'}
+                        </span>
+                      </span>
+                      {uploading && <progress className="composer-upload-progress" max="100" value={uploadProgress ?? undefined} aria-label="文件上传进度" />}
+                    </button>
+                    {isSubtitleSource && (
+                      <p className="composer-subtitle-pill" role="status">
+                        <Sparkles size={12} strokeWidth={1.7} aria-hidden="true" />
+                        <span>已识别字幕文件，将跳过转写直接生成</span>
+                      </p>
+                    )}
+                    {pathOpen && (
+                      <FormField
+                        control={form.control}
+                        name="video_url"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormControl>
+                              <Input
+                                {...field}
+                                className="composer-path-input"
+                                disabled={locked}
+                                aria-label="本地视频路径"
+                                autoCorrect="off"
+                                autoCapitalize="none"
+                                spellCheck={false}
+                                placeholder="填写本机文件完整路径，例如 D:\Videos\lesson.mp4"
+                                onChange={event => handleUrlInput(event.target.value, field.onChange)}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          <div className="composer-card-foot">
+            <div className="composer-controls-left">
+              <div className="composer-model-group">
+                <FormField
+                  control={form.control}
+                  name="model_name"
+                  render={({ field }) => (
+                    <FormItem className="composer-model-item">
+                      <Select
+                        value={providerId && field.value ? JSON.stringify([providerId, field.value]) : ''}
+                        onValueChange={pickModel}
+                        onOpenChange={open => { if (open) void loadModels() }}
+                        disabled={locked || (!modelList.length && modelsLoading)}
+                      >
+                        <FormControl>
+                          <SelectTrigger aria-label="生成模型" className="composer-model-trigger rounded-full">
+                            <Sparkles size={13} strokeWidth={1.7} className="composer-model-icon" aria-hidden="true" />
+                            <SelectValue placeholder={modelsLoading ? '加载模型…' : '选择模型'}>
+                              {currentModelLabel}
+                            </SelectValue>
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {modelList.map(model => (
+                            <SelectItem
+                              key={`${model.provider_id}:${model.model_name}`}
+                              value={JSON.stringify([model.provider_id, model.model_name])}
+                              title={model.model_name}
+                            >
+                              {modelDisplayName(model)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <button
+                  type="button"
+                  className="composer-icon-btn"
+                  aria-label="刷新模型列表"
+                  title="刷新模型列表"
+                  disabled={modelsLoading || locked}
+                  onClick={() => void loadModels({ force: true })}
+                >
+                  <RefreshCw size={13} strokeWidth={1.7} className={modelsLoading ? 'generation-spin' : ''} aria-hidden="true" />
+                </button>
+              </div>
+
+              <div className="composer-toggle-chips" role="group" aria-label="视觉增强选项">
+                <FormField
+                  control={form.control}
+                  name="format"
+                  render={({ field }) => {
+                    const checked = field.value?.includes('screenshot') || false
+                    return (
+                      <FormItem>
+                        <label
+                          className={`composer-chip-toggle ${checked ? 'is-checked' : ''} ${locked ? 'is-disabled' : ''}`}
+                          title="动态选取原片关键画面插入笔记"
+                        >
+                          <input
+                            type="checkbox"
+                            className="sr-only"
+                            disabled={locked}
+                            checked={checked}
+                            onChange={event => field.onChange(event.target.checked ? ['link', 'screenshot'] : ['link'])}
+                          />
+                          <ImageIcon size={13} strokeWidth={1.7} aria-hidden="true" />
+                          <span>自动配图</span>
+                        </label>
+                      </FormItem>
+                    )
+                  }}
+                />
+                <FormField
+                  control={form.control}
+                  name="video_understanding"
+                  render={({ field }) => {
+                    const checked = Boolean(field.value)
+                    return (
+                      <FormItem>
+                        <label
+                          className={`composer-chip-toggle ${checked ? 'is-checked' : ''} ${locked ? 'is-disabled' : ''}`}
+                          title="将原片关键帧交给多模态模型理解"
+                        >
+                          <input
+                            type="checkbox"
+                            className="sr-only"
+                            disabled={locked}
+                            checked={checked}
+                            onChange={event => field.onChange(event.target.checked)}
+                          />
+                          <ScanEye size={13} strokeWidth={1.7} aria-hidden="true" />
+                          <span>画面理解</span>
+                        </label>
+                      </FormItem>
+                    )
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="composer-actions-right">
+              {editing && (
+                <button type="button" className="composer-secondary-btn" onClick={() => navigate('/?view=create')}>
+                  新建一篇
+                </button>
+              )}
+              {pending && !submitting ? (
+                <button type="button" className="composer-primary-btn" disabled={checking} onClick={() => void checkPending()}>
+                  {checking ? <Loader2 size={14} className="generation-spin" aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />}
+                  <span>检查状态</span>
+                </button>
+              ) : (
+                <button type="submit" className="composer-primary-btn" disabled={locked || (!modelList.length && modelsLoading)}>
+                  {(submitting || generating) ? (
+                    <Loader2 size={14} className="generation-spin" aria-hidden="true" />
+                  ) : (
+                    <ArrowUp size={15} strokeWidth={2} aria-hidden="true" />
+                  )}
+                  <span>{submitting ? '正在提交…' : generating ? '正在生成' : editing ? '生成新版本' : '开始生成'}</span>
+                </button>
+              )}
+            </div>
           </div>
-          <FormField control={form.control} name="model_name" render={({ field }) => <FormItem><Select value={providerId && field.value ? JSON.stringify([providerId, field.value]) : ''} onValueChange={pickModel} onOpenChange={open => { if (open) void loadModels() }} disabled={locked || (!modelList.length && modelsLoading)}><FormControl><SelectTrigger aria-label="生成模型"><SelectValue placeholder={modelsLoading ? '正在加载模型…' : '选择模型'}>{field.value ? modelDisplayName(modelList.find(model => model.provider_id === providerId && model.model_name === field.value) || { model_name: field.value }) : (modelsLoading ? '正在加载模型…' : '选择模型')}</SelectValue></SelectTrigger></FormControl><SelectContent>{modelList.map(model => <SelectItem key={`${model.provider_id}:${model.model_name}`} value={JSON.stringify([model.provider_id, model.model_name])} title={model.model_name}>{modelDisplayName(model)}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem>} />
-          {modelsError && <p className="generation-inline-note">{modelsError}</p>}
-          {!modelList.length && !modelsLoading && <p className="generation-inline-note">请先在左侧「设置 · 模型与 API」中添加可用模型。</p>}
-          <div className="generation-options">
-            <FormField control={form.control} name="format" render={({ field }) => <FormItem><label><input type="checkbox" disabled={locked} checked={field.value?.includes('screenshot') || false} onChange={event => field.onChange(event.target.checked ? ['link','screenshot'] : ['link'])} /><span><strong>自动配图</strong><small>动态选取原片关键画面</small></span></label></FormItem>} />
-            <FormField control={form.control} name="video_understanding" render={({ field }) => <FormItem><label><input type="checkbox" disabled={locked} checked={field.value || false} onChange={event => field.onChange(event.target.checked)} /><span><strong>画面理解</strong><small>将关键帧交给看图模型</small></span></label></FormItem>} />
+
+          {(modelsError || (!modelList.length && !modelsLoading) || submitting || uploading || generating || notice) && (
+            <div className="composer-card-status" aria-live="polite">
+              {notice && <p role="alert" className="generation-error">{notice}</p>}
+              {modelsError && <p className="generation-inline-note">{modelsError}</p>}
+              {!modelList.length && !modelsLoading && <p className="generation-inline-note">请先在左侧「设置 · 模型与 API」中添加可用模型。</p>}
+              {submitting && (
+                <p className="generation-submit-state">
+                  <Loader2 size={13} className="generation-spin" aria-hidden="true" />
+                  <span>正在确认任务已接收{now - submittedAt >= 1000 ? ` · ${Math.floor((now - submittedAt) / 1000)} 秒` : '…'}</span>
+                </p>
+              )}
+              {!submitting && uploading && <p className="generation-submit-state">文件上传完成后即可生成</p>}
+              {!submitting && !uploading && generating && <p className="generation-submit-state">这篇笔记正在生成，可返回查看进度</p>}
+            </div>
+          )}
+        </div>
+
+        <FormField
+          control={form.control}
+          name="style"
+          render={({ field }) => (
+            <FormItem className="composer-style-section">
+              <div className="composer-style-grid" role="radiogroup" aria-label="笔记类型">
+                {([
+                  { value: 'tutorial', title: '教程笔记', description: '保留实操顺序，前置关键避坑', Icon: ListChecks },
+                  { value: 'knowledge', title: '知识笔记', description: '打破时间流水账，按概念体系重组', Icon: BookOpen },
+                ] as const).map(item => {
+                  const active = field.value === item.value
+                  const Icon = item.Icon
+                  return (
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      key={item.value}
+                      className={`composer-style-card ${active ? 'is-active' : ''}`}
+                      disabled={locked}
+                      onClick={() => field.onChange(item.value)}
+                    >
+                      <span className="composer-style-icon" aria-hidden="true">
+                        <Icon size={15} strokeWidth={1.7} />
+                      </span>
+                      <span className="composer-style-copy">
+                        <strong>{item.title}</strong>
+                        <span>{item.description}</span>
+                      </span>
+                      <span className="composer-style-check" aria-hidden="true">
+                        {active && <Check size={12} strokeWidth={2.2} />}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <details
+          className="composer-advanced"
+          open={creating ? draft.advancedOpen : undefined}
+          onToggle={event => { if (creating) draft.update({ advancedOpen: event.currentTarget.open }) }}
+        >
+          <summary className="composer-advanced-summary">
+            <span className="composer-advanced-title">
+              <SlidersHorizontal size={13} strokeWidth={1.7} aria-hidden="true" />
+              <span>进阶设置与补充要求</span>
+            </span>
+            <span className="composer-advanced-meta">
+              {advancedSummary && <span className="composer-advanced-pill">{advancedSummary}</span>}
+              <ChevronDown size={14} strokeWidth={1.75} className="composer-advanced-chevron" aria-hidden="true" />
+            </span>
+          </summary>
+
+          <div className="composer-advanced-body">
+            <FormField
+              control={form.control}
+              name="extras"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="composer-field-label">补充要求</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      {...field}
+                      className="composer-textarea"
+                      disabled={locked}
+                      placeholder="例如：重点记录参数、菜单路径与避坑细节"
+                      rows={2}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+
+            <div className="composer-segmented-row">
+              {!isLocal && (
+                <FormField
+                  control={form.control}
+                  name="quality"
+                  render={({ field }) => (
+                    <FormItem className="composer-segmented-item">
+                      <FormLabel className="composer-field-label">下载质量</FormLabel>
+                      <div
+                        className="codex-segmented composer-inline-segmented"
+                        role="radiogroup"
+                        aria-label="下载质量"
+                        style={{ '--segment-count': 3, '--segment-index': qualityIndex } as CSSProperties}
+                      >
+                        <span className="codex-segmented-thumb" aria-hidden="true" />
+                        {qualityOptions.map(opt => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            role="radio"
+                            aria-checked={field.value === opt.value}
+                            disabled={locked}
+                            className={`codex-segmented-tab ${field.value === opt.value ? 'is-active' : ''}`}
+                            onClick={() => field.onChange(opt.value)}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              <FormField
+                control={form.control}
+                name="frame_mode"
+                render={({ field }) => {
+                  const disabledFrame = locked || (!vision && !format?.includes('screenshot'))
+                  return (
+                    <FormItem className="composer-segmented-item">
+                      <FormLabel className="composer-field-label">取帧方式</FormLabel>
+                      <div
+                        className={`codex-segmented composer-inline-segmented ${disabledFrame ? 'is-disabled' : ''}`}
+                        role="radiogroup"
+                        aria-label="取帧方式"
+                        style={{ '--segment-count': 2, '--segment-index': frameModeIndex } as CSSProperties}
+                      >
+                        <span className="codex-segmented-thumb" aria-hidden="true" />
+                        {frameModeOptions.map(opt => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            role="radio"
+                            aria-checked={field.value === opt.value}
+                            disabled={disabledFrame}
+                            className={`codex-segmented-tab ${field.value === opt.value ? 'is-active' : ''}`}
+                            onClick={() => field.onChange(opt.value)}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </FormItem>
+                  )
+                }}
+              />
+
+              {frameMode === 'fixed' && (
+                <FormField
+                  control={form.control}
+                  name="video_interval"
+                  render={({ field }) => (
+                    <FormItem className="composer-interval-item">
+                      <FormLabel className="composer-field-label">间隔（秒）</FormLabel>
+                      <Input {...field} type="number" min={1} max={30} disabled={locked} />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+            </div>
+
+            <GenerationOptionsFields value={generationOptions} onChange={setGenerationOptions} disabled={locked} compactMode />
+
+            <div className="generation-details-actions">
+              <button
+                type="button"
+                className="generation-secondary"
+                disabled={locked || !providerId || !modelName}
+                onClick={() => {
+                  try {
+                    saveGenerationDefaults(providerId, modelName || '', generationOptions)
+                    toast.success('已保存该模型的生成默认值')
+                  } catch {
+                    toast.error('未能保存默认值，请检查本地存储')
+                  }
+                }}
+              >
+                存为该模型默认
+              </button>
+              <button
+                type="button"
+                className="generation-secondary"
+                disabled={locked}
+                onClick={() => setGenerationOptions(readGenerationDefaults(providerId, modelName || ''))}
+              >
+                恢复默认
+              </button>
+            </div>
           </div>
-        </div>
-      </section>
-
-      <details className="generation-advanced" open={creating ? draft.advancedOpen : undefined} onToggle={event => { if (creating) draft.update({ advancedOpen: event.currentTarget.open }) }}><summary>更多设置与补充要求</summary><div className="generation-advanced-fields">
-        <FormField control={form.control} name="extras" render={({ field }) => <FormItem><FormLabel>补充要求</FormLabel><FormControl><Textarea {...field} disabled={locked} placeholder="例如：重点记录参数、菜单路径与纠错过程" rows={3} /></FormControl></FormItem>} />
-        <div className="generation-technical"><FormField control={form.control} name="frame_mode" render={({ field }) => <FormItem><FormLabel>取帧方式</FormLabel><Select value={field.value} onValueChange={field.onChange} disabled={locked || (!vision && !format?.includes('screenshot'))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="dynamic">动态选择关键帧</SelectItem><SelectItem value="fixed">固定间隔（对照）</SelectItem></SelectContent></Select></FormItem>} />
-        {frameMode === 'fixed' && <FormField control={form.control} name="video_interval" render={({ field }) => <FormItem><FormLabel>间隔（秒）</FormLabel><Input {...field} type="number" min={1} max={30} disabled={locked} /><FormMessage /></FormItem>} />}
-        {platform !== 'local' && <FormField control={form.control} name="quality" render={({ field }) => <FormItem><FormLabel>下载质量</FormLabel><Select value={field.value} onValueChange={field.onChange} disabled={locked}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="fast">较小文件</SelectItem><SelectItem value="medium">标准</SelectItem><SelectItem value="slow">较高质量</SelectItem></SelectContent></Select></FormItem>} />}</div>
-        <GenerationOptionsFields value={generationOptions} onChange={setGenerationOptions} disabled={locked} />
-        <div className="generation-details-actions"><button type="button" className="generation-secondary" disabled={locked || !providerId || !modelName} onClick={() => { try { saveGenerationDefaults(providerId, modelName || '', generationOptions); toast.success('已保存该模型的生成默认值') } catch { toast.error('未能保存默认值，请检查本地存储') } }}>存为该模型默认</button><button type="button" className="generation-secondary" disabled={locked} onClick={() => setGenerationOptions(readGenerationDefaults(providerId, modelName || ''))}>恢复默认</button></div>
-      </div></details>
-
-      <div className="generation-submit-bar">
-        <div className="generation-submit-state" aria-live="polite">{submitting ? <><Loader2 size={15} className="generation-spin" /><span>正在确认任务已接收{now - submittedAt >= 1000 ? ` · ${Math.floor((now-submittedAt)/1000)} 秒` : '…'}</span></> : uploading ? '文件上传完成后即可生成' : generating ? '这篇笔记正在生成，可返回查看进度' : null}</div>
-        {notice && <p role="alert" className="generation-error">{notice}</p>}
-        <div className="generation-submit-actions">
-          {editing && <button type="button" className="generation-secondary" onClick={() => navigate('/?view=create')}>创建另一篇笔记</button>}
-          {pending && !submitting ? <button type="button" className="generation-primary" disabled={checking} onClick={() => void checkPending()}>{checking ? <Loader2 size={16} className="generation-spin" /> : <RefreshCw size={16} />}检查任务状态</button> : <button type="submit" className="generation-primary" disabled={locked || (!modelList.length && modelsLoading)}>{(submitting || generating) && <Loader2 size={16} className="generation-spin" />}{submitting ? '正在提交…' : generating ? '正在生成' : editing ? '生成新版本' : '开始生成'}</button>}
-        </div>
-      </div>
-    </div>
-  </form></Form>
+        </details>
+      </form>
+    </Form>
+  )
 }

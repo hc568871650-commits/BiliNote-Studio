@@ -3,9 +3,7 @@ import os
 import re
 from typing import Optional
 
-import chromadb
-from chromadb.config import Settings
-
+from app.core.lazy import lazy_import
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -232,10 +230,12 @@ class VectorStoreManager:
     """基于 ChromaDB 的笔记向量存储管理器。"""
 
     def __init__(self):
+        chromadb = lazy_import("chromadb", feature_hint="笔记语义检索与对话索引")
+        chroma_config = lazy_import("chromadb.config", feature_hint="笔记语义检索与对话索引")
         os.makedirs(VECTOR_DB_DIR, exist_ok=True)
         self._client = chromadb.PersistentClient(
             path=VECTOR_DB_DIR,
-            settings=Settings(anonymized_telemetry=False),
+            settings=chroma_config.Settings(anonymized_telemetry=False),
         )
 
     def _collection_name(self, task_id: str) -> str:

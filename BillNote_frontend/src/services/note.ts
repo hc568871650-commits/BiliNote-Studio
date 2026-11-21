@@ -113,13 +113,22 @@ export const updateNoteLearningState = (
 ) =>
   request.put(`/notes/${encodeURIComponent(taskId)}/learning-state`, payload, { suppressToast: true }) as unknown as Promise<NoteLearningState>
 
+export interface ReviewBankQuizOption {
+  key: string
+  text: string
+}
+
 export interface ReviewBankItem {
   kind: 'wrong_quiz' | 'pit_annotation'
   task_id: string
+  version_id?: string | null
   note_title: string
   section_id: string
   section_title: string
+  quiz_id?: string
+  annotation_id?: string
   question?: string
+  options?: ReviewBankQuizOption[]
   picked_key?: string
   correct_key?: string
   explanation?: string
@@ -127,6 +136,9 @@ export interface ReviewBankItem {
   detail?: string
   timestamp?: number | null
   timestamp_label?: string
+  mastered?: boolean
+  review_count?: number
+  last_reviewed_at?: string | null
   updated_at?: number
 }
 
@@ -134,17 +146,282 @@ export interface ReviewBankResponse {
   total: number
   wrong_quiz_count: number
   pit_count: number
+  pending_total?: number
+  mastered_total?: number
   items: ReviewBankItem[]
 }
 
-export const fetchReviewBank = (params: { kind?: 'all' | 'wrong_quiz' | 'pit'; limit?: number } = {}) =>
-  request.get('/learning/review-bank', { params, suppressToast: true }) as unknown as Promise<ReviewBankResponse>
+interface RawBackendWrongQuiz {
+  task_id?: string
+  version_id?: string | null
+  note_title?: string
+  section_id?: string
+  quiz_id?: string
+  section_title?: string
+  short_prompt?: string
+  full_question?: string
+  options?: ReviewBankQuizOption[]
+  selected_key?: string
+  picked_key?: string
+  correct_key?: string
+  explanation?: string
+  mastered?: boolean
+  review_count?: number
+  last_reviewed_at?: string | null
+  updated_at?: number | string
+}
+
+interface RawBackendPitAnnotation {
+  task_id?: string
+  version_id?: string | null
+  note_title?: string
+  section_id?: string
+  section_title?: string
+  annotation_id?: string
+  short_hint?: string
+  full_detail?: string
+  hint?: string
+  detail?: string
+  note?: string
+  timestamp?: number | null
+  timestamp_label?: string
+  mastered?: boolean
+  review_count?: number
+  last_reviewed_at?: string | null
+  updated_at?: number | string
+}
+
+interface RawReviewBankPayload {
+  total?: number
+  wrong_quiz_count?: number
+  pit_count?: number
+  pending_total?: number
+  mastered_total?: number
+  items?: ReviewBankItem[]
+  wrong_quizzes?: RawBackendWrongQuiz[]
+  pit_annotations?: RawBackendPitAnnotation[]
+  counts?: {
+    wrong_quizzes?: number
+    pit_annotations?: number
+    pending_total?: number
+    mastered_total?: number
+  }
+}
+
+function toTimestampNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+export function normalizeReviewBankResponse(raw: unknown): ReviewBankResponse {
+  const payload = (raw && typeof raw === 'object' ? raw : {}) as RawReviewBankPayload
+  if (Array.isArray(payload.items)) {
+    const wrongCount = Number.isFinite(payload.wrong_quiz_count)
+      ? Number(payload.wrong_quiz_count)
+      : payload.items.filter(item => item.kind === 'wrong_quiz').length
+    const pitCount = Number.isFinite(payload.pit_count)
+      ? Number(payload.pit_count)
+      : payload.items.filter(item => item.kind === 'pit_annotation').length
+    const total = Number.isFinite(payload.total) ? Number(payload.total) : wrongCount + pitCount
+    return {
+      total,
+      wrong_quiz_count: wrongCount,
+      pit_count: pitCount,
+      items: payload.items,
+    }
+  }
+
+  const wrongItems: ReviewBankItem[] = (payload.wrong_quizzes || []).map(item => ({
+    kind: 'wrong_quiz',
+    task_id: String(item.task_id || ''),
+    version_id: item.version_id ?? null,
+    note_title: String(item.note_title || item.task_id || ''),
+    section_id: String(item.section_id || ''),
+    quiz_id: String(item.quiz_id || item.section_id || ''),
+    section_title: String(item.section_title || ''),
+    question: String(item.full_question || item.short_prompt || ''),
+    options: Array.isArray(item.options) ? item.options : [],
+    picked_key: item.selected_key || item.picked_key || undefined,
+    correct_key: item.correct_key || undefined,
+    explanation: item.explanation ? String(item.explanation) : undefined,
+    mastered: Boolean(item.mastered),
+    review_count: Number(item.review_count || 0),
+    last_reviewed_at: item.last_reviewed_at ?? null,
+    updated_at: toTimestampNumber(item.updated_at),
+  }))
+
+  const pitItems: ReviewBankItem[] = (payload.pit_annotations || []).map(item => ({
+    kind: 'pit_annotation',
+    task_id: String(item.task_id || ''),
+    version_id: item.version_id ?? null,
+    note_title: String(item.note_title || item.task_id || ''),
+    section_id: String(item.section_id || ''),
+    section_title: String(item.section_title || ''),
+    annotation_id: item.annotation_id ? String(item.annotation_id) : undefined,
+    hint: String(item.short_hint || item.hint || ''),
+    detail: String(item.full_detail || item.detail || item.note || ''),
+    timestamp: item.timestamp ?? null,
+    timestamp_label: item.timestamp_label ? String(item.timestamp_label) : undefined,
+    mastered: Boolean(item.mastered),
+    review_count: Number(item.review_count || 0),
+    last_reviewed_at: item.last_reviewed_at ?? null,
+    updated_at: toTimestampNumber(item.updated_at),
+  }))
+
+  const wrongCount = Number.isFinite(payload.counts?.wrong_quizzes)
+    ? Number(payload.counts?.wrong_quizzes)
+    : wrongItems.length
+  const pitCount = Number.isFinite(payload.counts?.pit_annotations)
+    ? Number(payload.counts?.pit_annotations)
+    : pitItems.length
+
+  return {
+    total: wrongCount + pitCount,
+    wrong_quiz_count: wrongCount,
+    pit_count: pitCount,
+    pending_total: payload.counts?.pending_total ?? payload.pending_total,
+    mastered_total: payload.counts?.mastered_total ?? payload.mastered_total,
+    items: [...wrongItems, ...pitItems],
+  }
+}
+
+export const fetchReviewBank = async (params: { kind?: 'all' | 'wrong_quiz' | 'pit'; status?: 'pending' | 'mastered' | 'all'; limit?: number } = {}) => {
+  const raw = await (request.get('/learning/review-bank', { params, suppressToast: true }) as unknown as Promise<unknown>)
+  return normalizeReviewBankResponse(raw)
+}
+
+export interface ReviewQuizPracticeResult {
+  task_id: string
+  section_id: string
+  quiz_id: string
+  selected_key: string
+  correct_key: string
+  is_correct: boolean
+  mastered: boolean
+  review_count: number
+  last_reviewed_at: string
+  explanation?: string
+}
+
+export const submitReviewQuizPractice = async (payload: {
+  task_id: string
+  section_id: string
+  selected_key?: string
+  mastered?: boolean
+}): Promise<ReviewQuizPracticeResult> => {
+  return await request.post('/learning/review-bank/practice', payload, { suppressToast: true })
+}
+
+export const updateReviewPitStatus = async (payload: {
+  task_id: string
+  section_id: string
+  annotation_id: string
+  mastered: boolean
+}): Promise<{ task_id: string; section_id: string; annotation_id: string; mastered: boolean; review_count: number }> => {
+  return await request.post('/learning/review-bank/pit-status', payload, { suppressToast: true })
+}
+
+export interface NoteMediaInfo {
+  available: boolean
+  media_type: string | null
+  size: number
+  url: string | null
+  synthetic?: boolean
+}
+
+export const getNoteMediaInfo = async (taskId: string): Promise<NoteMediaInfo> => {
+  return await request.get(`/media/${encodeURIComponent(taskId)}/info`, {
+    suppressToast: true,
+    timeout: 6000,
+  })
+}
 
 export const noteMediaStreamUrl = (baseURL: string, taskId: string) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
   if (/^https?:\/\//i.test(apiBase)) {
-    return `${apiBase}/notes/${encodeURIComponent(taskId)}/media`
+    return `${apiBase}/media/${encodeURIComponent(taskId)}`
   }
   const origin = (baseURL || '').replace(/\/$/, '')
-  return `${origin}${apiBase}/notes/${encodeURIComponent(taskId)}/media`
+  return `${origin}${apiBase}/media/${encodeURIComponent(taskId)}`
+}
+
+export interface CollectionItem {
+  index: number
+  title: string
+  url: string
+  video_id: string
+  duration: number | null
+  platform: string
+  already_exists: boolean
+  existing_task_id: string | null
+}
+
+export interface CollectionResolution {
+  collection_title: string
+  platform: string
+  source_url: string
+  is_collection: boolean
+  total_count: number
+  items: CollectionItem[]
+}
+
+export const resolveCollection = async (url: string): Promise<CollectionResolution> => {
+  return await request.post('/ingestion/resolve-collection', { url }, { timeout: 30000, suppressToast: true })
+}
+
+export interface EnqueueBatchPayload {
+  items: Array<{ title: string; url: string; platform?: string }>
+  model_name: string
+  provider_id: string
+  quality?: 'fast' | 'medium' | 'slow'
+  style?: 'tutorial' | 'knowledge'
+  format?: string[]
+  extras?: string
+  screenshot?: boolean
+  link?: boolean
+  video_understanding?: boolean
+  video_interval?: number
+  grid_size?: number[]
+  frame_mode?: 'dynamic' | 'fixed'
+  generation_options?: GenerationOptions
+  create_folder?: boolean
+  folder_name?: string
+  folder_id?: string
+}
+
+export interface EnqueueBatchResult {
+  batch_id: string
+  folder: { id: string; name: string } | null
+  enqueued: Array<{ task_id: string; job_id: string; title: string; url: string; platform: string }>
+  skipped: Array<{ index: number; reason: string }>
+}
+
+export const enqueueBatch = async (payload: EnqueueBatchPayload): Promise<EnqueueBatchResult> => {
+  return await request.post('/ingestion/enqueue-batch', payload, { timeout: 30000, suppressToast: true })
+}
+
+export interface BatchUpgradeStructuredPayload {
+  task_ids: string[]
+  provider_id: string
+  model_name: string
+  protocol?: string
+  style?: 'tutorial' | 'knowledge'
+  extras?: string
+  generation_options?: GenerationOptions
+}
+
+export interface BatchUpgradeStructuredResult {
+  batch_id: string
+  enqueued: Array<{ task_id: string; job_id: string; title: string }>
+  skipped: Array<{ task_id: string; reason: string }>
+}
+
+export const batchUpgradeStructured = async (
+  payload: BatchUpgradeStructuredPayload,
+): Promise<BatchUpgradeStructuredResult> => {
+  return await request.post('/notes/batch-upgrade-structured', payload, { timeout: 30000, suppressToast: true })
 }

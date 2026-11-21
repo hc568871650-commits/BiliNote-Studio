@@ -101,7 +101,8 @@ const programmingReply = await request('/chat/ask', { task_id: 'ui-general-3', q
 assert(programmingReply.answer.includes('用循环处理列表'))
 assert.notEqual(programmingReply.sources[0].text, reply.sources[0].text)
 const generated = await request('/generate_note', { provider_id: 'preview-1', model_name: '通用示例模型', video_url: 'https://example.invalid/video' })
-assert.equal((await request(`/task_status/${generated.task_id}`, {}, 'get')).status, 'SUCCESS')
+const generatedStatus = (await request(`/task_status/${generated.task_id}`, {}, 'get')).status
+assert(['QUEUED', 'SUCCESS'].includes(generatedStatus), `Unexpected generated status: ${generatedStatus}`)
 const reloaded = await import(`${moduleUrl}#reload`)
 assert(reloaded.getPreviewTasks().some(task => task.id === generated.task_id))
 assert.deepEqual((await request('/note_library', {}, 'get', reloaded.previewAdapter)).entries['ui-general-1'].tags, ['复习', '练习'])

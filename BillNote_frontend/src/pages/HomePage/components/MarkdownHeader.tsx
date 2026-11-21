@@ -1,7 +1,6 @@
 'use client'
 
 import { AlignLeft, BookMarked, BookOpen, GitFork, MessageSquare, SlidersHorizontal } from 'lucide-react'
-import ReviewBankDialog from '@/components/ReviewBankDialog'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
@@ -14,6 +13,7 @@ import { ReaderToolbarContext, useToolbarFocusGroup, useWorkspaceTopbar } from '
 import '@/layouts/topbar.css'
 
 const GenerationDetailsDialog = lazy(() => import('./GenerationDetailsDialog'))
+const ReviewBankDialog = lazy(() => import('@/components/ReviewBankDialog'))
 
 interface VersionNote {
   ver_id: string
@@ -92,7 +92,7 @@ export function MarkdownHeader({
       {currentTask?.archived_at && <Badge variant="outline" className="shrink-0">已归档</Badge>}
       {isMultiVersion && versions.length > 1 && (
         <Select value={currentVerId} onValueChange={setCurrentVerId}>
-          <SelectTrigger className="note-version-trigger" aria-label="笔记版本">
+          <SelectTrigger className="note-version-trigger" aria-label="笔记版本" title={formatVersionLabel(versions[versionIndex], versionIndex, versions.length)}>
             <span className="truncate">{formatVersionLabel(versions[versionIndex], versionIndex, versions.length)}</span>
           </SelectTrigger>
           <SelectContent>
@@ -220,7 +220,11 @@ export function MarkdownHeader({
         </header>
       )}
       {children}
-      <ReviewBankDialog open={reviewOpen} onOpenChange={setReviewOpen} />
+      {reviewOpen && (
+        <Suspense fallback={null}>
+          <ReviewBankDialog open={reviewOpen} onOpenChange={setReviewOpen} />
+        </Suspense>
+      )}
       {task && diagnosticsId === task.id && (
         <Suspense fallback={<p role="status">读取诊断…</p>}>
           <GenerationDetailsDialog

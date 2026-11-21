@@ -1,9 +1,11 @@
-import { AnimatedNotebookIcon } from '@/components/AnimatedRailIcons'
+import { AnimatedCreateNoteIcon, AnimatedNotebookIcon } from '@/components/AnimatedRailIcons'
 import { BackendRailStatusButton } from '@/components/BackendHealth/BackendStatusButton'
+import DistillQueuePanel from '@/components/DistillQueue/DistillQueuePanel'
+import { useDistillQueueStore } from '@/store/distillQueueStore'
 import { isQuickEdition } from '@/utils/edition'
-import { BotMessageSquare, Monitor, Moon, Settings2, SquarePen, Sun } from 'lucide-react'
+import { BotMessageSquare, Monitor, Moon, Settings2, Sun } from 'lucide-react'
 import { useTheme } from 'next-themes'
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 import './workspace.css'
@@ -13,6 +15,7 @@ export type WorkspaceRailActive = 'create' | 'library' | 'organizer' | 'settings
 interface WorkspaceRailProps {
   active: WorkspaceRailActive
   libraryExpanded?: boolean
+  hasSidebarToggle?: boolean
   libraryButtonRef?: RefObject<HTMLButtonElement | null>
   onCreateClick?: () => void
   onLibraryClick?: () => void
@@ -34,12 +37,6 @@ type ViewTransitionLike = {
 type DocumentWithViewTransition = Document & {
   startViewTransition?: (updateCallback: () => void | Promise<void>) => ViewTransitionLike
 }
-
-// Remember the last visible rail state across route switches so the top highlight thumb
-// and notebook open/close icon animate smoothly between Home, Organizer, and Settings.
-let lastVisibleTopIndex: number | null = null
-let lastVisibleNotebookOpen = false
-let lastVisibleRouteKey = ''
 
 function resolveTargetDark(mode: ThemeModeId): boolean {
   if (mode === 'dark') return true
@@ -64,6 +61,7 @@ function routeMatchesRail(pathname: string, active: WorkspaceRailActive): boolea
 export default function WorkspaceRail({
   active,
   libraryExpanded,
+  hasSidebarToggle: hasSidebarToggleProp,
   libraryButtonRef,
   onCreateClick,
   onLibraryClick,
@@ -77,7 +75,7 @@ export default function WorkspaceRail({
   const committedMode: ThemeModeId = theme === 'light' || theme === 'dark' ? theme : 'system'
   const activeMode: ThemeModeId = pendingMode ?? committedMode
   const activeThemeIndex = activeMode === 'light' ? 0 : activeMode === 'dark' ? 1 : 2
-  const hasSidebarToggle = typeof libraryExpanded === 'boolean'
+  const hasSidebarToggle = hasSidebarToggleProp ?? (typeof libraryExpanded === 'boolean')
   const libraryTitle = hasSidebarToggle
     ? `${libraryExpanded ? '收起笔记库' : '展开笔记库'}（Ctrl+B）`
     : libraryLabel
@@ -92,69 +90,132 @@ export default function WorkspaceRail({
         : null
   const targetNotebookOpen = hasSidebarToggle ? Boolean(libraryExpanded) : false
 
-  const [displayTopIndex, setDisplayTopIndex] = useState<number | null>(() => (
-    isVisibleRoute && lastVisibleRouteKey && lastVisibleRouteKey !== location.pathname
-      ? lastVisibleTopIndex
-      : targetTopIndex
-  ))
-  const [displayNotebookOpen, setDisplayNotebookOpen] = useState<boolean>(() => (
-    isVisibleRoute && lastVisibleRouteKey && lastVisibleRouteKey !== location.pathname
-      ? lastVisibleNotebookOpen
-      : targetNotebookOpen
-  ))
-  const [lastTopSlot, setLastTopSlot] = useState<number>(() => (
-    (displayTopIndex ?? targetTopIndex ?? 1)
-  ))
+  const [displayTopIndex, setDisplayTopIndex] = useState<number | null>(targetTopIndex)
+  const [displayNotebookOpen, setDisplayNotebookOpen] = useState<boolean>(targetNotebookOpen)
+  const [lastTopSlot, setLastTopSlot] = useState<number>(() => targetTopIndex ?? 1)
   const [suppressThumbTransition, setSuppressThumbTransition] = useState(false)
   const navGroupRef = useRef<HTMLDivElement>(null)
-  const prevVisibleRef = useRef(isVisibleRoute)
+  const prevTopIndexRef = useRef<number | null>(targetTopIndex)
+  const lastTopSlotRef = useRef<number>(targetTopIndex ?? 1)
+
+  const activeCount = useDistillQueueStore(state => state.activeCount)
+  const recentCount = useDistillQueueStore(state => state.recentJobs.length)
+  const panelOpen = useDistillQueueStore(state => state.panelOpen)
+  const setPanelOpen = useDistillQueueStore(state => state.setPanelOpen)
+  const [hoverPopoverOpen, setHoverPopoverOpen] = useState(false)
+  const createWrapRef = useRef<HTMLDivElement>(null)
+  const hoverOpenTimerRef = useRef<number | null>(null)
+  const hoverCloseTimerRef = useRef<number | null>(null)
+
+  const clearHoverTimers = useCallback(() => {
+    if (hoverOpenTimerRef.current !== null) {
+      window.clearTimeout(hoverOpenTimerRef.current)
+      hoverOpenTimerRef.current = null
+    }
+    if (hoverCloseTimerRef.current !== null) {
+      window.clearTimeout(hoverCloseTimerRef.current)
+      hoverCloseTimerRef.current = null
+    }
+  }, [])
+
+  const isCreateView = active === 'create'
+  const showQueuePopover = panelOpen || (isCreateView && hoverPopoverOpen)
+  const badgeText = activeCount > 99 ? '99+' : String(activeCount)
+  const createTitle = activeCount > 0
+    ? (isCreateView
+        ? `新建笔记（${activeCount} 个任务蒸馏中，悬停或点击角标查看队列）`
+        : `新建笔记（${activeCount} 个任务蒸馏中，点击右下角数字查看队列）`)
+    : (isCreateView ? '新建笔记（右键查看蒸馏队列）' : '新建笔记')
+
+  const handleQueueHoverEnter = useCallback(() => {
+    clearHoverTimers()
+    if (!isCreateView) return
+    if (activeCount === 0 && recentCount === 0) return
+    hoverOpenTimerRef.current = window.setTimeout(() => {
+      setHoverPopoverOpen(true)
+    }, 200)
+  }, [activeCount, clearHoverTimers, isCreateView, recentCount])
+
+  const handleQueueHoverLeave = useCallback(() => {
+    clearHoverTimers()
+    if (!isCreateView) return
+    hoverCloseTimerRef.current = window.setTimeout(() => {
+      setHoverPopoverOpen(false)
+    }, 220)
+  }, [clearHoverTimers, isCreateView])
+
+  useEffect(() => {
+    if (!isCreateView) {
+      clearHoverTimers()
+      setHoverPopoverOpen(false)
+    }
+  }, [clearHoverTimers, isCreateView])
+
+  useEffect(() => () => clearHoverTimers(), [clearHoverTimers])
+
+  useEffect(() => {
+    if (!showQueuePopover) return
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null
+      if (!target) return
+      if (createWrapRef.current?.contains(target)) return
+      if (target.closest('#distill-queue-popover, [data-queue-trigger]')) return
+      setPanelOpen(false)
+      setHoverPopoverOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPanelOpen(false)
+        setHoverPopoverOpen(false)
+      }
+    }
+    window.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [setPanelOpen, showQueuePopover])
 
   useLayoutEffect(() => {
-    if (!isVisibleRoute) {
-      prevVisibleRef.current = false
-      return
-    }
-    const routeChanged = lastVisibleRouteKey !== '' && lastVisibleRouteKey !== location.pathname
-    const returningFromOtherRoute = !prevVisibleRef.current && routeChanged
-    prevVisibleRef.current = true
+    if (!isVisibleRoute) return
+    const prevTopIndex = prevTopIndexRef.current
+    prevTopIndexRef.current = targetTopIndex
+    setDisplayNotebookOpen(targetNotebookOpen)
 
-    if ((returningFromOtherRoute || routeChanged) && !prefersReducedMotion()) {
-      const fromIndex = lastVisibleTopIndex
-      const fromOpen = lastVisibleNotebookOpen
-      if (fromIndex !== targetTopIndex || fromOpen !== targetNotebookOpen) {
-        // Snap the thumb & notebook icon to the exact previous route position with transitions off,
-        // then re-enable transitions on the next frame so it always slides from the true prior tab.
-        setSuppressThumbTransition(true)
-        setDisplayTopIndex(fromIndex)
-        if (fromIndex !== null) setLastTopSlot(fromIndex)
-        setDisplayNotebookOpen(fromOpen)
-        let frame2 = 0
-        const frame1 = window.requestAnimationFrame(() => {
-          void navGroupRef.current?.offsetHeight
-          setSuppressThumbTransition(false)
-          frame2 = window.requestAnimationFrame(() => {
-            setDisplayTopIndex(targetTopIndex)
-            if (targetTopIndex !== null) setLastTopSlot(targetTopIndex)
-            setDisplayNotebookOpen(targetNotebookOpen)
-            lastVisibleTopIndex = targetTopIndex
-            lastVisibleNotebookOpen = targetNotebookOpen
-            lastVisibleRouteKey = location.pathname
-          })
+    // Re-appearing from null (e.g. Settings -> Notes or collapsed -> expanded):
+    // snap the hidden thumb directly onto the target slot first so it fades in place
+    // instead of flashing or sliding from a stale slot such as Create.
+    if (
+      prevTopIndex === null
+      && targetTopIndex !== null
+      && lastTopSlotRef.current !== targetTopIndex
+      && !prefersReducedMotion()
+    ) {
+      lastTopSlotRef.current = targetTopIndex
+      setSuppressThumbTransition(true)
+      setLastTopSlot(targetTopIndex)
+      setDisplayTopIndex(null)
+      let frame2 = 0
+      const frame1 = window.requestAnimationFrame(() => {
+        void navGroupRef.current?.offsetHeight
+        setSuppressThumbTransition(false)
+        frame2 = window.requestAnimationFrame(() => {
+          setDisplayTopIndex(targetTopIndex)
         })
-        return () => {
-          window.cancelAnimationFrame(frame1)
-          if (frame2) window.cancelAnimationFrame(frame2)
-        }
+      })
+      return () => {
+        window.cancelAnimationFrame(frame1)
+        if (frame2) window.cancelAnimationFrame(frame2)
       }
     }
 
     setSuppressThumbTransition(false)
     setDisplayTopIndex(targetTopIndex)
-    if (targetTopIndex !== null) setLastTopSlot(targetTopIndex)
-    setDisplayNotebookOpen(targetNotebookOpen)
-    lastVisibleTopIndex = targetTopIndex
-    lastVisibleNotebookOpen = targetNotebookOpen
-    lastVisibleRouteKey = location.pathname
+    if (targetTopIndex !== null) {
+      lastTopSlotRef.current = targetTopIndex
+      setLastTopSlot(targetTopIndex)
+    }
   }, [isVisibleRoute, location.pathname, targetTopIndex, targetNotebookOpen])
 
   useEffect(() => () => {
@@ -257,27 +318,79 @@ export default function WorkspaceRail({
         data-no-transition={suppressThumbTransition ? 'true' : undefined}
       >
         <span className="workspace-rail-active-thumb" aria-hidden="true" />
-        {onCreateClick ? (
+        <div
+          ref={createWrapRef}
+          className="workspace-rail-create-wrap"
+          onPointerEnter={handleQueueHoverEnter}
+          onPointerLeave={handleQueueHoverLeave}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            clearHoverTimers()
+            setHoverPopoverOpen(false)
+            setPanelOpen(!panelOpen)
+          }}
+        >
+          {onCreateClick ? (
+            <button
+              type="button"
+              className={`workspace-icon ${active === 'create' ? 'workspace-icon--active' : ''}`}
+              aria-pressed={active === 'create'}
+              aria-expanded={showQueuePopover}
+              aria-controls={showQueuePopover ? 'distill-queue-popover' : undefined}
+              title={createTitle}
+              aria-label={createTitle}
+              onClick={() => {
+                setPanelOpen(false)
+                setHoverPopoverOpen(false)
+                onCreateClick()
+              }}
+            >
+              <AnimatedCreateNoteIcon active={activeCount > 0} size={17} />
+            </button>
+          ) : (
+            <Link
+              to="/?view=create"
+              className={`workspace-icon ${active === 'create' ? 'workspace-icon--active' : ''}`}
+              aria-current={active === 'create' ? 'page' : undefined}
+              title={createTitle}
+              aria-label={createTitle}
+              onClick={() => {
+                setPanelOpen(false)
+                setHoverPopoverOpen(false)
+              }}
+            >
+              <AnimatedCreateNoteIcon active={activeCount > 0} size={17} />
+            </Link>
+          )}
           <button
             type="button"
-            className={`workspace-icon ${active === 'create' ? 'workspace-icon--active' : ''}`}
-            aria-pressed={active === 'create'}
-            title="新建笔记"
-            aria-label="新建笔记"
-            onClick={onCreateClick}
+            className="workspace-rail-badge"
+            data-visible={activeCount > 0 ? 'true' : 'false'}
+            data-wide={activeCount >= 10 ? 'true' : 'false'}
+            tabIndex={activeCount > 0 ? 0 : -1}
+            aria-hidden={activeCount === 0}
+            aria-label={`正在蒸馏 ${activeCount} 个任务，点击查看队列`}
+            title={`查看蒸馏队列（${activeCount} 个进行中）`}
+            onClick={(event) => {
+              event.stopPropagation()
+              clearHoverTimers()
+              setHoverPopoverOpen(false)
+              setPanelOpen(!panelOpen)
+            }}
           >
-            <SquarePen size={17} strokeWidth={1.6} />
+            {activeCount > 0 ? badgeText : ''}
           </button>
-        ) : (
-          <Link
-            to="/?view=create"
-            className={`workspace-icon ${active === 'create' ? 'workspace-icon--active' : ''}`}
-            aria-current={active === 'create' ? 'page' : undefined}
-            title="新建笔记"
-            aria-label="新建笔记"
-          >
-            <SquarePen size={17} strokeWidth={1.6} />
-          </Link>
+        </div>
+        {showQueuePopover && (
+          <DistillQueuePanel
+            variant="popover"
+            onClose={() => {
+              setPanelOpen(false)
+              setHoverPopoverOpen(false)
+            }}
+            onPointerEnter={clearHoverTimers}
+            onPointerLeave={handleQueueHoverLeave}
+          />
         )}
 
         {onLibraryClick ? (

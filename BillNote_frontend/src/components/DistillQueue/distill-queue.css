@@ -1,0 +1,493 @@
+/* 统一蒸馏队列面板与全局毛玻璃完成提醒浮卡（遵循 Apple HIG × Codex 规范） */
+
+.distill-queue-surface {
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-highlight), var(--glass-shadow);
+  color: var(--foreground);
+}
+
+.distill-queue-popover {
+  position: fixed;
+  top: 10px;
+  left: 54px;
+  z-index: 48;
+  width: min(356px, calc(100vw - 68px));
+  max-height: min(520px, calc(100dvh - 28px));
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform-origin: top left;
+  animation: distill-popover-in 240ms var(--ease-spring) both;
+}
+
+@keyframes distill-popover-in {
+  from {
+    opacity: 0;
+    transform: translate3d(-6px, -2px, 0) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.distill-queue-inline {
+  margin-top: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--surface-border);
+  background: color-mix(in srgb, var(--surface-raised) 76%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 3px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+}
+
+html.dark .distill-queue-inline {
+  background: color-mix(in srgb, var(--surface-raised) 74%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.distill-queue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 13px 10px;
+  border-bottom: 1px solid var(--surface-hairline);
+}
+
+.distill-queue-title-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.distill-queue-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+  white-space: nowrap;
+}
+
+.distill-queue-count-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #ffffff;
+  background: var(--reading-accent, var(--primary));
+}
+
+.distill-queue-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* 极简三档提醒切换胶囊 */
+.distill-notify-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-text) 6%, transparent);
+  border: 1px solid var(--surface-hairline);
+}
+
+html.dark .distill-notify-switch {
+  background: color-mix(in srgb, #ffffff 7%, transparent);
+}
+
+.distill-notify-option {
+  height: 21px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 160ms var(--ease-apple), color 160ms var(--ease-apple);
+}
+
+.distill-notify-option:hover {
+  color: var(--foreground);
+}
+
+.distill-notify-option[aria-checked="true"] {
+  background: var(--surface-raised);
+  color: var(--reading-accent, var(--primary));
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+html.dark .distill-notify-option[aria-checked="true"] {
+  background: color-mix(in srgb, #ffffff 14%, transparent);
+  color: var(--foreground);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.distill-queue-close {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: background-color 150ms var(--ease-apple), color 150ms var(--ease-apple);
+}
+
+.distill-queue-close:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.distill-queue-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.distill-queue-inline .distill-queue-body {
+  max-height: 280px;
+}
+
+.distill-queue-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 3px 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.distill-queue-link-btn {
+  border: 0;
+  background: transparent;
+  padding: 2px 5px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color 140ms var(--ease-apple), background-color 140ms var(--ease-apple);
+}
+
+.distill-queue-link-btn:hover:not(:disabled) {
+  color: var(--foreground);
+  background: var(--surface-hover);
+}
+
+.distill-queue-link-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.distill-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.distill-job-card {
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--surface-hairline);
+  background: color-mix(in srgb, var(--surface-page) 68%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 160ms var(--ease-apple), background-color 160ms var(--ease-apple);
+}
+
+html.dark .distill-job-card {
+  background: color-mix(in srgb, #ffffff 4.5%, transparent);
+}
+
+.distill-job-card:hover {
+  border-color: var(--surface-border);
+}
+
+.distill-job-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.distill-job-meta-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.distill-job-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 560;
+  color: var(--foreground);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.distill-job-sub {
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.distill-job-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.distill-job-status-dot--active {
+  background: var(--reading-accent, var(--primary));
+}
+
+.distill-job-status-dot--success {
+  background: #10b981;
+}
+
+.distill-job-status-dot--failed {
+  background: #ef4444;
+}
+
+.distill-job-status-dot--cancelled {
+  background: var(--muted-foreground);
+}
+
+.distill-job-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.distill-job-action-btn {
+  height: 23px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--surface-border);
+  background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 150ms var(--ease-apple), border-color 150ms var(--ease-apple), color 150ms var(--ease-apple);
+}
+
+.distill-job-action-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--surface-border-strong);
+}
+
+.distill-job-action-btn--accent {
+  border-color: color-mix(in srgb, var(--reading-accent, var(--primary)) 34%, transparent);
+  background: color-mix(in srgb, var(--reading-accent, var(--primary)) 12%, transparent);
+  color: var(--reading-accent, var(--primary));
+}
+
+.distill-job-action-btn--accent:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--reading-accent, var(--primary)) 20%, transparent);
+}
+
+.distill-job-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.distill-job-progress-track {
+  position: relative;
+  height: 3.5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-text) 9%, transparent);
+  overflow: hidden;
+}
+
+.distill-job-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--reading-accent, var(--primary));
+  transform-origin: left center;
+  transition: width 360ms var(--ease-apple);
+}
+
+.distill-job-error {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #dc2626;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+html.dark .distill-job-error {
+  color: #f87171;
+}
+
+.distill-queue-empty {
+  padding: 20px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* 右下角毛玻璃完成提醒浮卡容器 */
+.distill-toast-region {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(336px, calc(100vw - 24px));
+  pointer-events: none;
+}
+
+.distill-toast-card {
+  pointer-events: auto;
+  border-radius: 16px;
+  padding: 11px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: opacity 220ms var(--ease-apple), transform 280ms var(--ease-spring);
+  transition-behavior: allow-discrete;
+  animation: distill-toast-in 300ms var(--ease-spring) both;
+}
+
+@keyframes distill-toast-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.distill-toast-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.distill-toast-indicator {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--reading-accent, var(--primary));
+}
+
+.distill-toast-indicator--failed {
+  background: #ef4444;
+}
+
+.distill-toast-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.distill-toast-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--foreground);
+  line-height: 1.35;
+}
+
+.distill-toast-detail {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.distill-toast-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.distill-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 活跃任务微点脉冲：默认静态，按 prefers-reduced-motion: no-preference 启用 */
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-reduced-motion="true"]) .distill-job-status-dot--active {
+    animation: distill-dot-pulse 1.9s ease-in-out infinite;
+  }
+}
+
+@keyframes distill-dot-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.48;
+    transform: scale(0.84);
+  }
+}
+
+html[data-reduced-motion="true"] :is(.distill-queue-popover, .distill-toast-card) {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .distill-queue-popover,
+  .distill-toast-card {
+    animation: none !important;
+    transition: none !important;
+  }
+}

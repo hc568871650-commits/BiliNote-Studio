@@ -1,0 +1,792 @@
+/* 单实体卷帘形变播放器：默认收起为精简音频进度条，上拉/点击顶耳原位卷展为 16:9 视频，下拉/点击顶耳原位卷收回音频条 */
+
+.reading-note-column {
+  container-type: inline-size;
+  container-name: reading-stage;
+}
+
+.apple-pip-window {
+  --pip-ox: 0px;
+  --pip-oy: 0px;
+  --pip-lift: 1;
+  position: absolute;
+  z-index: 34;
+  overflow: visible;
+  box-sizing: border-box;
+  transform: translate3d(var(--pip-ox), var(--pip-oy), 0) scale(var(--pip-lift));
+  transform-origin: center center;
+  transition:
+    left 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    top 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 380ms var(--ease-spring),
+    transform 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.apple-pip-window.is-interacting {
+  transition: none;
+}
+
+.apple-pip-window.is-dragging {
+  --pip-lift: 1.012;
+  cursor: grabbing;
+  transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 收起态（纯音频进度条）开启字幕时，默认轻盈浮于顶耳上方，贴近顶边时自动翻转至下方防裁切 */
+.apple-pip-top-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 12px);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 11;
+  animation: apple-pip-caption-fade-in 180ms var(--ease-apple) 200ms both;
+}
+
+@keyframes apple-pip-caption-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.apple-pip-top-caption.is-below {
+  bottom: auto;
+  top: calc(100% + 7px);
+}
+
+.apple-pip-top-caption span {
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: 9px;
+  background: rgba(14, 17, 25, 0.84);
+  -webkit-backdrop-filter: blur(14px) saturate(175%);
+  backdrop-filter: blur(14px) saturate(175%);
+  border: 0.75px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 一体化极薄连续凹弧顶耳（7px 视觉凸起 + 16px 舒适拉合热区 + 实色 1px 零色差共线） */
+.apple-pip-ear-wrap {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% - 1px);
+  transform: translateX(-50%);
+  height: 16px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 12;
+  pointer-events: none;
+}
+
+.apple-pip-ear-handle {
+  position: relative;
+  width: 68px;
+  height: 16px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.apple-pip-window.is-dragging .apple-pip-ear-handle,
+.apple-pip-ear-handle.is-curtaining {
+  cursor: grabbing;
+}
+
+.apple-pip-ear-shape {
+  display: block;
+  width: 56px;
+  height: 8px;
+  overflow: visible;
+}
+
+.apple-pip-ear-fill {
+  fill: #0f131d;
+  transition: fill 160ms var(--ease-apple);
+}
+
+.apple-pip-ear-stroke {
+  fill: none;
+  stroke: #2d313b;
+  stroke-width: 1;
+  transition: stroke 160ms var(--ease-apple);
+}
+
+.apple-pip-window.is-interacting .apple-pip-ear-stroke {
+  stroke: color-mix(in srgb, var(--reading-accent, var(--primary)) 75%, #2d313b);
+}
+
+.apple-pip-ear-grip {
+  fill: rgba(255, 255, 255, 0.36);
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: fill 150ms var(--ease-apple), transform 180ms var(--ease-spring);
+}
+
+.apple-pip-window:hover .apple-pip-ear-grip,
+.apple-pip-ear-handle:hover .apple-pip-ear-grip {
+  fill: rgba(255, 255, 255, 0.72);
+  transform: scaleX(1.18);
+}
+
+.apple-pip-ear-handle.is-curtaining .apple-pip-ear-grip {
+  fill: var(--reading-accent, #0a84ff);
+  transform: scaleX(1.32);
+}
+
+/* 统一画框主体（11px 干练圆角，音频条与视频画框共用同一底座与边框） */
+.apple-pip-frame {
+  position: relative;
+  width: 100%;
+  container-type: inline-size;
+  container-name: pip-frame;
+  border-radius: 11px;
+  background: #0f131d;
+  border: 1px solid #2d313b;
+  box-shadow:
+    0 16px 42px -10px rgba(0, 0, 0, 0.44),
+    0 4px 14px -4px rgba(0, 0, 0, 0.26);
+  overflow: hidden;
+  box-sizing: border-box;
+  cursor: grab;
+  transition: border-color 160ms var(--ease-apple), box-shadow 200ms var(--ease-apple);
+}
+
+.apple-pip-window.is-dragging .apple-pip-frame {
+  cursor: grabbing;
+}
+
+.apple-pip-window.is-interacting .apple-pip-frame {
+  border-color: color-mix(in srgb, var(--reading-accent, var(--primary)) 75%, #2d313b);
+  box-shadow: 0 22px 54px -10px rgba(0, 0, 0, 0.56);
+}
+
+/* 卷帘式视频舞台（高度在 0px 与 16:9 之间由苹果弹簧平滑过渡；手动拉合时 0ms 零延迟跟手） */
+.apple-pip-stage {
+  position: relative;
+  width: 100%;
+  background: #090b10;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: height 380ms var(--ease-spring);
+}
+
+.apple-pip-window.is-embed .apple-pip-stage {
+  aspect-ratio: 16 / 9;
+  transition: none;
+}
+
+.apple-pip-window.is-curtaining .apple-pip-stage,
+.apple-pip-window.is-interacting .apple-pip-stage {
+  transition: none;
+}
+
+.apple-pip-media {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 0;
+  object-fit: contain;
+  background: #090b10;
+  transition: opacity 220ms var(--ease-apple);
+}
+
+.apple-pip-media.is-hidden-visual,
+.apple-pip-cinema-canvas.is-hidden-visual {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 克制电影感模拟画布 */
+.apple-pip-cinema-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(155deg, #131722 0%, #0b0d14 55%, #07080d 100%);
+  overflow: hidden;
+  transition: opacity 220ms var(--ease-apple);
+}
+
+.apple-pip-cinema-glow {
+  position: absolute;
+  inset: -20%;
+  background:
+    radial-gradient(ellipse 62% 52% at 24% 22%, color-mix(in srgb, var(--reading-accent, #0a84ff) 26%, transparent), transparent 68%),
+    radial-gradient(ellipse 55% 48% at 78% 76%, color-mix(in srgb, var(--reading-accent, #5e5ce6) 16%, transparent), transparent 70%);
+  filter: blur(22px);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.apple-pip-cinema-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, transparent 42%, rgba(0, 0, 0, 0.44) 100%);
+  pointer-events: none;
+}
+
+.apple-pip-cinema-stamp {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  font-family: var(--ui-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.34);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  transition: opacity 150ms var(--ease-apple);
+}
+
+.apple-pip-window:hover .apple-pip-cinema-stamp,
+.apple-pip-window:focus-within .apple-pip-cinema-stamp {
+  opacity: 0;
+}
+
+/* 展开态左上极轻小关闭钮（悬停显出） */
+.apple-pip-stage-top {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  z-index: 6;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms var(--ease-apple);
+}
+
+.apple-pip-window:hover .apple-pip-stage-top,
+.apple-pip-window:focus-within .apple-pip-stage-top {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.apple-pip-close-dot {
+  width: 20px;
+  height: 20px;
+  border: 0.75px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(20, 23, 31, 0.56);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  backdrop-filter: blur(14px) saturate(180%);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.16), 0 2px 8px rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.88);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 140ms var(--ease-apple), color 140ms var(--ease-apple), transform 160ms var(--ease-spring);
+}
+
+.apple-pip-close-dot:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
+.apple-pip-close-dot:active {
+  transform: scale(0.9);
+}
+
+/* ==========================================================================
+   统一底部融合底座（恒定绝对贴底 34px：收起态为 248×36px 精巧声音条，展开态悬停淡入融入底边）
+   ========================================================================== */
+
+.apple-pip-dock-base {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 34px;
+  z-index: 6;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: 3px 9px 3px;
+  color: rgba(255, 255, 255, 0.9);
+  transition: opacity 180ms var(--ease-apple), background 220ms var(--ease-apple);
+}
+
+.apple-pip-dock-base.is-standalone {
+  background: linear-gradient(180deg, rgba(18, 22, 33, 0.96) 0%, rgba(12, 15, 23, 1) 100%);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.apple-pip-dock-base.is-overlay {
+  padding: 4px 10px 3px;
+  background: linear-gradient(
+    to top,
+    rgba(6, 8, 12, 0.88) 0%,
+    rgba(6, 8, 12, 0.5) 68%,
+    transparent 100%
+  );
+  opacity: 0;
+  pointer-events: none;
+}
+
+.apple-pip-window:hover .apple-pip-dock-base.is-overlay,
+.apple-pip-window:focus-within .apple-pip-dock-base.is-overlay,
+.apple-pip-window.is-curtaining .apple-pip-dock-base.is-overlay {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.apple-pip-dock-controls {
+  height: 19px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 4px;
+}
+
+.apple-pip-dock-left {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.apple-pip-dock-center {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.apple-pip-dock-right {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1px;
+  min-width: 0;
+}
+
+.apple-pip-dock-btn {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 140ms var(--ease-apple), color 140ms var(--ease-apple), transform 160ms var(--ease-spring);
+}
+
+.apple-pip-dock-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.apple-pip-dock-btn:active {
+  transform: scale(0.88);
+}
+
+.apple-pip-dock-btn--play {
+  width: 20px;
+  height: 20px;
+  color: rgba(255, 255, 255, 0.96);
+  background: transparent;
+}
+
+.apple-pip-dock-btn--play:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.apple-pip-dock-btn--close {
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.apple-pip-dock-btn--close:hover {
+  color: #ffffff;
+}
+
+.apple-pip-dock-btn.is-active {
+  color: color-mix(in srgb, var(--reading-accent, #0a84ff) 84%, #ffffff);
+  background: color-mix(in srgb, var(--reading-accent, #0a84ff) 18%, transparent);
+}
+
+.apple-pip-time,
+.apple-pip-mono {
+  font-family: var(--ui-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.78);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.apple-pip-time-sep,
+.apple-pip-time-total {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.apple-pip-time-sep {
+  margin: 0 2px;
+}
+
+@container pip-frame (max-width: 296px) {
+  .apple-pip-time-sep,
+  .apple-pip-time-total {
+    display: none;
+  }
+}
+
+.apple-pip-rate-btn {
+  height: 17px;
+  padding: 0 3px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 8.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background-color 140ms var(--ease-apple), color 140ms var(--ease-apple);
+}
+
+.apple-pip-rate-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+/* ==========================================================================
+   Apple 细丝进度轨道
+   ========================================================================== */
+
+.apple-scrubber {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  display: flex;
+  align-items: center;
+}
+
+.apple-scrubber-track {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  transition: height 150ms var(--ease-apple);
+}
+
+.apple-scrubber:hover .apple-scrubber-track,
+.apple-scrubber:focus-within .apple-scrubber-track {
+  height: 3.5px;
+}
+
+.apple-scrubber-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--scrubber-pct, 0%);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.apple-scrubber-thumb {
+  position: absolute;
+  left: var(--scrubber-pct, 0%);
+  top: 50%;
+  width: 6.5px;
+  height: 6.5px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.45);
+  transform: translate(-50%, -50%) scale(0);
+  opacity: 0;
+  transition: transform 150ms var(--ease-spring), opacity 140ms var(--ease-apple);
+}
+
+.apple-scrubber:hover .apple-scrubber-thumb,
+.apple-scrubber:focus-within .apple-scrubber-thumb {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+
+.apple-scrubber-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* ---------------- 视频内实时字幕（悬停底座显出时平滑上移避让） ---------------- */
+
+.apple-pip-caption {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  z-index: 4;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  transition: transform 200ms var(--ease-spring);
+}
+
+.apple-pip-window:hover .apple-pip-caption,
+.apple-pip-window:focus-within .apple-pip-caption,
+.apple-pip-window.is-curtaining .apple-pip-caption {
+  transform: translateY(-34px);
+}
+
+.apple-pip-caption span {
+  max-width: 100%;
+  padding: 3px 10px;
+  border-radius: 8px;
+  background: rgba(8, 10, 15, 0.72);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  backdrop-filter: blur(12px) saturate(160%);
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 11.5px;
+  line-height: 1.42;
+  text-align: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.32);
+}
+
+/* ---------------- 在线嵌入模式工具栏与转写字幕 ---------------- */
+
+.apple-pip-embed-drawer {
+  height: 0;
+  overflow: hidden;
+  background: rgba(14, 16, 22, 0.94);
+  transition: height 180ms var(--ease-spring);
+}
+
+.apple-pip-window.is-embed-bar-open .apple-pip-embed-drawer,
+.apple-pip-embed-drawer:focus-within {
+  height: 28px;
+  border-bottom: 0.75px solid rgba(255, 255, 255, 0.08);
+}
+
+.apple-pip-embed-bar {
+  height: 28px;
+  padding: 0 6px 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.apple-pip-embed-drag {
+  border: 0;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 11px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.apple-pip-embed-drag.is-dragging {
+  cursor: grabbing;
+}
+
+.apple-pip-island-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.apple-pip-icon {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 140ms var(--ease-apple), color 140ms var(--ease-apple);
+}
+
+.apple-pip-icon:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.apple-pip-icon.is-active {
+  color: var(--reading-accent, #0a84ff);
+}
+
+.apple-pip-icon:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.apple-pip-embed-caption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(14, 16, 22, 0.94);
+  border-top: 0.75px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.apple-pip-embed-caption-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.apple-pip-embed-caption-time {
+  font-family: var(--ui-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+  color: var(--reading-accent, #0a84ff);
+  flex-shrink: 0;
+}
+
+.apple-pip-embed-caption-text {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* 屏蔽层与尺寸 HUD */
+.apple-pip-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+}
+
+.apple-pip-size-hud {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 9;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: rgba(16, 18, 24, 0.76);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  backdrop-filter: blur(16px) saturate(180%);
+  border: 0.75px solid rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  font-family: var(--ui-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 四角受限等比缩放热区：弧线与 11px 外框圆角零偏移重合生长 */
+.apple-pip-resize {
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  z-index: 10;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.apple-pip-resize::after {
+  content: '';
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  opacity: 0;
+  transition: opacity 160ms var(--ease-apple), border-color 160ms var(--ease-apple);
+  pointer-events: none;
+}
+
+.apple-pip-window:hover .apple-pip-resize::after {
+  opacity: 0.28;
+}
+
+.apple-pip-resize:hover::after,
+.apple-pip-window.is-interacting .apple-pip-resize::after {
+  opacity: 0.92 !important;
+  border-color: color-mix(in srgb, var(--reading-accent, #ffffff) 75%, #ffffff) !important;
+}
+
+.apple-pip-resize--nw { top: 0; left: 0; cursor: nwse-resize; }
+.apple-pip-resize--nw::after { top: 0; left: 0; border-top: 1.5px solid rgba(255, 255, 255, 0.85); border-left: 1.5px solid rgba(255, 255, 255, 0.85); border-top-left-radius: 11px; }
+
+.apple-pip-resize--ne { top: 0; right: 0; cursor: nesw-resize; }
+.apple-pip-resize--ne::after { top: 0; right: 0; border-top: 1.5px solid rgba(255, 255, 255, 0.85); border-right: 1.5px solid rgba(255, 255, 255, 0.85); border-top-right-radius: 11px; }
+
+.apple-pip-resize--sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.apple-pip-resize--sw::after { bottom: 0; left: 0; border-bottom: 1.5px solid rgba(255, 255, 255, 0.85); border-left: 1.5px solid rgba(255, 255, 255, 0.85); border-bottom-left-radius: 11px; }
+
+.apple-pip-resize--se { bottom: 0; right: 0; cursor: nwse-resize; }
+.apple-pip-resize--se::after { bottom: 0; right: 0; border-bottom: 1.5px solid rgba(255, 255, 255, 0.85); border-right: 1.5px solid rgba(255, 255, 255, 0.85); border-bottom-right-radius: 11px; }
+
+html[data-reduced-motion="true"] :is(.apple-pip-window, .apple-pip-stage, .apple-pip-dock-base, .apple-pip-caption, .apple-pip-top-caption, .apple-pip-media, .apple-pip-cinema-canvas) {
+  animation: none !important;
+  transition: none !important;
+}
+
+html[data-reduced-motion="true"] .apple-pip-window {
+  transform: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .apple-pip-window,
+  .apple-pip-stage,
+  .apple-pip-dock-base,
+  .apple-pip-caption,
+  .apple-pip-top-caption,
+  .apple-pip-media,
+  .apple-pip-cinema-canvas {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .apple-pip-window {
+    transform: none !important;
+  }
+}

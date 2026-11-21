@@ -15,6 +15,8 @@ from app.services.web_page import resolve_public
 
 MEDIA_SUFFIXES = {'.mp4', '.mkv', '.mov', '.avi', '.webm', '.m4v', '.flv', '.ts',
                   '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.opus', '.wma'}
+SUBTITLE_SUFFIXES = {'.srt', '.vtt'}
+UPLOAD_ALLOWED_SUFFIXES = MEDIA_SUFFIXES | SUBTITLE_SUFFIXES
 COVER_DOMAINS = ('hdslb.com', 'bilibili.com', 'ytimg.com', 'kwimgs.com', 'kwaicdn.com',
                  'douyinpic.com', 'byteimg.com', 'pstatp.com')
 IMAGE_LIMIT = 8 * 1024 * 1024
@@ -51,8 +53,8 @@ class UploadBodyLimit:
 
 async def save_upload(file: UploadFile, directory: str):
     suffix = Path((file.filename or '').replace('\\', '/')).suffix.lower()
-    if suffix not in MEDIA_SUFFIXES:
-        raise HTTPException(415, '请选择支持的音频或视频文件')
+    if suffix not in UPLOAD_ALLOWED_SUFFIXES:
+        raise HTTPException(415, '请选择支持的音频、视频或字幕文件（.srt / .vtt）')
     limit = int(os.getenv('BILINOTE_UPLOAD_MAX_BYTES', str(4 * 1024 ** 3)))
     if limit <= 0:
         raise HTTPException(503, '上传大小限制配置无效，请检查后台设置')
@@ -80,7 +82,8 @@ async def save_upload(file: UploadFile, directory: str):
         (names / (target.name + '.json')).write_text(json.dumps({'filename': original}, ensure_ascii=False), encoding='utf-8')
         complete = True
         return {'url': f'/uploads/{target.name}',
-                'filename': original}
+                'filename': original,
+                'is_subtitle': suffix in SUBTITLE_SUFFIXES}
     finally:
         if created and not complete and target.is_file():
             target.unlink()

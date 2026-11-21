@@ -1,7 +1,5 @@
-import enum
+"""向后兼容导出：规范定义已迁移至 app.enums.note_enums。"""
 
+from app.enums.note_enums import DownloadQuality
 
-class DownloadQuality(str, enum.Enum):
-    fast = "fast"
-    medium = "medium"
-    slow = "slow"
+__all__ = ["DownloadQuality"]

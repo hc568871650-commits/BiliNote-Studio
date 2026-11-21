@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useLayoutEffect, useRef } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import WorkspaceRail from './WorkspaceRail'
+import { useWorkspaceShell } from './WorkspaceShellContext'
 import './settings.css'
 const positions = new Map<string, number>()
 const sections = ['general', 'appearance', 'model', 'transcriber', 'download', 'monitor', 'about']
@@ -9,6 +10,7 @@ const sections = ['general', 'appearance', 'model', 'transcriber', 'download', '
 export default function SettingLayout({ Menu }: { Menu: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
+  const { shared } = useWorkspaceShell()
   const providerDetail = /^\/settings\/model\/[^/]+\/?$/.test(location.pathname)
   const content = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -26,8 +28,8 @@ export default function SettingLayout({ Menu }: { Menu: ReactNode }) {
     const timeout = window.setTimeout(() => observer.disconnect(), 1500)
     return () => { observer.disconnect(); clearTimeout(timeout) }
   }, [location.pathname])
-  return <div className="settings-shell">
-    <WorkspaceRail active="settings" libraryLabel="返回笔记库" />
+  return <div className={`settings-shell${shared ? ' settings-shell--embedded' : ''}`}>
+    {!shared && <WorkspaceRail active="settings" libraryLabel="返回笔记库" />}
     <div className="settings-frame workspace-route-enter">
       <aside className="settings-categories" aria-label="设置分类">{Menu}</aside>
       <div className={`settings-detail${providerDetail ? ' settings-detail--with-back' : ''}`}>

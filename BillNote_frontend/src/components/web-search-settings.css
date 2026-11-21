@@ -5,7 +5,7 @@
 .search-settings fieldset { min-width:0; padding:0; border:0; }
 .search-settings .settings-row,.search-settings .settings-field { padding:12px 0; }
 .search-settings .settings-row p { margin-top:4px; }
-.search-settings-option > .choice-trigger { width:auto; min-width:126px; }
+.search-settings-option > .choice-trigger:not(.settings-fixed-control) { width:auto; min-width:126px; }
 .search-settings .settings-field { gap:8px 14px; border-top:1px solid var(--border); }
 .search-settings .settings-field > small { margin:0; color:var(--muted-foreground); }
 .search-settings-cost { margin:8px 0 12px; }

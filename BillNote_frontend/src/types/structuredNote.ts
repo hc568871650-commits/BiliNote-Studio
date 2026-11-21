@@ -242,7 +242,7 @@ export function structuredNoteToMindmapMarkdown(doc: StructuredNoteDocument): st
           .map(step => spansPlainText(step).replace(/\s+/g, ' ').trim())
           .filter(Boolean)
           .join(' → ')
-        if (chain) lines.push(`- ${chain}`)
+        if (chain) lines.push(`- 因果链：${chain}`)
       } else if (block.type === 'list') {
         for (const item of block.items || []) {
           const text = spansPlainText(item).replace(/\s+/g, ' ').trim()
@@ -272,9 +272,19 @@ export function structuredNoteToMindmapMarkdown(doc: StructuredNoteDocument): st
       }
     }
 
-    for (const anno of sec.annotations || []) {
+    const pitAnnotations = (sec.annotations || []).filter(anno => anno.kind === 'pit')
+    const otherAnnotations = (sec.annotations || []).filter(anno => anno.kind !== 'pit')
+
+    for (const anno of otherAnnotations) {
       const hint = (anno.short_hint || '').replace(/\s+/g, ' ').trim()
       if (hint) lines.push(`- [${MINDMAP_KIND_LABELS[anno.kind] || '要点'}] ${hint}`)
+    }
+    if (pitAnnotations.length > 0) {
+      lines.push('- 高频避坑')
+      for (const pit of pitAnnotations) {
+        const hint = (pit.short_hint || pit.full_detail || '').replace(/\s+/g, ' ').trim()
+        if (hint) lines.push(`  - [避坑] ${hint}`)
+      }
     }
   }
   return lines.join('\n')

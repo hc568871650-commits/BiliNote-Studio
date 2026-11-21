@@ -107,14 +107,19 @@ class LocalDownloader(Downloader):
     def download_video(self, video_url: str, output_dir: Optional[str] = None) -> str:
         return str(self._source(video_url))
 
+    def download_subtitles(self, video_url: str, output_dir: Optional[str] = None, langs: list = None):
+        from app.domains.ingestion.subtitle_parser import is_subtitle_path, parse_subtitle_file
+
+        if not is_subtitle_path(video_url):
+            return None
+        source = self._source(video_url)
+        return parse_subtitle_file(source)
+
     def download(self, video_url: str, output_dir: Optional[str] = None,
                  quality: DownloadQuality = 'fast', need_video: Optional[bool] = False) -> AudioDownloadResult:
+        from app.domains.ingestion.subtitle_parser import is_subtitle_path, parse_subtitle_file
+
         source = self._source(video_url)
-        directory = self._output_directory(source, output_dir)
-        duration = self._duration(source)
-        file_path = self.convert_to_mp3(str(source), str(directory / f'{source.stem}.mp3'))
-        cover_path = self.extract_cover(str(source), str(directory), duration=duration)
-        cover_url = save_cover_to_static(cover_path)
         title = source.stem
         if source.parent == (Path.cwd() / 'uploads').resolve():
             try:
@@ -122,6 +127,20 @@ class LocalDownloader(Downloader):
                 title = Path(original).stem
             except (OSError, ValueError, KeyError, TypeError):
                 pass
+        if is_subtitle_path(source):
+            transcript = parse_subtitle_file(source)
+            duration = max((seg.end for seg in transcript.segments), default=0.0)
+            return AudioDownloadResult(
+                file_path=str(source), title=title, duration=duration, cover_url='',
+                platform='local', video_id=source.stem,
+                raw_info={'path': str(source), 'source_path': str(source), 'is_subtitle': True},
+                video_path=None,
+            )
+        directory = self._output_directory(source, output_dir)
+        duration = self._duration(source)
+        file_path = self.convert_to_mp3(str(source), str(directory / f'{source.stem}.mp3'))
+        cover_path = self.extract_cover(str(source), str(directory), duration=duration)
+        cover_url = save_cover_to_static(cover_path)
         return AudioDownloadResult(
             file_path=file_path, title=title, duration=duration, cover_url=cover_url,
             platform='local', video_id=source.stem,

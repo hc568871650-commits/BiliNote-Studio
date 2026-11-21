@@ -63,21 +63,43 @@ const sampleDoc = {
     blocks: [
       { type: 'paragraph', spans: [{ text: '主干内容。', emphasis: 'plain' }] },
       {
+        type: 'flow_chain',
+        steps: [
+          [{ text: '连接数过高', emphasis: 'plain' }],
+          [{ text: '上下文切换雪崩', emphasis: 'hl' }],
+        ],
+      },
+      {
         type: 'checklist',
         title: '环境准备自查',
         items: [{ id: 'c1', spans: [{ text: '安装 Node.js 22', emphasis: 'code' }], checked: false }],
       },
     ],
-    annotations: [],
+    annotations: [
+      {
+        id: 'pit-1',
+        kind: 'pit',
+        short_hint: 'maxLifetime 必须短于 wait_timeout',
+        full_detail: '否则服务端断开空闲连接后客户端会抛出通信异常。',
+      },
+    ],
     quiz: null,
   }],
 }
 assert.equal(mod.resolveStructuredNote({ structured: sampleDoc }, '# markdown')?.title, '测试标题')
 assert.equal(mod.resolveStructuredNote(null, JSON.stringify(sampleDoc))?.title, '测试标题')
 assert.equal(mod.resolveStructuredNote(null, '# 纯文本标题\n\n正文'), null)
-assert.equal(mod.sectionPlainSummary(sampleDoc.sections[0]), '核心结论\n主干内容。\n环境准备自查：安装 Node.js 22')
+assert.equal(mod.sectionPlainSummary(sampleDoc.sections[0]), '核心结论\n主干内容。\n连接数过高 → 上下文切换雪崩\n环境准备自查：安装 Node.js 22')
 const sampleMindmap = mod.structuredNoteToMindmapMarkdown(sampleDoc)
-assert(sampleMindmap.includes('# 测试标题') && sampleMindmap.includes('## 第一节 (00:10)') && sampleMindmap.includes('- **核心结论**') && sampleMindmap.includes('- [自查] 安装 Node.js 22'))
+assert(
+  sampleMindmap.includes('# 测试标题')
+  && sampleMindmap.includes('## 第一节 (00:10)')
+  && sampleMindmap.includes('- **核心结论**')
+  && sampleMindmap.includes('- 因果链：连接数过高 → 上下文切换雪崩')
+  && sampleMindmap.includes('- [自查] 安装 Node.js 22')
+  && sampleMindmap.includes('- 高频避坑')
+  && sampleMindmap.includes('  - [避坑] maxLifetime 必须短于 wait_timeout'),
+)
 
 const accentBundled = await build({
   entryPoints: [fileURLToPath(new URL('../src/store/accentStore.ts', import.meta.url))],

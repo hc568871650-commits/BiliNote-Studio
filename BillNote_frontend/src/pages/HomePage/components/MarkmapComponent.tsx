@@ -591,10 +591,32 @@ export default function MarkmapEditor({
   // 初始化 Markmap 实例 + Toolbar
   useEffect(() => {
     if (!svgRef.current || mmRef.current) return
-    const mm = Markmap.create(svgRef.current, { color: () => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim(), maxWidth: 360 })
+    const resolveBranchColor = (node: INode) => {
+      const rootStyle = getComputedStyle(document.documentElement)
+      const accent = (rootStyle.getPropertyValue('--reading-accent').trim()
+        || rootStyle.getPropertyValue('--primary').trim()
+        || '#2563eb')
+      const muted = rootStyle.getPropertyValue('--muted-foreground').trim() || '#64748b'
+      const depth = node.state?.depth ?? 0
+      if (depth <= 1) return accent
+      if (depth === 2) return `color-mix(in srgb, ${accent} 72%, ${muted})`
+      return `color-mix(in srgb, ${accent} 46%, ${muted})`
+    }
+    const mm = Markmap.create(svgRef.current, {
+      color: resolveBranchColor,
+      maxWidth: 340,
+      spacingHorizontal: 76,
+      spacingVertical: 8,
+      paddingX: 12,
+    })
     mmRef.current = mm
     const normalDuration = mm.options.duration
-    const applyMotionPreference = () => { mm.setOptions({ duration: prefersReducedMotion() ? 0 : normalDuration }) }
+    const applyMotionPreference = () => {
+      mm.setOptions({
+        duration: prefersReducedMotion() ? 0 : normalDuration,
+        color: resolveBranchColor,
+      })
+    }
     const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
     motionQuery.addEventListener('change', applyMotionPreference)
     applyMotionPreference()

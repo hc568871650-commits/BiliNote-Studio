@@ -30,6 +30,16 @@ export const HomePage: FC = () => {
   const [view, setView] = useState<'create' | 'notes' | 'configure'>(() => useInterfaceStore.getState().startPage === 'create' ? 'create' : currentTaskId ? 'notes' : 'create')
   const recentNoteId = useRef<string | null>(readRecentNote())
   const initialSearch = useRef(location.search)
+  const syncedRouteTokenRef = useRef<string>('')
+  const routeToken = `${location.pathname}|${location.search}|${location.key}`
+  const requestedRouteView = location.pathname === '/' && syncedRouteTokenRef.current !== routeToken
+    ? new URLSearchParams(location.search).get('view')
+    : null
+  const effectiveView: 'create' | 'notes' | 'configure' = requestedRouteView === 'create'
+    ? 'create'
+    : requestedRouteView === 'read'
+      ? 'notes'
+      : view
 
   useEffect(() => {
     const restoreStartup = () => {
@@ -70,6 +80,7 @@ export const HomePage: FC = () => {
   }, [currentTask, view])
 
   useLayoutEffect(() => {
+    syncedRouteTokenRef.current = routeToken
     if (location.pathname !== '/') return
     const requested = new URLSearchParams(location.search).get('view')
     if (requested === 'create') setView('create')
@@ -80,7 +91,7 @@ export const HomePage: FC = () => {
       setView('notes')
       window.dispatchEvent(new Event('bilinote-refresh-task'))
     }
-  }, [location.key, location.pathname, location.search, setCurrentTask])
+  }, [location.key, location.pathname, location.search, routeToken, setCurrentTask])
 
   // A pending sync or a deleted note must not send the user into the creation view.
   useEffect(() => {
@@ -106,13 +117,13 @@ export const HomePage: FC = () => {
 
   return (
     <HomeLayout
-      composing={view !== 'notes'}
-      hasTask={view !== 'create' && Boolean(currentTask)}
+      composing={effectiveView !== 'notes'}
+      hasTask={effectiveView !== 'create' && Boolean(currentTask)}
       title={currentTask ? generationTitle(currentTask) : '笔记'}
       onCreate={createNote}
       onRead={openNotes}
       onConfigure={() => setView('configure')}
-      NoteForm={<><div hidden={view === 'configure'}><NoteForm creating onSubmitted={submitted} /></div>{null}</>}
+      NoteForm={<><div hidden={effectiveView === 'configure'}><NoteForm creating onSubmitted={submitted} /></div>{null}</>}
       ConfigureForm={<NoteForm onSubmitted={submitted} />}
       Preview={currentTask ? <MarkdownViewer status={status} /> : <div className="workspace-empty">
         <h1>暂时没有笔记</h1>

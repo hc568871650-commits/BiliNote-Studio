@@ -6,7 +6,7 @@ import path from 'node:path'
 // UI-only sandbox: no proxy, no backend, no Tauri sidecar, isolated browser origin.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } },
+  resolve: { alias: { '@': path.resolve(process.cwd(), 'src') } },
   define: { __APP_VERSION__: JSON.stringify('next-ui-preview'), 'import.meta.env.VITE_API_BASE_URL': JSON.stringify('/__ui_preview_api') },
   cacheDir: '.cache/ui-preview-v2',
   build: { target: 'esnext', outDir: '.cache/ui-preview-dist', rollupOptions: { input: path.resolve(import.meta.dirname, 'ui-preview.html') } },

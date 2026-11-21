@@ -12,9 +12,6 @@ from pydantic import HttpUrl
 from runtime_env import load_dotenv
 
 from app.downloaders.base import Downloader
-from app.downloaders.bilibili_downloader import BilibiliDownloader
-from app.downloaders.local_downloader import LocalDownloader
-from app.downloaders.youtube_downloader import YoutubeDownloader
 from app.db.video_task_dao import delete_task_by_video, insert_video_task
 from app.enmus.exception import NoteErrorEnum, ProviderErrorEnum
 from app.enmus.task_status_enums import TaskStatus
@@ -22,7 +19,6 @@ from app.enmus.note_enums import DownloadQuality
 from app.exceptions.note import NoteError
 from app.exceptions.provider import ProviderError
 from app.gpt.base import GPT
-from app.gpt.gpt_factory import GPTFactory
 from app.models.audio_model import AudioDownloadResult
 from app.models.gpt_model import GPTSource
 from app.models.model_config import ModelConfig
@@ -31,15 +27,17 @@ from app.models.transcriber_model import TranscriptResult, TranscriptSegment
 from app.services.constant import SUPPORT_PLATFORM_MAP
 from app.services.provider import ProviderService
 from app.transcriber.base import Transcriber
-from app.transcriber.transcriber_provider import get_transcriber, _transcribers
 from app.utils.note_helper import replace_content_markers, prepend_source_link
 from app.utils.screenshot_marker import extract_screenshot_timestamps
 from app.utils.status_code import StatusCode
-from app.utils.video_helper import generate_screenshot
-from app.utils.video_reader import VideoReader
 from app.utils.dynamic_frames import nearest_candidate
 from app.services import note_storage
 from app.services import note_diagnostics
+
+# 保留模块级可覆盖槽位，确保单元测试可直接 patch note_service.get_transcriber / generate_screenshot / VideoReader
+get_transcriber = None
+generate_screenshot = None
+VideoReader = None
 
 # ------------------ 环境变量与全局配置 ------------------
 
@@ -345,12 +343,15 @@ class NoteGenerator:
         """
         根据环境变量 TRANSCRIBER_TYPE 动态获取并实例化转写器
         """
-        if self.transcriber_type not in _transcribers:
+        from app.transcriber import transcriber_provider as _tp
+
+        if self.transcriber_type not in _tp._transcribers:
             logger.error(f"未找到支持的转写器：{self.transcriber_type}")
             raise Exception(f"不支持的转写器：{self.transcriber_type}")
 
         logger.info(f"使用转写器：{self.transcriber_type}")
-        return get_transcriber(
+        factory = get_transcriber if callable(get_transcriber) else _tp.get_transcriber
+        return factory(
             transcriber_type=self.transcriber_type,
             model_size=self.model_size,
         )
@@ -362,6 +363,8 @@ class NoteGenerator:
         :param provider_id: 供应商 ID
         :return: GPT 实例
         """
+        from app.gpt.gpt_factory import GPTFactory
+
         provider = ProviderService.get_provider_by_id(provider_id)
         if not provider:
             logger.error(f"[get_gpt] 未找到模型供应商: provider_id={provider_id}")
@@ -417,7 +420,13 @@ class NoteGenerator:
         status_file.parent.mkdir(parents=True, exist_ok=True)
         print(f"写入状态文件: {status_file} 当前状态: {status}")
         try:
-            note_storage.write_status(task_id, status.value if isinstance(status, TaskStatus) else status, message)
+            status_text = status.value if isinstance(status, TaskStatus) else status
+            note_storage.write_status(task_id, status_text, message)
+            try:
+                from app.jobs.manager import get_job_manager
+                get_job_manager().sync_task_status(task_id, status_text, stage_message=message)
+            except Exception:
+                pass
 
             print(f"状态文件写入成功: {status_file}")
         except Exception as e:
@@ -550,9 +559,13 @@ class NoteGenerator:
     def _prepare_video_evidence(self, transcript, task_id, frame_mode='dynamic',
                                 video_interval=0, grid_size=None, video_understanding=False):
         """One local extraction; images reach a model only for explicit video understanding."""
+        _vr = globals().get("VideoReader")
+        if _vr is None:
+            from app.utils.video_reader import VideoReader as _vr
+
         run_dir = self.run_dir or Path('Temp') / 'note_jobs' / str(task_id) / uuid.uuid4().hex
         self.run_dir = run_dir
-        reader = VideoReader(video_path=str(self.video_path), grid_size=tuple(grid_size or [2, 2]),
+        reader = _vr(video_path=str(self.video_path), grid_size=tuple(grid_size or [2, 2]),
                              frame_interval=video_interval if video_interval > 0 else 6,
                              frame_mode=frame_mode, subtitle_segments=transcript.segments,
                              frame_budget=120, save_quality=80,
@@ -786,8 +799,11 @@ class NoteGenerator:
                 try:
                     if not self.run_dir:
                         raise RuntimeError("Missing isolated screenshot directory")
+                    _gen_shot = globals().get("generate_screenshot")
+                    if not callable(_gen_shot):
+                        from app.utils.video_helper import generate_screenshot as _gen_shot
                     actual_ts = nearest_candidate(ts, self.frame_evidence, self.video_duration)
-                    img_path = generate_screenshot(str(video_path), str(self.run_dir / "images"), max(0, actual_ts - .001), idx)
+                    img_path = _gen_shot(str(video_path), str(self.run_dir / "images"), max(0, actual_ts - .001), idx)
                     if not Path(img_path).is_file() or Path(img_path).stat().st_size == 0:
                         raise RuntimeError('Screenshot output is missing or empty')
                     filename = Path(img_path).name
@@ -828,8 +844,11 @@ class NoteGenerator:
             try:
                 if not self.run_dir:
                     raise RuntimeError("Missing isolated screenshot directory")
+                _gen_shot = globals().get("generate_screenshot")
+                if not callable(_gen_shot):
+                    from app.utils.video_helper import generate_screenshot as _gen_shot
                 actual_ts = nearest_candidate(ts, self.frame_evidence, self.video_duration)
-                img_path = generate_screenshot(str(video_path), str(self.run_dir / "images"), max(0, actual_ts-.001), idx)
+                img_path = _gen_shot(str(video_path), str(self.run_dir / "images"), max(0, actual_ts-.001), idx)
                 if not Path(img_path).is_file() or Path(img_path).stat().st_size == 0:
                     raise RuntimeError('Screenshot output is missing or empty')
                 filename = Path(img_path).name

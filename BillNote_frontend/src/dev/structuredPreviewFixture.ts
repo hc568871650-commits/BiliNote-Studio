@@ -191,5 +191,307 @@ export const structuredPreviewDoc: StructuredNoteDocument = {
       ],
       quiz: null,
     },
+    {
+      id: 'sec-3',
+      title: '索引设计与最左前缀原则',
+      level: 2,
+      time_ranges: [{ start: 2740, end: 3120, label: '45:40' }],
+      core_takeaways: [
+        {
+          spans: [
+            { text: '联合索引把等值列放最前、范围列放最后', emphasis: 'hl', annotation_id: 'why-idx' },
+            { text: '：只要中间出现 ', emphasis: 'plain' },
+            { text: '>', emphasis: 'code' },
+            { text: ' 或 ', emphasis: 'plain' },
+            { text: 'BETWEEN', emphasis: 'code' },
+            { text: '，后续列就会退出索引有序查找。', emphasis: 'plain' },
+          ],
+        },
+      ],
+      blocks: [
+        {
+          type: 'paragraph',
+          spans: [
+            { text: '对高频查询优先建立覆盖索引，', emphasis: 'plain' },
+            { text: '避免在索引列上套用函数或隐式类型转换', emphasis: 'wave', annotation_id: 'pit-idx' },
+            { text: '，否则优化器会直接放弃 B+ 树检索。', emphasis: 'plain' },
+          ],
+        },
+        {
+          type: 'table',
+          table_kind: 'comparison',
+          columns: ['写法示例', '是否命中索引', '底层原因'],
+          column_modes: ['nowrap', 'nowrap', 'wrap'],
+          rows: [
+            [
+              [{ text: 'created_at >= ?', emphasis: 'code' }],
+              [{ text: '命中范围扫描', emphasis: 'hl' }],
+              [{ text: '保持列原值参与比较，B+ 树可直接二分定位起点' }],
+            ],
+            [
+              [{ text: 'DATE(created_at) = ?', emphasis: 'code' }],
+              [{ text: '索引失效', emphasis: 'plain' }],
+              [{ text: '函数破坏了索引键的有序性，被迫退化为全索引/全表扫描' }],
+            ],
+          ],
+        },
+      ],
+      annotations: [
+        {
+          id: 'why-idx',
+          kind: 'why',
+          short_hint: 'B+ 树按第一列全局有序，第二列仅在第一列相等时有序',
+          full_detail: '联合索引 (a, b, c) 在叶子节点先按 a 排序，a 相同时再按 b 排序；一旦 a 走了范围条件，对应区间的 b 不再全局有序，因此无法继续利用二分查找。',
+          timestamp: 2810,
+          timestamp_label: '原片 46:50',
+        },
+        {
+          id: 'pit-idx',
+          kind: 'pit',
+          short_hint: '字符串列传数字会触发隐式 CAST 导致索引失效',
+          full_detail: '例如手机号列为 VARCHAR 时写 WHERE phone = 13800138000，MySQL 会把每行字符串转成浮点数比较，相当于在列上套了函数。',
+          timestamp: 3015,
+          timestamp_label: '原片 50:15',
+        },
+      ],
+      quiz: null,
+    },
+    {
+      id: 'sec-3-1',
+      title: '覆盖索引与回表代价权衡',
+      level: 3,
+      time_ranges: [{ start: 3120, end: 3340, label: '52:00' }],
+      core_takeaways: [
+        {
+          spans: [
+            { text: '把高频列表页所需字段收进联合索引可消除随机回表 IO', emphasis: 'ul' },
+            { text: '，但单表二级索引总数建议控制在 ', emphasis: 'plain' },
+            { text: '5 个以内', emphasis: 'code' },
+            { text: ' 以防写入放大。', emphasis: 'plain' },
+          ],
+        },
+      ],
+      blocks: [
+        {
+          type: 'paragraph',
+          spans: [
+            { text: '当 ', emphasis: 'plain' },
+            { text: 'EXPLAIN', emphasis: 'code' },
+            { text: ' 的 Extra 列出现 ', emphasis: 'plain' },
+            { text: 'Using index', emphasis: 'code' },
+            { text: ' 时，说明查询仅靠二级索引页就完成了全部字段返回，无需二次查聚簇索引。', emphasis: 'plain' },
+          ],
+        },
+      ],
+      annotations: [],
+      quiz: null,
+    },
+    {
+      id: 'sec-4',
+      title: '事务隔离级别与 MVCC 快照读',
+      level: 2,
+      time_ranges: [{ start: 3420, end: 3900, label: '57:00' }],
+      core_takeaways: [
+        {
+          spans: [
+            { text: '长事务会拖住 Undo Log 无法回收', emphasis: 'hl', annotation_id: 'why-mvcc' },
+            { text: '：并发读写下既撑爆表空间，又会拉长普通快照读的版本链遍历耗时。', emphasis: 'plain' },
+          ],
+        },
+      ],
+      blocks: [
+        {
+          type: 'paragraph',
+          spans: [
+            { text: '严禁在数据库事务内调用外部 HTTP 接口或等待用户输入', emphasis: 'wave' },
+            { text: '；先在事务外准备完所有外部数据，再以最短路径完成加锁与提交。', emphasis: 'plain' },
+          ],
+        },
+      ],
+      annotations: [
+        {
+          id: 'why-mvcc',
+          kind: 'why',
+          short_hint: '最早未提交事务决定整个系统的 ReadView 水位',
+          full_detail: 'InnoDB 的 Purge 线程只能清理早于最老活跃事务 ID 的历史版本。哪怕只是一个忘记提交的只读事务，也会让全库千万级变更历史滞留在 Undo 表空间中。',
+          timestamp: 3600,
+          timestamp_label: '原片 60:00',
+        },
+      ],
+      quiz: {
+        short_prompt: '事务里顺手调个第三方支付查询接口会怎样？',
+        full_question: '在开启数据库事务后、提交前顺手调用一个耗时 2 秒的外部 HTTP 接口，最大的隐患是什么？',
+        options: [
+          { key: 'A', text: '外部接口失败会自动回滚远端状态，属于推荐写法' },
+          { key: 'B', text: '连接和行锁被白白占用 2 秒，高并发下迅速打满连接池并阻塞其他写入' },
+          { key: 'C', text: '仅会多耗一点内存，对并发吞吐没有影响' },
+        ],
+        correct_key: 'B',
+        explanation: '事务期间数据库连接与已持有的行锁都不会释放；把网络 IO 放进事务会把毫秒级锁持有拉长成秒级，直接引发雪崩。',
+      },
+    },
+    {
+      id: 'sec-5',
+      title: '缓存穿透、击穿与雪崩治理',
+      level: 2,
+      time_ranges: [{ start: 3960, end: 4440, label: '66:00' }],
+      core_takeaways: [
+        {
+          spans: [
+            { text: '缓存失效治理的核心是把突发回源请求削平为单飞回源', emphasis: 'hl' },
+            { text: '：空值短缓存挡穿透，互斥锁/逻辑过期挡击穿，随机 TTL 抖动挡雪崩。', emphasis: 'plain' },
+          ],
+        },
+      ],
+      blocks: [
+        {
+          type: 'flow_chain',
+          steps: [
+            [{ text: '布隆过滤器拦截非法 ID', emphasis: 'plain' }],
+            [{ text: '热点 Key 采用 ', emphasis: 'plain' }, { text: 'singleflight', emphasis: 'code' }, { text: ' 合并回源', emphasis: 'plain' }],
+            [{ text: 'TTL 叠加 ', emphasis: 'plain' }, { text: '±15%', emphasis: 'code' }, { text: ' 随机抖动', emphasis: 'plain' }],
+          ],
+        },
+        {
+          type: 'table',
+          table_kind: 'comparison',
+          columns: ['故障形态', '典型诱因', '首选防线'],
+          column_modes: ['nowrap', 'wrap', 'wrap'],
+          rows: [
+            [
+              [{ text: '缓存穿透', emphasis: 'code' }],
+              [{ text: '恶意或异常查询大量根本不存在的主键' }],
+              [{ text: '短 TTL 空对象缓存 + 参数校验 / 布隆过滤器' }],
+            ],
+            [
+              [{ text: '缓存击穿', emphasis: 'code' }],
+              [{ text: '单个超高并发热点 Key 突然到期' }],
+              [{ text: '逻辑过期异步重建或单机/分布式互斥回源' }],
+            ],
+            [
+              [{ text: '缓存雪崩', emphasis: 'code' }],
+              [{ text: '大批量 Key 同一秒集中过期或缓存节点宕机' }],
+              [{ text: '随机 TTL 打散过期时间 + 多级本地缓存兜底' }],
+            ],
+          ],
+        },
+      ],
+      annotations: [],
+      quiz: null,
+    },
+    {
+      id: 'sec-6',
+      title: '读写分离与主从延迟应对',
+      level: 2,
+      time_ranges: [{ start: 4500, end: 4920, label: '75:00' }],
+      core_takeaways: [
+        {
+          spans: [
+            { text: '写后立刻读的场景必须强制路由主库', emphasis: 'hl', annotation_id: 'case-repl' },
+            { text: '：不要假设只读副本能在毫秒内完成 Binlog 回放。', emphasis: 'plain' },
+          ],
+        },
+      ],
+      blocks: [
+        {
+          type: 'paragraph',
+          spans: [
+            { text: '把业务读请求划分为', emphasis: 'plain' },
+            { text: '强一致读（走主库）', emphasis: 'ul' },
+            { text: '与', emphasis: 'plain' },
+            { text: '最终一致读（走从库）', emphasis: 'ul' },
+            { text: '，并在大批量数据订正时限速分批写入，防止主从延迟被拉大到数十秒。', emphasis: 'plain' },
+          ],
+        },
+      ],
+      annotations: [
+        {
+          id: 'case-repl',
+          kind: 'case',
+          short_hint: '用户刚改完配置立刻刷新页面却看到旧值',
+          full_detail: '大促期间主库写入峰值为平时的 6 倍，只读副本出现 1.8 秒同步延迟；用户提交设置后前端立即发 GET 请求落到从库，导致误以为保存失败并重复提交。',
+          timestamp: 4680,
+          timestamp_label: '原片 78:00',
+        },
+      ],
+      quiz: null,
+    },
+    {
+      id: 'sec-7',
+      title: '连接泄漏定位与全链路观测',
+      level: 2,
+      time_ranges: [{ start: 4980, end: 5340, label: '83:00' }],
+      core_takeaways: [
+        {
+          spans: [
+            { text: '监控活跃连接占比与等待线程数比只看 CPU 更早预警', emphasis: 'hl' },
+            { text: '：当 ', emphasis: 'plain' },
+            { text: 'active / max > 80%', emphasis: 'code' },
+            { text: ' 持续 1 分钟时就应立刻触发告警。', emphasis: 'plain' },
+          ],
+        },
+      ],
+      blocks: [
+        {
+          type: 'flow_chain',
+          steps: [
+            [{ text: '开启 ', emphasis: 'plain' }, { text: 'leakDetectionThreshold', emphasis: 'code' }],
+            [{ text: '捕获未归还连接的调用栈', emphasis: 'plain' }],
+            [{ text: '收敛流式游标与异常分支的 ', emphasis: 'plain' }, { text: 'finally', emphasis: 'code' }, { text: ' 释放', emphasis: 'plain' }],
+          ],
+        },
+      ],
+      annotations: [],
+      quiz: null,
+    },
+    {
+      id: 'sec-8',
+      title: '压测验收与容量规划清单',
+      level: 2,
+      time_ranges: [{ start: 5400, end: 5760, label: '90:00' }],
+      core_takeaways: [
+        {
+          spans: [
+            { text: '压测只看平均延迟极具欺骗性', emphasis: 'hl' },
+            { text: '：验收基线必须同时盯住 ', emphasis: 'plain' },
+            { text: 'P95 / P99', emphasis: 'code' },
+            { text: ' 尾延迟与错误率曲线。', emphasis: 'plain' },
+          ],
+        },
+      ],
+      blocks: [
+        {
+          type: 'checklist',
+          title: '发布前压测验收核对',
+          items: [
+            {
+              id: 'chk-perf-1',
+              spans: [
+                { text: '核心接口在 2 倍峰值 QPS 下 ', emphasis: 'plain' },
+                { text: 'P99 < 120 ms', emphasis: 'code' },
+                { text: ' 且无连接池等待堆积', emphasis: 'plain' },
+              ],
+              checked: false,
+            },
+            {
+              id: 'chk-perf-2',
+              spans: [
+                { text: '模拟单节点缓存失效后，回源 QPS 稳定可控、不触发数据库满载', emphasis: 'plain' },
+              ],
+              checked: false,
+            },
+            {
+              id: 'chk-perf-3',
+              spans: [
+                { text: '已配置慢查询、锁等待与连接池饱和度三级告警阈值', emphasis: 'plain' },
+              ],
+              checked: true,
+            },
+          ],
+        },
+      ],
+      annotations: [],
+      quiz: null,
+    },
   ],
 }

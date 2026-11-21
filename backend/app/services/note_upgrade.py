@@ -44,7 +44,12 @@ def load_cached_transcript(task_id: str, task: dict[str, Any] | None = None) -> 
             continue
 
     if not segments:
-        raise ValueError("该笔记缺少可用的缓存转写字幕，无法免转写升级结构化版本")
+        versions = (task_obj or {}).get("markdown") if isinstance((task_obj or {}).get("markdown"), list) else []
+        latest_md = str((versions[0] or {}).get("content") or "").strip() if versions and isinstance(versions[0], dict) else ""
+        if latest_md:
+            paragraphs = [part.strip() for part in latest_md.split("\n\n") if part.strip()]
+            return [TranscriptSegment(start=0.0, end=0.0, text=part) for part in paragraphs]
+        raise ValueError("该笔记缺少可用的缓存转写字幕或历史正文，无法升级结构化版本")
     return sorted(segments, key=lambda s: s.start)
 
 

@@ -2,13 +2,15 @@ import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { ImperativePanelGroupHandle } from 'react-resizable-panels'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import {
-  constrainedReaderPercent, DEFAULT_READER_PERCENT, readingChatConstraints,
+  constrainedReaderPercent, DEFAULT_READER_PERCENT, READING_CHAT_LAYOUT_KEY,
+  READING_TRANSCRIPT_LAYOUT_KEY, readingChatConstraints,
   readReaderPreference, saveReaderPreference,
 } from './readingChatLayoutState'
 import './reading-chat-layout.css'
 
 type ReadingChatLayoutProps = {
   mode: 'closed' | 'half' | 'full'
+  dockKind?: 'chat' | 'transcript'
   reader: ReactNode
   chat: ReactNode
   onCloseChat?: () => void
@@ -21,10 +23,11 @@ function localStorageOrUndefined() {
 
 const resizeKeys = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End'])
 
-export default function ReadingChatLayout({ mode, reader, chat, children }: ReadingChatLayoutProps) {
+export default function ReadingChatLayout({ mode, dockKind = 'chat', reader, chat, children }: ReadingChatLayoutProps) {
+  const storageKey = dockKind === 'transcript' ? READING_TRANSCRIPT_LAYOUT_KEY : READING_CHAT_LAYOUT_KEY
   const root = useRef<HTMLDivElement>(null)
   const group = useRef<ImperativePanelGroupHandle>(null)
-  const preferred = useRef(readReaderPreference(localStorageOrUndefined()))
+  const preferred = useRef(readReaderPreference(localStorageOrUndefined(), storageKey))
   const [width, setWidth] = useState(0)
   const [dragging, setDragging] = useState(false)
   const id = useId()
@@ -32,6 +35,14 @@ export default function ReadingChatLayout({ mode, reader, chat, children }: Read
   const split = mode === 'half' && !narrow
   const opener = useRef<HTMLElement | null>(null)
   const previousMode = useRef(mode)
+
+  useLayoutEffect(() => {
+    preferred.current = readReaderPreference(localStorageOrUndefined(), storageKey)
+    if (split) {
+      const readerSize = constrainedReaderPercent(preferred.current, width)
+      group.current?.setLayout([readerSize, 100 - readerSize])
+    }
+  }, [storageKey, split, width])
 
   useLayoutEffect(() => {
     const element = root.current
@@ -66,11 +77,11 @@ export default function ReadingChatLayout({ mode, reader, chat, children }: Read
     const size = group.current?.getLayout()[0]
     if (size === undefined) return
     preferred.current = size
-    saveReaderPreference(size, localStorageOrUndefined())
+    saveReaderPreference(size, localStorageOrUndefined(), storageKey)
   }
   const reset = () => {
     preferred.current = DEFAULT_READER_PERCENT
-    saveReaderPreference(DEFAULT_READER_PERCENT, localStorageOrUndefined())
+    saveReaderPreference(DEFAULT_READER_PERCENT, localStorageOrUndefined(), storageKey)
     const size = constrainedReaderPercent(DEFAULT_READER_PERCENT, width)
     group.current?.setLayout([size, 100 - size])
   }
@@ -83,7 +94,7 @@ export default function ReadingChatLayout({ mode, reader, chat, children }: Read
         {reader}
       </ResizablePanel>
       <ResizableHandle id={`${id}-separator`} className="reading-chat-layout-handle" disabled={!split} tabIndex={split ? 0 : -1}
-        aria-label="阅读与聊天宽度" aria-keyshortcuts="ArrowLeft ArrowRight Home End Enter"
+        aria-label={dockKind === 'transcript' ? '阅读与原文参照宽度' : '阅读与聊天宽度'} aria-keyshortcuts="ArrowLeft ArrowRight Home End Enter"
         title="拖动或方向键调整宽度；Enter / 双击恢复默认"
         onDragging={active => { setDragging(active); if (!active) rememberLayout() }}
         onKeyUp={event => { if (resizeKeys.has(event.key)) rememberLayout() }}

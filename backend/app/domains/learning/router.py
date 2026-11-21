@@ -1,0 +1,127 @@
+"""独立学习域路由（/api/learning/*）与旧路径（/api/notes/{task_id}/learning-state）兼容别名。"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from fastapi import APIRouter
+from pydantic import BaseModel
+
+from app.utils.response import ResponseWrapper as R
+
+router = APIRouter(tags=["learning"])
+
+
+class LearningStateUpdateRequest(BaseModel):
+    quiz_attempts: Optional[dict] = None
+    pinned_annotations: Optional[dict] = None
+    checklist_states: Optional[dict] = None
+
+
+class ReviewQuizPracticeRequest(BaseModel):
+    task_id: str
+    section_id: str
+    selected_key: Optional[str] = None
+    mastered: Optional[bool] = None
+
+
+class ReviewPitStatusRequest(BaseModel):
+    task_id: str
+    section_id: str
+    annotation_id: str
+    mastered: bool
+
+
+def _get_state(task_id: str):
+    from app.services import learning_state
+
+    try:
+        return R.success(learning_state.get_learning_state(task_id))
+    except FileNotFoundError as exc:
+        return R.error(str(exc), code=404)
+    except ValueError as exc:
+        return R.error(str(exc), code=400)
+
+
+def _save_state(task_id: str, data: LearningStateUpdateRequest):
+    from app.services import learning_state
+
+    try:
+        payload = data.model_dump(exclude_none=True)
+        return R.success(learning_state.update_learning_state(task_id, payload))
+    except FileNotFoundError as exc:
+        return R.error(str(exc), code=404)
+    except ValueError as exc:
+        return R.error(str(exc), code=400)
+
+
+@router.get("/learning/notes/{task_id}/state")
+@router.get("/notes/{task_id}/learning-state")
+def get_note_learning_state(task_id: str):
+    return _get_state(task_id)
+
+
+@router.put("/learning/notes/{task_id}/state")
+@router.post("/learning/notes/{task_id}/state")
+@router.put("/notes/{task_id}/learning-state")
+@router.post("/notes/{task_id}/learning-state")
+def save_note_learning_state(task_id: str, data: LearningStateUpdateRequest):
+    return _save_state(task_id, data)
+
+
+@router.get("/learning/review-bank")
+def get_learning_review_bank(
+    kind: str = "all",
+    status: str = "pending",
+    limit: int = 100,
+    include_archived: bool = False,
+):
+    from app.services import learning_state
+
+    try:
+        return R.success(
+            learning_state.query_review_bank(
+                kind=kind,
+                status=status,
+                limit=limit,
+                include_archived=include_archived,
+            )
+        )
+    except ValueError as exc:
+        return R.error(str(exc), code=400)
+
+
+@router.post("/learning/review-bank/practice")
+def submit_review_quiz_practice(data: ReviewQuizPracticeRequest):
+    from app.services import learning_state
+
+    try:
+        result = learning_state.record_quiz_practice(
+            data.task_id,
+            data.section_id,
+            selected_key=data.selected_key,
+            mastered=data.mastered,
+        )
+        return R.success(result)
+    except FileNotFoundError as exc:
+        return R.error(str(exc), code=404)
+    except ValueError as exc:
+        return R.error(str(exc), code=400)
+
+
+@router.post("/learning/review-bank/pit-status")
+def update_review_pit_status(data: ReviewPitStatusRequest):
+    from app.services import learning_state
+
+    try:
+        result = learning_state.set_pit_mastered(
+            data.task_id,
+            data.section_id,
+            data.annotation_id,
+            mastered=data.mastered,
+        )
+        return R.success(result)
+    except FileNotFoundError as exc:
+        return R.error(str(exc), code=404)
+    except ValueError as exc:
+        return R.error(str(exc), code=400)

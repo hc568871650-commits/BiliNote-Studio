@@ -36,6 +36,41 @@ function BackendInitDialog({ open, failed = false, lastError = null, onRetry }: 
     setFeedback(ok ? '已复制脱敏日志，分享前请检查个人和业务信息。' : '复制失败，请检查剪贴板权限后重试。')
   }
   if (!open && !failed) return null
+  if (!failed) {
+    return (
+      <main className="startup-skeleton-shell" aria-busy="true" aria-label="正在连接本地服务">
+        <aside className="startup-skeleton-rail" aria-hidden="true">
+          <span className="studio-brand-mark" dangerouslySetInnerHTML={{ __html: studioMarkMarkup }} />
+          <span className="startup-skel-dot" />
+          <span className="startup-skel-dot" />
+          <span className="startup-skel-dot" />
+        </aside>
+        <aside className="startup-skeleton-sidebar" aria-hidden="true">
+          <div className="startup-skel-bar w-24 h-4" />
+          <div className="startup-skel-list">
+            <div className="startup-skel-item" />
+            <div className="startup-skel-item" />
+            <div className="startup-skel-item" />
+            <div className="startup-skel-item" />
+          </div>
+        </aside>
+        <section className="startup-skeleton-main">
+          <div className="startup-skeleton-doc" aria-hidden="true">
+            <div className="startup-skel-bar w-2/3 h-7" />
+            <div className="startup-skel-bar w-1/3 h-3.5" />
+            <div className="startup-skel-block" />
+            <div className="startup-skel-bar w-full h-3.5" />
+            <div className="startup-skel-bar w-5/6 h-3.5" />
+            <div className="startup-skel-bar w-4/6 h-3.5" />
+          </div>
+          <div className="startup-skeleton-pill" role="status">
+            <span className="startup-pulse" aria-hidden="true" />
+            <span>正在连接本地服务…</span>
+          </div>
+        </section>
+      </main>
+    )
+  }
   return <main className="startup-screen">
     <div className="startup-brand"><span className="studio-brand-mark" aria-hidden="true" dangerouslySetInnerHTML={{ __html: studioMarkMarkup }} /><span>BiliNote Studio</span><span className="startup-brand-caption">学习工作台</span></div>
     <section className="startup-card" aria-labelledby="startup-title" aria-busy={!failed}>

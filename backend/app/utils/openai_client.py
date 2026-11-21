@@ -7,12 +7,16 @@
     `httpx.LocalProtocolError: Illegal header value b'Bearer '` 这种天书报错。
     在入口挡掉，给用户「xxx 的 API Key 未配置」这种能看懂的提示。
 """
-from typing import Optional
+from __future__ import annotations
 
-from openai import OpenAI
+from typing import TYPE_CHECKING, Optional
 
+from app.core.lazy import lazy_attr
 from app.services.proxy_config_manager import ProxyConfigManager
 from app.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from openai import OpenAI
 
 logger = get_logger(__name__)
 
@@ -42,4 +46,5 @@ def build_openai_client(
         kwargs["http_client"] = httpx.Client(proxy=proxy_url, timeout=timeout or 600.0)
         logger.info(f"OpenAI 客户端走代理: {proxy_url}")
 
+    OpenAI = lazy_attr("openai", "OpenAI", feature_hint="OpenAI 兼容模型请求")
     return OpenAI(**kwargs)

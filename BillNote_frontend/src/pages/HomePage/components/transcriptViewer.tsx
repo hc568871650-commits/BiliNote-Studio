@@ -2,10 +2,10 @@
 
 import { useTaskStore } from '@/store/taskStore'
 import { scrollMotion } from '@/utils/motion'
+import { findSegmentIndexForTime, formatMediaTime } from '@/utils/mediaTranscriptSync'
 import { useEffect, useState, useRef } from 'react'
 import { Play, ScrollText, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { noteMediaStreamUrl } from '@/services/note'
 
 interface Segment {
   start: number
@@ -24,71 +24,70 @@ interface Task {
 const TranscriptViewer = ({
   onClose,
   highlightTime,
-  taskId,
-  baseURL = '',
+  playbackTime,
+  mediaAvailable = false,
+  playerOpen = false,
+  onSeekTime,
+  onTogglePlayer,
 }: {
   onClose?: () => void
   highlightTime?: number | null
+  playbackTime?: number | null
   taskId?: string
   baseURL?: string
+  mediaAvailable?: boolean
+  playerOpen?: boolean
+  onSeekTime?: (seconds: number) => void
+  onTogglePlayer?: () => void
 }) => {
   const getCurrentTask = useTaskStore(state => state.getCurrentTask)
   const currentTaskId = useTaskStore(state => state.currentTaskId)
   const [task, setTask] = useState<Task | null>(null)
   const [activeSegment, setActiveSegment] = useState<number | null>(null)
-  const [mediaOpen, setMediaOpen] = useState(false)
-  const [mediaUnavailable, setMediaUnavailable] = useState(false)
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([])
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const effectiveTaskId = taskId || currentTaskId || ''
-  const mediaUrl = effectiveTaskId ? noteMediaStreamUrl(baseURL, effectiveTaskId) : ''
+  const lastScrolledIdxRef = useRef<number | null>(null)
 
   useEffect(() => {
     setTask(getCurrentTask())
     setActiveSegment(null)
-    setMediaUnavailable(false)
+    lastScrolledIdxRef.current = null
   }, [currentTaskId, getCurrentTask])
 
-  const seekMedia = (seconds: number, autoPlay = true) => {
-    const video = videoRef.current
-    if (!video || mediaUnavailable) return
-    try {
-      video.currentTime = Math.max(0, seconds)
-      if (autoPlay) void video.play().catch(() => undefined)
-    } catch { /* Media metadata may still be loading. */ }
-  }
+  const segments = task?.transcript?.segments || []
 
+  // 响应外部显式跳转时间点（点击笔记时间戳或引用跳转）
   useEffect(() => {
     if (highlightTime == null) return
-    const list = task?.transcript?.segments || []
-    const matchedIndex = list.findIndex(seg => seg.end >= highlightTime)
+    const matchedIndex = findSegmentIndexForTime(segments, highlightTime)
     if (matchedIndex >= 0) {
       setActiveSegment(matchedIndex)
+      lastScrolledIdxRef.current = matchedIndex
       segmentRefs.current[matchedIndex]?.scrollIntoView({ behavior: scrollMotion(), block: 'nearest' })
     }
-    if (!mediaUnavailable && mediaUrl) {
-      setMediaOpen(true)
-      requestAnimationFrame(() => seekMedia(highlightTime, true))
-    }
-  }, [highlightTime, task, mediaUnavailable, mediaUrl])
+  }, [highlightTime, segments])
 
-  const formatTime = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60)
-    const secs = Math.floor(seconds % 60)
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
+  // 响应底部原声回看条实时播放进度，平滑跟随高亮对应转写段
+  useEffect(() => {
+    if (playbackTime == null) return
+    const matchedIndex = findSegmentIndexForTime(segments, playbackTime)
+    if (matchedIndex >= 0 && matchedIndex !== lastScrolledIdxRef.current) {
+      setActiveSegment(matchedIndex)
+      lastScrolledIdxRef.current = matchedIndex
+      segmentRefs.current[matchedIndex]?.scrollIntoView({ behavior: scrollMotion(), block: 'nearest' })
+    }
+  }, [playbackTime, segments])
 
   const handleSegmentClick = (index: number, start: number) => {
     setActiveSegment(index)
+    lastScrolledIdxRef.current = index
     segmentRefs.current[index]?.scrollIntoView({
       behavior: scrollMotion(),
       block: 'nearest',
     })
-    if (mediaOpen && !mediaUnavailable) seekMedia(start, true)
+    onSeekTime?.(start)
   }
 
-  const segments = task?.transcript?.segments || []
-  const totalDuration = segments.length > 0 ? formatTime(segments[segments.length - 1]?.end || 0) : ''
+  const totalDuration = segments.length > 0 ? formatMediaTime(segments[segments.length - 1]?.end || 0) : ''
 
   return (
     <aside className="transcript-viewer select-text flex h-full min-h-0 w-full flex-col bg-[var(--surface-page)]" aria-label="原文参照">
@@ -101,13 +100,13 @@ const TranscriptViewer = ({
           </span>
         )}
         <div className="flex-1" />
-        {mediaUrl && !mediaUnavailable && (
+        {mediaAvailable && onTogglePlayer && (
           <button
             type="button"
-            aria-pressed={mediaOpen}
-            title={mediaOpen ? '收起原片播放器' : '展开本地原片回看'}
-            aria-label={mediaOpen ? '收起原片播放器' : '展开本地原片回看'}
-            onClick={() => setMediaOpen(open => !open)}
+            aria-pressed={playerOpen}
+            title={playerOpen ? '收起原声回看条' : '展开原声回看条'}
+            aria-label={playerOpen ? '收起原声回看条' : '展开原声回看条'}
+            onClick={onTogglePlayer}
           >
             <Play size={13} strokeWidth={1.7} aria-hidden="true" />
           </button>
@@ -118,59 +117,45 @@ const TranscriptViewer = ({
           </button>
         )}
       </header>
-      {mediaOpen && mediaUrl && !mediaUnavailable && (
-        <div className="shrink-0 border-b border-[var(--surface-hairline)] bg-black/90 p-2">
-          <video
-            ref={videoRef}
-            controls
-            preload="metadata"
-            src={mediaUrl}
-            className="max-h-48 w-full rounded-lg bg-black"
-            onLoadedMetadata={() => {
-              if (highlightTime != null) seekMedia(highlightTime, false)
-            }}
-            onError={() => {
-              setMediaUnavailable(true)
-              setMediaOpen(false)
-            }}
-          />
-        </div>
-      )}
       {!segments.length ? (
         <div className="flex flex-1 items-center justify-center p-4 text-xs text-muted-foreground">暂无转写内容</div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2">
           <div className="space-y-1">
-            {segments.map((segment, index) => (
-              <button
-                key={index}
-                type="button"
-                data-transcript-start={segment.start}
-                data-transcript-end={segment.end}
-                ref={el => { segmentRefs.current[index] = el }}
-                aria-pressed={activeSegment === index}
-                className={cn(
-                  'group flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-[var(--surface-hover)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--primary)]',
-                  activeSegment === index && 'bg-[var(--surface-selected)]',
-                )}
-                onClick={() => handleSegmentClick(index, segment.start)}
-              >
-                <span className={cn(
-                  'mt-0.5 w-11 shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground',
-                  activeSegment === index && 'font-medium text-[var(--primary)]',
-                )}>
-                  {formatTime(segment.start)}
-                </span>
-                <span className="min-w-0 flex-1 text-[13px] leading-relaxed text-foreground">
-                  {segment.speaker && (
-                    <span className="mr-1.5 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-foreground">
-                      {segment.speaker}
-                    </span>
+            {segments.map((segment, index) => {
+              const isActive = activeSegment === index
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  data-transcript-start={segment.start}
+                  data-transcript-end={segment.end}
+                  data-transcript-active={isActive ? 'true' : undefined}
+                  ref={el => { segmentRefs.current[index] = el }}
+                  aria-pressed={isActive}
+                  className={cn(
+                    'group flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-[var(--surface-hover)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--primary)]',
+                    isActive && 'bg-[color-mix(in_srgb,var(--reading-accent,var(--primary))_11%,transparent)] ring-1 ring-[color-mix(in_srgb,var(--reading-accent,var(--primary))_24%,transparent)]',
                   )}
-                  {segment.text}
-                </span>
-              </button>
-            ))}
+                  onClick={() => handleSegmentClick(index, segment.start)}
+                >
+                  <span className={cn(
+                    'mt-0.5 w-11 shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground',
+                    isActive && 'font-semibold text-[var(--reading-accent,var(--primary))]',
+                  )}>
+                    {formatMediaTime(segment.start)}
+                  </span>
+                  <span className="min-w-0 flex-1 text-[13px] leading-relaxed text-foreground">
+                    {segment.speaker && (
+                      <span className="mr-1.5 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-foreground">
+                        {segment.speaker}
+                      </span>
+                    )}
+                    {segment.text}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         </div>
       )}

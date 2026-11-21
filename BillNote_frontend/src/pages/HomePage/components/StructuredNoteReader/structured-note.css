@@ -1153,6 +1153,38 @@
   text-decoration-color: color-mix(in oklab, var(--ui-muted) 55%, transparent);
 }
 
+/* 跨路由精准锚点定位后的 1.6s 动态强调色柔光脉冲高亮（不创建隔离合成组） */
+.structured-note-shell .note-quiz-anchor {
+  position: relative;
+}
+
+.structured-note-shell .anchor-pulse-highlight {
+  border-radius: 12px;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--app-accent) 46%, transparent);
+  background: color-mix(in oklab, var(--app-accent) 10%, transparent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-reduced-motion="true"]) .structured-note-shell .anchor-pulse-highlight {
+    animation: structured-anchor-pulse 1.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+@keyframes structured-anchor-pulse {
+  0% {
+    background: color-mix(in oklab, var(--app-accent) 18%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--app-accent) 52%, transparent);
+  }
+  65% {
+    background: color-mix(in oklab, var(--app-accent) 9%, transparent);
+    box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--app-accent) 26%, transparent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .structured-note-shell .morph-quiz,
   .structured-note-shell .quiz-full-layer,

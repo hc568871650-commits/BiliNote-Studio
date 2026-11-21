@@ -34,10 +34,66 @@ export default function ReadingSelection({ children, taskId, versionId, title, o
       el.querySelector('button')?.setAttribute('aria-pressed', String(checked))
     })
   }, [selected])
+  const popoverRef = useRef<HTMLDivElement>(null)
+  const pointerOriginRef = useRef<{ x: number; y: number } | null>(null)
+  const pendingFrameRef = useRef<number | null>(null)
+  const cancelPendingCheck = () => {
+    if (pendingFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingFrameRef.current)
+      pendingFrameRef.current = null
+    }
+  }
   useEffect(() => {
-    const dismiss = () => setSelection(null)
+    cancelPendingCheck()
+    setSelection(null)
+    setSelected([])
+  }, [taskId, versionId])
+  useEffect(() => {
+    const dismiss = () => {
+      cancelPendingCheck()
+      setSelection(null)
+    }
+    const onSelectionChange = () => {
+      const sel = window.getSelection()
+      if (
+        !sel
+        || sel.isCollapsed
+        || !sel.toString().trim()
+        || !container.current?.contains(sel.anchorNode)
+        || !container.current.contains(sel.focusNode)
+      ) {
+        cancelPendingCheck()
+        setSelection(null)
+      }
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (target && popoverRef.current?.contains(target)) {
+        pointerOriginRef.current = null
+        return
+      }
+      pointerOriginRef.current = { x: event.clientX, y: event.clientY }
+      cancelPendingCheck()
+      setSelection(null)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') dismiss()
+    }
     window.addEventListener('scroll', dismiss, true)
-    return () => window.removeEventListener('scroll', dismiss, true)
+    window.addEventListener('resize', dismiss)
+    window.addEventListener('blur', dismiss)
+    document.addEventListener('selectionchange', onSelectionChange)
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      cancelPendingCheck()
+      window.removeEventListener('scroll', dismiss, true)
+      window.removeEventListener('resize', dismiss)
+      window.removeEventListener('blur', dismiss)
+      document.removeEventListener('selectionchange', onSelectionChange)
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+    }
   }, [])
   const addBlocks = (openChat: boolean) => {
     const blocks = Array.from(container.current?.querySelectorAll<HTMLElement>('[data-note-block]') || []).filter(el => selected.includes(el.dataset.noteBlock || ''))
@@ -55,26 +111,48 @@ export default function ReadingSelection({ children, taskId, versionId, title, o
   return <div ref={container} data-note-task={taskId} data-note-version={versionId} className={`reading-selection ${selected.length ? 'reading-selection--active' : ''}`}
     onKeyDown={event => { if (event.key === 'Escape') { setSelection(null); setSelected([]) } }}
     onMouseUp={event => {
-      if ((event.target as HTMLElement).closest('button')) return
-      const sel = window.getSelection()
-      if (!sel || sel.isCollapsed || !container.current?.contains(sel.anchorNode) || !container.current.contains(sel.focusNode)) { setSelection(null); return }
-      const text = sel.toString().trim()
-      if (!text) return
-      const range = sel.getRangeAt(0)
-      const rect = range.getBoundingClientRect()
-      const start = range.startContainer
-      const block = (start instanceof HTMLElement ? start : start.parentElement)?.closest<HTMLElement>('[data-note-block]')
-      // A mouse selection can span blocks. Keep a bounded anchor excerpt from
-      // its first block while retaining the complete selected text for the chat.
-      let sourceText: string | undefined
-      if (block && !block.contains(range.endContainer)) {
-        const first = range.cloneRange()
-        first.setEnd(block, block.childNodes.length)
-        const fragment = first.cloneContents()
-        fragment.querySelectorAll('[data-block-pick]').forEach(control => control.remove())
-        sourceText = fragment.textContent?.trim().slice(0, 512) || undefined
+      const target = event.target as HTMLElement | null
+      if (target && popoverRef.current?.contains(target)) return
+      const origin = pointerOriginRef.current
+      pointerOriginRef.current = null
+      const dragged = origin
+        ? Math.hypot(event.clientX - origin.x, event.clientY - origin.y) >= 4
+        : false
+      // A plain single click (without dragging or multi-click word selection) is
+      // intended to clear/interact, never to re-open a stale selection popover.
+      if (!dragged && event.detail < 2) {
+        cancelPendingCheck()
+        setSelection(null)
+        return
       }
-      setSelection({ text, blockId: block?.dataset.noteBlock, sourceText, x: Math.max(8, Math.min(rect.left, window.innerWidth - 320)), y: Math.max(8, rect.top - 44) })
+      cancelPendingCheck()
+      pendingFrameRef.current = window.requestAnimationFrame(() => {
+        pendingFrameRef.current = null
+        const sel = window.getSelection()
+        if (!sel || sel.isCollapsed || !container.current?.contains(sel.anchorNode) || !container.current.contains(sel.focusNode)) { setSelection(null); return }
+        const anchorEl = sel.anchorNode instanceof HTMLElement ? sel.anchorNode : sel.anchorNode?.parentElement
+        const focusEl = sel.focusNode instanceof HTMLElement ? sel.focusNode : sel.focusNode?.parentElement
+        if (anchorEl?.closest('[data-block-pick]') && focusEl?.closest('[data-block-pick]')) { setSelection(null); return }
+        const text = sel.toString().trim()
+        if (!text) { setSelection(null); return }
+        const range = sel.getRangeAt(0)
+        const rect = range.getBoundingClientRect()
+        if (!rect.width && !rect.height) { setSelection(null); return }
+        const start = range.startContainer
+        const block = (start instanceof HTMLElement ? start : start.parentElement)?.closest<HTMLElement>('[data-note-block]')
+        // A mouse selection can span blocks. Keep a bounded anchor excerpt from
+        // its first block while retaining the complete selected text for the chat.
+        let sourceText: string | undefined
+        if (block && !block.contains(range.endContainer)) {
+          const first = range.cloneRange()
+          first.setEnd(block, block.childNodes.length)
+          const fragment = first.cloneContents()
+          fragment.querySelectorAll('[data-block-pick]').forEach(control => control.remove())
+          sourceText = fragment.textContent?.trim().slice(0, 512) || undefined
+        }
+        const top = rect.top > 56 ? rect.top - 44 : Math.min(window.innerHeight - 48, rect.bottom + 8)
+        setSelection({ text, blockId: block?.dataset.noteBlock, sourceText, x: Math.max(8, Math.min(rect.left, window.innerWidth - 240)), y: Math.max(8, top) })
+      })
     }}
     onClick={event => {
       const button = (event.target as HTMLElement).closest<HTMLElement>('[data-block-pick]')
@@ -90,7 +168,7 @@ export default function ReadingSelection({ children, taskId, versionId, title, o
       if (texts.length) onRefine(texts)
     }}>重新蒸馏</button>}<button type="button" onClick={() => setSelected([])}>取消</button></div></div>}
     {children}
-    {selection && <div className="reading-selection-popover" style={{ left: selection.x, top: selection.y }} role="toolbar" aria-label="选中文字操作" onMouseDown={event => event.preventDefault()}>
+    {selection && <div ref={popoverRef} className="reading-selection-popover" style={{ left: selection.x, top: selection.y }} role="toolbar" aria-label="选中文字操作" onMouseDown={event => event.preventDefault()}>
       <button type="button" onClick={() => { if (onQuote([quote(selection.text, selection.blockId, selection.sourceText)], true)) { setSelection(null); window.getSelection()?.removeAllRanges() } }}>问 AI 助手</button>
       <button type="button" onClick={() => { if (onQuote([quote(selection.text, selection.blockId, selection.sourceText)], false)) { setSelection(null); window.getSelection()?.removeAllRanges() } }}>加入引用</button>
     </div>}

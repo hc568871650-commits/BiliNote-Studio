@@ -11,9 +11,15 @@ import { upgradePreview, upgradePreviewAdapter, loadUpgradePreview, upgradeChatS
 import { distillationPreview, distillationPreviewAdapter, loadDistillationPreview } from './distillationPreviewAdapter'
 import { generationUsagePreview, generationUsagePreviewAdapter, loadGenerationUsagePreview } from './generationUsagePreviewAdapter'
 import { desktopExperiencePreview, desktopExperiencePreviewAdapter, loadDesktopExperiencePreview } from './desktopExperiencePreview'
+import { setCustomJobStreamConnector } from '@/services/jobs'
+import { createPreviewJobStreamConnector } from './previewJobsMock'
 
 // This entry is never imported by main.tsx. All API requests use synthetic local data.
+const useSyntheticPreviewAdapter = !desktopExperiencePreview && !generationUsagePreview && !distillationPreview && !upgradePreview && !graphPreview
 request.defaults.adapter = desktopExperiencePreview ? desktopExperiencePreviewAdapter : generationUsagePreview ? generationUsagePreviewAdapter : distillationPreview ? distillationPreviewAdapter : upgradePreview ? upgradePreviewAdapter : graphPreview ? graphPreviewAdapter : previewAdapter
+if (useSyntheticPreviewAdapter) {
+  setCustomJobStreamConnector(createPreviewJobStreamConnector())
+}
 setChatStreamTransport(upgradePreview ? upgradeChatStream : graphPreview ? async () => { throw new Error('此环境只验证整理流程，请返回交互预览试用阅读聊天') } : previewChatStream)
 const { useTaskStore } = await import('@/store/taskStore')
 await useTaskStore.persist.rehydrate()

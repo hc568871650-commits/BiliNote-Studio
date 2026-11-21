@@ -43,6 +43,12 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-text) 5%, transparent);
 }
+/* Keep fixed-width row selects aligned with settings rows instead of stretching to 100% and crushing the label column. */
+.api-settings .settings-row > .choice-trigger,
+.api-settings .settings-row > .choice-trigger.settings-fixed-control {
+  width: var(--settings-control-width);
+  max-width: 100%;
+}
 .dark .api-settings .choice-trigger { background: color-mix(in srgb, #ffffff 5.5%, transparent); }
 .api-settings .choice-trigger:hover:not(:disabled) { background: var(--surface-hover); }
 .api-input-action { display: flex; align-items: center; gap: 6px; min-width: 0; }

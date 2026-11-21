@@ -20,6 +20,7 @@ def _default_state() -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "quiz_attempts": {},
         "pinned_annotations": {},
+        "pit_statuses": {},
         "checklist_states": {},
         "updated_at": None,
     }
@@ -50,6 +51,8 @@ def _read_state_file(path: Path) -> dict[str, Any]:
         base["quiz_attempts"] = dict(raw["quiz_attempts"])
     if isinstance(raw.get("pinned_annotations"), dict):
         base["pinned_annotations"] = dict(raw["pinned_annotations"])
+    if isinstance(raw.get("pit_statuses"), dict):
+        base["pit_statuses"] = dict(raw["pit_statuses"])
     if isinstance(raw.get("checklist_states"), dict):
         base["checklist_states"] = {str(k): bool(v) for k, v in raw["checklist_states"].items()}
     base["updated_at"] = raw.get("updated_at")
@@ -82,7 +85,7 @@ def update_learning_state(task_id: str, payload: dict[str, Any]) -> dict[str, An
                     continue
                 if not isinstance(entry, dict):
                     continue
-                selected = str(entry.get("selected_key") or "").strip().upper()[:2]
+                selected = str(entry.get("selected_key") or entry.get("picked_key") or "").strip().upper()[:2]
                 correct = str(entry.get("correct_key") or "").strip().upper()[:2]
                 if not selected:
                     state["quiz_attempts"].pop(sec_id, None)
@@ -90,13 +93,19 @@ def update_learning_state(task_id: str, payload: dict[str, Any]) -> dict[str, An
                 prev = state["quiz_attempts"].get(sec_id) or {}
                 prev_count = int(prev.get("attempt_count") or 0)
                 is_correct = bool(entry["is_correct"]) if "is_correct" in entry else (bool(correct) and selected == correct)
+                ever_wrong = bool(prev.get("ever_wrong")) or (not is_correct)
+                mastered = bool(entry["mastered"]) if "mastered" in entry else (False if not is_correct else bool(prev.get("mastered", False)))
                 state["quiz_attempts"][sec_id] = {
                     "section_id": sec_id,
                     "selected_key": selected,
                     "correct_key": correct,
                     "is_correct": is_correct,
+                    "ever_wrong": ever_wrong,
+                    "mastered": mastered,
                     "attempt_count": prev_count + 1,
-                    "short_prompt": str(entry.get("short_prompt") or prev.get("short_prompt") or "")[:200],
+                    "review_count": int(prev.get("review_count") or 0),
+                    "last_reviewed_at": prev.get("last_reviewed_at"),
+                    "short_prompt": str(entry.get("short_prompt") or entry.get("question") or prev.get("short_prompt") or "")[:200],
                     "updated_at": now,
                 }
 
@@ -174,18 +183,158 @@ def _load_latest_structured(folder: Path, task: dict[str, Any]) -> tuple[str | N
     return ver_id, None
 
 
-def query_review_bank(*, kind: str = "all", limit: int = 100, include_archived: bool = False) -> dict[str, Any]:
+def _load_note_manifest_and_structured(task_id: str) -> tuple[Path, dict[str, Any] | None]:
+    folder = note_storage._note_dir(task_id)
+    manifest_path = folder / "_meta" / "manifest.json"
+    if not manifest_path.is_file() or manifest_path.is_symlink():
+        return folder, None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        task = manifest.get("task") or {}
+        _, structured = _load_latest_structured(folder, task)
+        return folder, structured
+    except (OSError, ValueError, TypeError):
+        return folder, None
+
+
+def record_quiz_practice(
+    task_id: str,
+    section_id: str,
+    *,
+    selected_key: str | None = None,
+    mastered: bool | None = None,
+) -> dict[str, Any]:
+    """在复习库中原位重练错题或切换掌握状态。"""
+    sec_id = str(section_id or "").strip()
+    if not sec_id:
+        raise ValueError("section_id 不能为空")
+    with note_storage.LOCK:
+        path = _state_path(task_id)
+        state = _read_state_file(path)
+        _, structured = _load_note_manifest_and_structured(task_id)
+        quiz_meta: dict[str, Any] = {}
+        if structured:
+            for sec in structured.get("sections") or []:
+                if isinstance(sec, dict) and str(sec.get("id") or "") == sec_id:
+                    if isinstance(sec.get("quiz"), dict):
+                        quiz_meta = sec["quiz"]
+                    break
+
+        prev = state["quiz_attempts"].get(sec_id) or {}
+        now = _now_iso()
+        correct_key = str(quiz_meta.get("correct_key") or prev.get("correct_key") or "").strip().upper()[:2]
+        picked = str(selected_key).strip().upper()[:2] if selected_key is not None and str(selected_key).strip() else str(prev.get("selected_key") or "").strip().upper()[:2]
+        is_correct = bool(correct_key) and picked == correct_key if selected_key is not None else bool(prev.get("is_correct", False))
+        ever_wrong = bool(prev.get("ever_wrong")) or (prev.get("is_correct") is False) or (not is_correct)
+        if mastered is not None:
+            next_mastered = bool(mastered)
+        elif selected_key is not None and not is_correct:
+            next_mastered = False
+        else:
+            next_mastered = bool(prev.get("mastered", False))
+
+        updated_entry = {
+            "section_id": sec_id,
+            "selected_key": picked,
+            "correct_key": correct_key,
+            "is_correct": is_correct,
+            "ever_wrong": ever_wrong,
+            "mastered": next_mastered,
+            "attempt_count": int(prev.get("attempt_count") or 0) + (1 if selected_key is not None else 0),
+            "review_count": int(prev.get("review_count") or 0) + 1,
+            "last_reviewed_at": now,
+            "short_prompt": str(quiz_meta.get("short_prompt") or prev.get("short_prompt") or "")[:200],
+            "updated_at": now,
+        }
+        state["quiz_attempts"][sec_id] = updated_entry
+        state["updated_at"] = now
+        path.parent.mkdir(parents=True, exist_ok=True)
+        note_storage._atomic_json(path, state)
+
+        return {
+            "task_id": task_id,
+            "section_id": sec_id,
+            "quiz_id": sec_id,
+            "selected_key": picked,
+            "correct_key": correct_key,
+            "is_correct": is_correct,
+            "mastered": next_mastered,
+            "review_count": updated_entry["review_count"],
+            "last_reviewed_at": now,
+            "explanation": str(quiz_meta.get("explanation") or ""),
+        }
+
+
+def set_pit_mastered(
+    task_id: str,
+    section_id: str,
+    annotation_id: str,
+    *,
+    mastered: bool,
+) -> dict[str, Any]:
+    """切换高频避坑条目的掌握状态。"""
+    sec_id = str(section_id or "").strip()
+    anno_id = str(annotation_id or "").strip()
+    if not sec_id or not anno_id:
+        raise ValueError("section_id 和 annotation_id 不能为空")
+    key = f"{sec_id}:{anno_id}"
+    with note_storage.LOCK:
+        path = _state_path(task_id)
+        state = _read_state_file(path)
+        prev = (state.get("pit_statuses") or {}).get(key) or {}
+        now = _now_iso()
+        entry = {
+            "section_id": sec_id,
+            "annotation_id": anno_id,
+            "mastered": bool(mastered),
+            "review_count": int(prev.get("review_count") or 0) + 1,
+            "last_reviewed_at": now,
+            "updated_at": now,
+        }
+        state.setdefault("pit_statuses", {})[key] = entry
+        state["updated_at"] = now
+        path.parent.mkdir(parents=True, exist_ok=True)
+        note_storage._atomic_json(path, state)
+        return {
+            "task_id": task_id,
+            "section_id": sec_id,
+            "annotation_id": anno_id,
+            "annotation_key": key,
+            **entry,
+        }
+
+
+def query_review_bank(
+    *,
+    kind: str = "all",
+    status: str = "pending",
+    limit: int = 100,
+    include_archived: bool = False,
+) -> dict[str, Any]:
     """Aggregate wrong quiz attempts and pinned/pit annotations across the entire library."""
     if kind not in ("all", "wrong_quiz", "pit", "pinned"):
         raise ValueError("kind 须为 all / wrong_quiz / pit / pinned")
+    if status not in ("pending", "mastered", "all"):
+        raise ValueError("status 须为 pending / mastered / all")
     if type(limit) is not int or not 1 <= limit <= 500:
         raise ValueError("limit 须为 1 到 500 的整数")
 
     wrong_quizzes: list[dict[str, Any]] = []
     pit_annotations: list[dict[str, Any]] = []
+    pending_total = 0
+    mastered_total = 0
     root = note_storage.ROOT
     if not root.exists():
-        return {"wrong_quizzes": [], "pit_annotations": [], "counts": {"wrong_quizzes": 0, "pit_annotations": 0}}
+        return {
+            "wrong_quizzes": [],
+            "pit_annotations": [],
+            "counts": {
+                "wrong_quizzes": 0,
+                "pit_annotations": 0,
+                "pending_total": 0,
+                "mastered_total": 0,
+            },
+        }
 
     for folder in sorted(root.iterdir(), key=lambda p: p.name):
         if not folder.is_dir() or folder.is_symlink() or "__" not in folder.name:
@@ -222,7 +371,19 @@ def query_review_bank(*, kind: str = "all", limit: int = 100, include_archived: 
         # Collect wrong quizzes
         if kind in ("all", "wrong_quiz"):
             for sec_id, attempt in (state.get("quiz_attempts") or {}).items():
-                if not isinstance(attempt, dict) or attempt.get("is_correct") is not False:
+                if not isinstance(attempt, dict):
+                    continue
+                ever_wrong = bool(attempt.get("ever_wrong")) or attempt.get("is_correct") is False
+                if not ever_wrong:
+                    continue
+                is_mastered = bool(attempt.get("mastered", False))
+                if is_mastered:
+                    mastered_total += 1
+                else:
+                    pending_total += 1
+                if status == "pending" and is_mastered:
+                    continue
+                if status == "mastered" and not is_mastered:
                     continue
                 sec = sections_by_id.get(sec_id) or {}
                 quiz = sec.get("quiz") if isinstance(sec.get("quiz"), dict) else {}
@@ -231,6 +392,7 @@ def query_review_bank(*, kind: str = "all", limit: int = 100, include_archived: 
                     "version_id": version_id,
                     "note_title": note_title,
                     "section_id": sec_id,
+                    "quiz_id": sec_id,
                     "section_title": str(sec.get("title") or sec_id),
                     "time_ranges": sec.get("time_ranges") or [],
                     "short_prompt": str(quiz.get("short_prompt") or attempt.get("short_prompt") or ""),
@@ -240,13 +402,16 @@ def query_review_bank(*, kind: str = "all", limit: int = 100, include_archived: 
                     "correct_key": quiz.get("correct_key") or attempt.get("correct_key"),
                     "explanation": str(quiz.get("explanation") or ""),
                     "attempt_count": int(attempt.get("attempt_count") or 1),
+                    "mastered": is_mastered,
+                    "review_count": int(attempt.get("review_count") or 0),
+                    "last_reviewed_at": attempt.get("last_reviewed_at"),
                     "updated_at": attempt.get("updated_at") or state.get("updated_at") or "",
                 })
 
         # Collect pit annotations & pinned annotations
         if kind in ("all", "pit", "pinned"):
             pinned_map = state.get("pinned_annotations") or {}
-            seen_keys: set[str] = set()
+            pit_status_map = state.get("pit_statuses") or {}
             if structured:
                 for sec in structured.get("sections") or []:
                     if not isinstance(sec, dict):
@@ -259,6 +424,7 @@ def query_review_bank(*, kind: str = "all", limit: int = 100, include_archived: 
                         anno_id = str(anno["id"])
                         key = f"{sec_id}:{anno_id}"
                         pinned_entry = pinned_map.get(key)
+                        pit_status = pit_status_map.get(key) or {}
                         is_pinned = bool(pinned_entry)
                         is_pit = str(anno.get("kind") or "") == "pit"
                         if kind == "pinned" and not is_pinned:
@@ -267,7 +433,15 @@ def query_review_bank(*, kind: str = "all", limit: int = 100, include_archived: 
                             continue
                         if kind == "all" and not (is_pinned or is_pit):
                             continue
-                        seen_keys.add(key)
+                        is_mastered = bool(pit_status.get("mastered", False))
+                        if is_mastered:
+                            mastered_total += 1
+                        else:
+                            pending_total += 1
+                        if status == "pending" and is_mastered:
+                            continue
+                        if status == "mastered" and not is_mastered:
+                            continue
                         pit_annotations.append({
                             "task_id": task_id,
                             "version_id": version_id,
@@ -282,8 +456,11 @@ def query_review_bank(*, kind: str = "all", limit: int = 100, include_archived: 
                             "timestamp": anno.get("timestamp"),
                             "timestamp_label": str(anno.get("timestamp_label") or ""),
                             "pinned": is_pinned,
+                            "mastered": is_mastered,
+                            "review_count": int(pit_status.get("review_count") or 0),
+                            "last_reviewed_at": pit_status.get("last_reviewed_at"),
                             "note": str((pinned_entry or {}).get("note") or ""),
-                            "updated_at": (pinned_entry or {}).get("updated_at") or task.get("createdAt") or "",
+                            "updated_at": pit_status.get("updated_at") or (pinned_entry or {}).get("updated_at") or task.get("createdAt") or "",
                         })
 
     wrong_quizzes.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
@@ -294,5 +471,7 @@ def query_review_bank(*, kind: str = "all", limit: int = 100, include_archived: 
         "counts": {
             "wrong_quizzes": len(wrong_quizzes),
             "pit_annotations": len(pit_annotations),
+            "pending_total": pending_total,
+            "mastered_total": mastered_total,
         },
     }

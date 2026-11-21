@@ -1,14 +1,14 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-11-15",
+  "updated_at": "2026-11-21",
   "timezone": "America/Los_Angeles",
   "product": "BiliNote Studio",
-  "consolidated_version": "0.1.0-preview.33",
+  "consolidated_version": "0.3.0",
   "source": {
     "branch": "main",
-    "base_release_commit": "9eabee072e88e29fc290bda50b546d073a5b6f3c",
-    "desktop_code_level": "0.1.0-preview.33",
-    "backend_code_level": "0.1.0-preview.31",
+    "base_release_commit": "e256d4c58dcc4df426991c24a7aaf9faa590608c",
+    "desktop_code_level": "0.3.0",
+    "backend_code_level": "0.3.0",
     "version_fields_aligned": true,
     "workspaces": [
       "E:/codex/bilinote",
