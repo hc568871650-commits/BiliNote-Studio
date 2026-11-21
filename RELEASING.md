@@ -1,6 +1,6 @@
 # Studio 源码同步与发行流程
 
-2026-11-21：`0.3.0` 源码已合并至 `main`，涵盖极速冷启动、单实体卷帘悬浮音视频播放器、SSE 后台蒸馏队列、多 P 合集导入、`.srt/.vtt` 字幕直出、旧笔记批量结构化升级与 4 格式外带，详见 [CHANGELOG.md](CHANGELOG.md) 与 [0.3.0 验收报告](docs/0.3.0-real-flow-validation-2026-11-20/VALIDATION_REPORT.md)。
+2026-11-21：`v0.3.0` 已作为正式版公开，详见 [0.3.0 发布说明](docs/releases/0.3.0.md) 与 [0.3.0 验收记录](docs/releases/0.3.0-validation.md)。
 
 历史记录（2026-11-18）：`v0.2.0` 正式里程碑版本已公开，详见 [0.2.0 发布说明](docs/releases/0.2.0.md) 与 [0.2.0 验收记录](docs/releases/0.2.0-validation.md)。
 

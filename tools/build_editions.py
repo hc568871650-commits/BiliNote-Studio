@@ -42,7 +42,27 @@ def backend(args, work):
                      "    uvicorn.run(main.app, host='127.0.0.1', port=int(os.environ['BACKEND_PORT']))\n", encoding="utf-8")
     packages = ["chromadb"]
     distributions = []
-    hidden = ["uvicorn", "fastapi", "starlette"]
+    hidden = [
+        "uvicorn",
+        "fastapi",
+        "starlette",
+        "app.domains.ingestion.collection",
+        "app.domains.ingestion.subtitle_parser",
+        "app.domains.learning.router",
+        "app.domains.media.router",
+        "app.domains.pipeline.runner",
+        "app.jobs.events",
+        "app.jobs.manager",
+        "app.jobs.models",
+        "app.routers.ingestion",
+        "app.routers.jobs",
+        "app.services.media_io",
+        "app.services.learning_state",
+        "app.services.media_stream",
+        "app.services.note_upgrade",
+        "app.services.purpose_preferences",
+        "app.utils.secret_store",
+    ]
     excludes = ["markdown_pdf", "fitz", "pymupdf"] if getattr(args, "installer", False) else []
     if getattr(args, "installer", False):
         excludes += ["app.transcriber.whisper", "app.transcriber.mlx_whisper_transcriber", "faster_whisper", "ctranslate2", "torch", "av"]

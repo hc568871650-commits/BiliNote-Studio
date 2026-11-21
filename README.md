@@ -4,7 +4,7 @@
 
 BiliNote Studio 是基于 [JefferyHcool/BiliNote](https://github.com/JefferyHcool/BiliNote) v2.4.5 独立维护的非官方二次开发桌面版。在保留视频转写、AI 总结、截图、思维导图与导出链路的基础上，全面聚焦**高信噪比结构化阅读、单实体悬浮音视频回看、后台无感蒸馏队列、主动回忆自测复习、课程级批量生产与计划式资料库整理**。
 
-> **版本状态（源码 `v0.3.0`）**：`main` 分支源码已升级至 **`0.3.0`**，完整变更见 [CHANGELOG.md](CHANGELOG.md)，隔离环境真实链路验收见 [0.3.0 验收报告](docs/0.3.0-real-flow-validation-2026-11-20/VALIDATION_REPORT.md)。最新公开预构建 Windows x64 安装包见 [GitHub Releases (`v0.2.0`)](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.2.0)（`0.3.0` 可从源码直接构建或通过 `ui-preview.html` 零配置体验）。
+> **版本状态（`v0.3.0`）**：Windows x64 安装包见 [GitHub Releases (`v0.3.0`)](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.3.0)。详细变更见 [0.3.0 发布说明](docs/releases/0.3.0.md) 与 [CHANGELOG.md](CHANGELOG.md)，实测范围与校验摘要见 [0.3.0 验收记录](docs/releases/0.3.0-validation.md)。
 
 ![深色主工作台、结构化阅读器与单实体卷帘悬浮音视频播放器](doc/showcase/studio-0.3.0/01-floating-player-dark.png)
 
@@ -92,7 +92,15 @@ BiliNote Studio 是基于 [JefferyHcool/BiliNote](https://github.com/JefferyHcoo
 
 ## 开始使用
 
-### 1. 零配置体验 0.3.0 独立 UI 预览
+### 1. Windows 安装（推荐）
+
+前往 [GitHub Releases (`v0.3.0`)](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.3.0) 下载单一 Windows x64 安装包 `BiliNote-Studio-0.3.0-windows-x64-setup.exe`（`74,612,531` 字节）及校验文件 `SHA256SUMS.txt`，核对 SHA-256（`f86a02d549d3e6290ab2390aa7f3dda72e59ea3e34cd408c0005f9c2c3ca95cc`）后运行安装。
+
+- **独立身份与数据分离**：公开安装版应用标识 `com.bilinote.studio`，后端端口 `38484`，用户数据位于 `%LOCALAPPDATA%\BiliNoteStudio`，不覆盖原版 BiliNote，也不会自动导入旧数据库；Studio `0.2.0 → 0.3.0` 覆盖安装自动保留数据。
+- **外部依赖说明**：首次使用视频生成功能需本机已安装 FFmpeg 并配置转写与大模型服务；仅阅读、管理资料或导入 `.srt/.vtt` 字幕不需要 FFmpeg。
+- **公开包裁剪范围**：保留全部阅读/自测/整理与 4 格式导出功能；不内置 FFmpeg、PDF 导出（PyMuPDF）、本地 Whisper 或抖音链接下载。详细说明见 [用户指南](docs/studio/USER_GUIDE.md)。
+
+### 2. 零配置体验 0.3.0 独立 UI 预览
 
 已安装 Node.js 与 pnpm 时，可在仓库根目录直接体验 `0.3.0` 全部前端交互（含单实体卷帘悬浮播放器、多 P 合集导入、字幕直出提示、批量结构化升级确认弹窗、导轨数字球队列与复习本重练；使用独立端口与合成数据，不启动后端，零模型费用）：
 
@@ -103,14 +111,6 @@ pnpm dev:warm
 ```
 
 启动后在浏览器访问 `http://127.0.0.1:21483/ui-preview.html`。
-
-### 2. Windows 预构建安装包（最新公开 Release：`v0.2.0`）
-
-如需直接安装免编译版本，可前往 [GitHub Releases (`v0.2.0`)](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.2.0) 下载单一 Windows x64 安装包 `BiliNote-Studio-0.2.0-windows-x64-setup.exe`（`74,750,484` 字节）及校验文件 `SHA256SUMS.txt`（SHA-256：`28e2843f3494f578a0f8f0380eeb3457baa04a802656d063d8c7bf83868e4d93`）。
-
-- **独立身份与数据分离**：公开安装版应用标识 `com.bilinote.studio`，后端端口 `38484`，用户数据位于 `%LOCALAPPDATA%\BiliNoteStudio`，不覆盖原版 BiliNote，也不会自动导入旧数据库。
-- **外部依赖说明**：首次使用视频生成功能需本机已安装 FFmpeg 并配置转写与大模型服务；仅阅读、管理资料或导入 `.srt/.vtt` 字幕不需要 FFmpeg。
-- **公开包裁剪范围**：保留全部阅读/自测/整理与 4 格式导出功能；不内置 FFmpeg、PDF 导出（PyMuPDF）、本地 Whisper 或抖音链接下载。详细说明见 [用户指南](docs/studio/USER_GUIDE.md)。
 
 ### 3. 从源码开发或构建 `0.3.0`
 
@@ -132,6 +132,7 @@ pnpm dev:warm
 
 ## 文档与上游致谢
 
+- [0.3.0 发布说明](docs/releases/0.3.0.md) 与 [0.3.0 验收记录](docs/releases/0.3.0-validation.md)
 - [变更记录（含 `0.3.0` 全量说明）](CHANGELOG.md)
 - [0.3.0 隔离环境真实流程验收报告](docs/0.3.0-real-flow-validation-2026-11-20/VALIDATION_REPORT.md)
 - [0.2.0 发布说明](docs/releases/0.2.0.md) 与 [0.2.0 验收记录](docs/releases/0.2.0-validation.md)
