@@ -1,7 +1,7 @@
 import { memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ArrowRight, ChevronRight, MessageSquare, X } from 'lucide-react'
+import { ArrowRight, BookmarkPlus, Check, ChevronRight, MessageSquare, X } from 'lucide-react'
 import type { ReadingAttachment, ReadingMessage } from '@/store/readingAssistantStore'
 import type { QuotePart } from '@/utils/quoteSource'
 import type { ReadingRecoveryState } from '@/utils/readingRecovery'
@@ -26,8 +26,15 @@ export const ReadingAttachmentCard = memo(function ReadingAttachmentCard({ attac
   </div>
 })
 
-export const ReadingMessageItem = memo(function ReadingMessageItem({ message, recovery = 'unavailable', questionStatus, busy = false, onRestore, onQuote, onImage, onPreview }: AttachmentActions & {
-  message: ReadingMessage; recovery?: ReadingRecoveryState; questionStatus?: ReadingMessage['delivery_status']; busy?: boolean; onRestore?: (id: string) => void
+export const ReadingMessageItem = memo(function ReadingMessageItem({ message, recovery = 'unavailable', questionStatus, busy = false, onRestore, onQuote, onImage, onPreview, onSaveAnnotation, savedAsAnnotation = false, savingAnnotation = false }: AttachmentActions & {
+  message: ReadingMessage
+  recovery?: ReadingRecoveryState
+  questionStatus?: ReadingMessage['delivery_status']
+  busy?: boolean
+  onRestore?: (id: string) => void
+  onSaveAnnotation?: (message: ReadingMessage) => void
+  savedAsAnnotation?: boolean
+  savingAnnotation?: boolean
 }) {
   if (message.role === 'user') {
     const compactQuotes = Boolean(message.attachments && message.attachments.length >= 2 && message.attachments.every(item => item.type === 'quote'))
@@ -49,6 +56,19 @@ export const ReadingMessageItem = memo(function ReadingMessageItem({ message, re
         <WorkProgress entries={message.work_log} events={message.tool_events} />
         {!!message.attachments?.length && <div className="reading-message-attachments">{message.attachments.map(a => <ReadingAttachmentCard key={a.id} attachment={a} onQuote={onQuote} onImage={onImage} onPreview={onPreview} />)}</div>}
         {message.content.trim() ? <ReactMarkdown remarkPlugins={remarkPlugins}>{message.content}</ReactMarkdown> : <p className="reading-chat-error">本轮未收到正文，可恢复原问题后手动重试。</p>}
+        {!message.incomplete && message.content.trim() && onSaveAnnotation && (
+          <div className="mt-2 flex items-center justify-end">
+            <button
+              type="button"
+              disabled={savingAnnotation || savedAsAnnotation}
+              onClick={() => onSaveAnnotation(message)}
+              className="inline-flex items-center gap-1 rounded-full border border-[var(--surface-hairline)] bg-[color-mix(in_srgb,var(--surface-raised)_72%,transparent)] px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-[color-mix(in_srgb,var(--reading-accent,var(--primary))_35%,transparent)] hover:text-[var(--reading-accent,var(--primary))] disabled:opacity-60"
+            >
+              {savedAsAnnotation ? <Check size={12} strokeWidth={1.7} /> : <BookmarkPlus size={12} strokeWidth={1.65} />}
+              <span>{savedAsAnnotation ? '已沉淀为批注' : savingAnnotation ? '正在沉淀…' : '沉淀为正文批注'}</span>
+            </button>
+          </div>
+        )}
         {message.incomplete && recovery !== 'unavailable' && <div className="reading-turn-recovery">
           <span>{questionStatus === 'cancelled' ? '已停止' : questionStatus === 'interrupted' ? '已中断' : '回复未完成'}</span>
           <button type="button" disabled={busy || recovery !== 'ready'}

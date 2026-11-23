@@ -1,10 +1,12 @@
-import { ChevronDown, Folder, FolderOpen, Pencil, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { ChevronDown, Folder, FolderOpen, Layers, Pencil, Plus, Trash2 } from 'lucide-react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { ALL_FOLDER_ID, DEFAULT_FOLDER_ID, useFolderStore } from '@/store/folderStore'
 import { useLibrarySearchStore } from '@/store/librarySearchStore'
 import type { Task } from '@/store/taskStore'
+
+const TopicQuizDialog = lazy(() => import('@/components/TopicQuizDialog'))
 
 interface FolderSidebarProps {
   tasks: Task[]
@@ -19,6 +21,7 @@ const FolderSidebar = ({ tasks, archived, disabled, onCreate, onRename, onDelete
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('bilinote-folder-section-v1') === 'collapsed' } catch { return false }
   })
+  const [quizFolderId, setQuizFolderId] = useState<string | null>(null)
   // A library-wide search folds folders away so results get the height; a click peeks without changing the saved state.
   // Folder-scoped search keeps them visible because switching folders changes the search scope.
   const searching = useLibrarySearchStore(state => Boolean(state.query.trim()) && state.scope === 'all')
@@ -73,14 +76,30 @@ const FolderSidebar = ({ tasks, archived, disabled, onCreate, onRename, onDelete
             <span className="min-w-0 flex-1 truncate">{folder.name}</span>
             <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{count(folder.id)}</span>
           </button>
-          {!disabled && folder.id !== ALL_FOLDER_ID && !system && <div className="flex shrink-0 items-center gap-0.5 pr-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
-            <button type="button" className="library-folder-action" title="重命名文件夹" aria-label={`重命名${folder.name}`} onClick={() => onRename(folder.id)}><Pencil className="h-3 w-3" strokeWidth={1.5} /></button>
-            <button type="button" className="library-folder-action library-folder-action--danger" title="删除文件夹" aria-label={`删除${folder.name}`} onClick={() => onDelete(folder.id)}><Trash2 className="h-3 w-3" strokeWidth={1.5} /></button>
+          {!disabled && folder.id !== ALL_FOLDER_ID && <div className="flex shrink-0 items-center gap-0.5 pr-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+            {count(folder.id) > 0 && (
+              <button type="button" className="library-folder-action" title="专题综合自测" aria-label={`${folder.name}专题综合自测`} onClick={() => setQuizFolderId(folder.id)}><Layers className="h-3 w-3" strokeWidth={1.55} /></button>
+            )}
+            {!system && (
+              <>
+                <button type="button" className="library-folder-action" title="重命名文件夹" aria-label={`重命名${folder.name}`} onClick={() => onRename(folder.id)}><Pencil className="h-3 w-3" strokeWidth={1.5} /></button>
+                <button type="button" className="library-folder-action library-folder-action--danger" title="删除文件夹" aria-label={`删除${folder.name}`} onClick={() => onDelete(folder.id)}><Trash2 className="h-3 w-3" strokeWidth={1.5} /></button>
+              </>
+            )}
           </div>}
         </div>
       })}
     </div>
     </div></div>
+    {quizFolderId && (
+      <Suspense fallback={null}>
+        <TopicQuizDialog
+          open={Boolean(quizFolderId)}
+          initialFolderId={quizFolderId}
+          onOpenChange={open => { if (!open) setQuizFolderId(null) }}
+        />
+      </Suspense>
+    )}
   </aside>
 }
 

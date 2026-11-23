@@ -2,10 +2,16 @@
 
 ## 当前活跃预览
 
-- 无（`0.3.0` 全部预览验证已完成并实装至本地正式版，所有开发预览服务已按任务 ID 精确停止释放）。
+- 无（`0.4.0` 全四阶段 Milestone 4A/4B/4C/4D 隔离验收均已完成，所有本次临时隔离前后端服务均已按任务 ID 精确停止释放）。
 
 ## 已停止历史预览
 
+- **`127.0.0.1:21486/`**（`task-681`）：`0.4.0` Milestone 4C+4D 隔离验收前端（直连 `19486`），已于 2026-11-22 按任务 ID 精确停止，不再可访问。
+- **`127.0.0.1:19486`**（`task-680` / `task-693`）：`0.4.0` Milestone 4C+4D 隔离验收后端（数据目录 `.BiliNote-dev\m4cd-validation-data`），已于 2026-11-22 按任务 ID 精确停止，不再可访问。
+- **`127.0.0.1:21485/`**（`task-377`，PID `32608`）：`0.4.0` Milestone 4B 隔离验收前端（直连 `19485`），已于 2026-11-22 按任务 ID 精确停止，不再可访问。
+- **`127.0.0.1:19485`**（`task-376` / `task-396`，PID `8168` / `484`）：`0.4.0` Milestone 4B 隔离验收后端（数据目录 `.BiliNote-dev\m4b-validation-data`），已于 2026-11-22 按任务 ID 精确停止，不再可访问。
+- **`127.0.0.1:21484/`**（`task-211`，PID `36048`）：`0.4.0` Milestone 4A 隔离验收前端（直连 `19484`），已于 2026-11-22 按任务 ID 精确停止，不再可访问。
+- **`127.0.0.1:19484`**（`task-210` / `task-244`，PID `17576` / `37124`）：`0.4.0` Milestone 4A 隔离验收后端（数据目录 `.BiliNote-dev\m4a-validation-data`），已于 2026-11-22 按任务 ID 精确停止，不再可访问。
 - **`127.0.0.1:21483/ui-preview.html`**（`task-769`，PID `34180`）：`0.3.0` Phase 4 与悬浮播放器深浅双模全量验收完成，已于 2026-11-21 按任务 ID 精确停止，不再可访问。
 - **`127.0.0.1:19483`**（`task-726`，PID `38412`）：`0.3.0` 隔离后端验收服务，已于 2026-11-21 按任务 ID 精确停止，不再可访问。
 - **`127.0.0.1:21483/ui-preview.html`**（`task-257`，PID `11896`）：Phase 1~3 热预览服务，已停止并由 `task-769` 替代。
@@ -16,8 +22,7 @@
 
 ## 正式安装环境
 
-- **正式安装**：`E:\AI-Tools\BiliNote` 经用户明确授权已实装升级至 **`0.3.0`**（`local-release-0.3.0`，桌面 `0.3.0` + 后端 `0.3.0`，默认 `8483` 端口），已完成启动核验（`backend/ffmpeg/db` 全部 `ok`、`11` 篇既有笔记与 `8` 个资料库会话无损、`/api/jobs` / `/api/learning/review-bank` / `/api/ai_purposes` 均在线、`3082` 个受保护文件零变动）。
-- **回滚与历史备份**：
-  - 本次 `0.3.0` 全量实装备份与一键回滚脚本：`e:\agy work\bilinote studio\.BiliNote-dev\local-release-0.3.0\backup`（及 `Rollback.ps1`）。
-  - 历史 `0.2.0` 桌面精修备份：`e:\agy work\bilinote studio\.BiliNote-dev\local-release-0.2.0-ui-polish-20261119\backup`；原 `0.2.0` 基线备份：`e:\agy work\bilinote studio\.BiliNote-dev\local-release-0.2.0\backup`。
+- **正式安装**：`E:\AI-Tools\BiliNote` 经用户明确授权已实装升级并热更新至 **`0.4.0`**（`local-release-0.4.0`，桌面 `0.4.0` + 后端 `0.4.0` + 内置纯 Python BSD 许可 `pypdf 7.1.1`，默认 `8483` 端口），已完成启动核验（`backend/ffmpeg/db` 全部 `ok`、`12` 篇既有笔记无损、`/api/jobs` / `/api/learning/review-bank?status=due` / `/api/ai_purposes` / `/api/system/storage` / `/api/system/playback-cache` / `/api/media/{task_id}/translate-captions` 均在线、`3145` 个受保护文件 SHA256 零变动）。
+- **回滚备份**：
+  - 本次 `0.3.0 → 0.4.0` 全量实装备份与一键回滚脚本：`e:\agy work\bilinote studio\.BiliNote-dev\local-release-0.4.0\backup`（及 `Rollback.ps1`）。历史过期 `0.2.0`/`0.3.0` 构建缓存与中间热更新临时目录已清理释放空间。
 - 后续开发未经另行明确授权仍不得修改、停止、重启或覆盖 `E:\AI-Tools\BiliNote`。

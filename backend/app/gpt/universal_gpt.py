@@ -103,6 +103,8 @@ class UniversalGPT(GPT):
     def create_messages(self, segments: List[TranscriptSegment], **kwargs):
         from app.gpt import prompt_builder as builder_mod
         prompt_mode = kwargs.get('prompt_mode')
+        output_language = kwargs.get('output_language')
+        post_context = kwargs.get('post_context')
         if prompt_mode == 'structured' and callable(getattr(builder_mod, 'generate_structured_prompt', None)):
             content_text = builder_mod.generate_structured_prompt(
                 title=kwargs.get('title'),
@@ -111,6 +113,8 @@ class UniversalGPT(GPT):
                 _format=kwargs.get('_format'),
                 style=kwargs.get('style'),
                 extras=kwargs.get('extras'),
+                output_language=output_language,
+                post_context=post_context,
             )
         elif prompt_mode == 'knowledge_pass1' and callable(getattr(builder_mod, 'generate_knowledge_pass1_prompt', None)):
             content_text = builder_mod.generate_knowledge_pass1_prompt(
@@ -119,6 +123,8 @@ class UniversalGPT(GPT):
                 tags=kwargs.get('tags'),
                 _format=kwargs.get('_format'),
                 extras=kwargs.get('extras'),
+                output_language=output_language,
+                post_context=post_context,
             )
         else:
             content_text = generate_base_prompt(
@@ -128,6 +134,8 @@ class UniversalGPT(GPT):
                 _format=kwargs.get('_format'),
                 style=kwargs.get('style'),
                 extras=kwargs.get('extras'),
+                output_language=output_language,
+                post_context=post_context,
             )
 
         video_img_urls = kwargs.get('video_img_urls', [])
@@ -219,6 +227,8 @@ class UniversalGPT(GPT):
             "format": source._format,
             "style": source.style,
             "extras": source.extras,
+            "output_language": getattr(source, 'output_language', 'zh-CN') or 'zh-CN',
+            "post_context": getattr(source, 'post_context', None) or '',
             "video_img_urls": source.video_img_urls or [],
             "segments": [
                 {
@@ -520,7 +530,10 @@ class UniversalGPT(GPT):
             self._audit_event('checkpoint_reused', phase='summarize', node=f'chunk-{getattr(self, "_chunk_index", 0)}/{node}', depth=depth)
             return cached['text']
         kwargs = dict(title=source.title, tags=source.tags, _format=source._format,
-            style=source.style, extras=source.extras, frame_evidence=getattr(source, 'frame_evidence', None))
+            style=source.style, extras=source.extras,
+            output_language=getattr(source, 'output_language', None),
+            post_context=getattr(source, 'post_context', None),
+            frame_evidence=getattr(source, 'frame_evidence', None))
         if prompt_mode:
             kwargs['prompt_mode'] = prompt_mode
         messages = message_builder(chunk.segments, chunk.image_urls,
@@ -675,8 +688,12 @@ class UniversalGPT(GPT):
             segs = chunks[idx].segments if idx < len(chunks) else source.segment
             cards.extend(self._parse_knowledge_cards(raw, segs, source.title))
 
+        lang_rule = prompt_contract.get_output_language_rule(getattr(source, 'output_language', None)) if callable(getattr(prompt_contract, 'get_output_language_rule', None)) else ''
         batch_prompt = getattr(prompt_contract, 'KNOWLEDGE_CARD_BATCH_MERGE_INSTRUCTIONS', MERGE_PROMPT)
         pass2_prompt = getattr(prompt_contract, 'KNOWLEDGE_CONSOLIDATE_PASS2_INSTRUCTIONS', MERGE_PROMPT)
+        if lang_rule:
+            batch_prompt = batch_prompt + "\n" + lang_rule
+            pass2_prompt = pass2_prompt + "\n" + lang_rule
         max_chars = getattr(self, 'max_merge_text_chars', 24000)
 
         def build_pass2_messages(card_items: list[dict]) -> list:
@@ -684,6 +701,7 @@ class UniversalGPT(GPT):
                 "title": source.title or "",
                 "tags": source.tags or "",
                 "extras": source.extras or "",
+                "output_language": getattr(source, 'output_language', 'zh-CN') or 'zh-CN',
                 "screenshot_enabled": "screenshot" in (source._format or []),
                 "cards": card_items,
             }
@@ -757,6 +775,9 @@ class UniversalGPT(GPT):
         if len(docs) == 1:
             return json.dumps(docs[0], ensure_ascii=False)
         merge_inst = getattr(prompt_contract, 'TUTORIAL_STRUCTURED_MERGE_INSTRUCTIONS', MERGE_PROMPT)
+        lang_rule = prompt_contract.get_output_language_rule(getattr(source, 'output_language', None)) if callable(getattr(prompt_contract, 'get_output_language_rule', None)) else ''
+        if lang_rule:
+            merge_inst = merge_inst + "\n" + lang_rule
 
         def build_messages(texts, *_args, **_kwargs):
             return [{"role": "user", "content": merge_inst + "\n\n" + "\n\n---\n\n".join(texts)}]
@@ -842,6 +863,8 @@ class UniversalGPT(GPT):
             _format=source._format,
             style=note_style,
             extras=source.extras,
+            output_language=getattr(source, 'output_language', None),
+            post_context=getattr(source, 'post_context', None),
             frame_evidence=getattr(source, 'frame_evidence', None),
             prompt_mode='structured',
         )
@@ -946,6 +969,8 @@ class UniversalGPT(GPT):
             _format=source._format,
             style=source.style,
             extras=source.extras,
+            output_language=getattr(source, 'output_language', None),
+            post_context=getattr(source, 'post_context', None),
             frame_evidence=getattr(source, 'frame_evidence', None),
         )
 

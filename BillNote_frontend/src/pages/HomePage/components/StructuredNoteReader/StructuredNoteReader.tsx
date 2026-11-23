@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { Pencil, RefreshCw, Trash2 } from 'lucide-react'
 import NoteImage from '@/components/NoteImage'
+import type { UserAnnotationRecord } from '@/services/note'
 import {
   buildOriginTimeUrl,
   sectionPlainSummary,
@@ -14,7 +15,7 @@ import {
   type StructuredNoteDocument,
   type StructuredSection,
 } from '@/types/structuredNote'
-import { AnnotationGlyph, HairlineCloseIcon } from './AnnotationIcons'
+import { AnnotationGlyph, HairlineCloseIcon, UserNoteGlyph } from './AnnotationIcons'
 import MorphingQuizCapsule, { type QuizAnswerPayload, type QuizAskPayload } from './MorphingQuizCapsule'
 import './structured-note.css'
 
@@ -29,6 +30,10 @@ interface AnnotationEntry {
   sectionTitle: string
   item: StructuredAnnotation
 }
+
+type PopoverEntry =
+  | { mode: 'ai'; data: AnnotationEntry }
+  | { mode: 'user'; data: UserAnnotationRecord }
 
 export interface StructuredFocusAnchor {
   sectionId?: string
@@ -46,11 +51,14 @@ interface Props {
   videoId?: string
   checklistScopeKey?: string
   initialQuizAnswers?: Record<string, string>
+  userAnnotations?: UserAnnotationRecord[]
   focusAnchor?: StructuredFocusAnchor | null
   onJumpTime?: (seconds: number, originUrl: string | null) => void
   onAskAssistant: (payload: QuizAskPayload) => void
   onAnswerQuiz?: (payload: QuizAnswerPayload) => void
   onRefineSection?: (sectionId: string) => void
+  onEditUserAnnotation?: (annotationId: string, payload: { title: string; detail: string }) => Promise<void> | void
+  onDeleteUserAnnotation?: (annotationId: string) => Promise<void> | void
 }
 
 function resolveImageSrc(src: string, baseURL: string, resourceBase?: string): string {
@@ -123,11 +131,14 @@ export default function StructuredNoteReader({
   videoId,
   checklistScopeKey,
   initialQuizAnswers,
+  userAnnotations = [],
   focusAnchor,
   onJumpTime,
   onAskAssistant,
   onAnswerQuiz,
   onRefineSection,
+  onEditUserAnnotation,
+  onDeleteUserAnnotation,
 }: Props) {
   const effectivePlatform = doc.platform || platform
   const effectiveVideoId = doc.video_id || videoId
@@ -135,6 +146,10 @@ export default function StructuredNoteReader({
   const instanceId = useId()
 
   const [activeAnnoKey, setActiveAnnoKey] = useState<string | null>(null)
+  const [editingUserAnnoId, setEditingUserAnnoId] = useState<string | null>(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [editDetail, setEditDetail] = useState('')
+  const [savingUserAnno, setSavingUserAnno] = useState(false)
   const [expandedQuizId, setExpandedQuizId] = useState<string | null>(null)
   const [hoverTip, setHoverTip] = useState<{ key: string; hint: string; left: number; top: number } | null>(null)
   const [hoverVisible, setHoverVisible] = useState(false)
@@ -145,7 +160,7 @@ export default function StructuredNoteReader({
   const hoverBubbleRef = useRef<HTMLDivElement>(null)
   const hoverTargetRef = useRef<HTMLElement | null>(null)
   const pointerPressingAnnoRef = useRef(false)
-  const lastActiveEntryRef = useRef<AnnotationEntry | null>(null)
+  const lastActiveEntryRef = useRef<PopoverEntry | null>(null)
 
   useEffect(() => {
     setCheckedMap(readChecklistStorage(checklistScopeKey))
@@ -169,15 +184,56 @@ export default function StructuredNoteReader({
   )
 
   const annotationMap = useMemo(() => {
-    const map = new Map<string, AnnotationEntry>()
+    const map = new Map<string, PopoverEntry>()
     doc.sections.forEach((sec, sIdx) => {
       const secId = sec.id || `sec-${sIdx + 1}`
       ;(sec.annotations || []).forEach(item => {
-        map.set(`${secId}:${item.id}`, { sectionId: secId, sectionTitle: sec.title, item })
+        map.set(`${secId}:${item.id}`, { mode: 'ai', data: { sectionId: secId, sectionTitle: sec.title, item } })
       })
     })
+    userAnnotations.forEach(item => {
+      map.set(`user:${item.id}`, { mode: 'user', data: item })
+    })
     return map
-  }, [doc.sections])
+  }, [doc.sections, userAnnotations])
+
+  const userAnnotationsByPlacement = useMemo(() => {
+    const byBlock = new Map<string, UserAnnotationRecord[]>()
+    const bySection = new Map<string, UserAnnotationRecord[]>()
+    const orphan: UserAnnotationRecord[] = []
+    const validSectionIds = new Set(doc.sections.map((sec, idx) => sec.id || `sec-${idx + 1}`))
+
+    // 预计算当前文档所有 blockId，便于版本重生成导致 blockId 失配时平滑回退到 sectionId
+    const validBlockIds = new Set<string>()
+    let counter = 0
+    doc.sections.forEach(sec => {
+      validBlockIds.add(`note-block-s-${counter++}`)
+      ;(sec.core_takeaways || []).forEach(() => {
+        validBlockIds.add(`note-block-s-${counter++}`)
+      })
+      ;(sec.blocks || []).forEach(blk => {
+        const bid = `note-block-s-${counter++}`
+        if (blk.type === 'checklist' && !(blk.items || []).length) return
+        if (blk.type === 'screenshot' && !blk.image_url) return
+        validBlockIds.add(bid)
+      })
+    })
+
+    for (const item of userAnnotations) {
+      if (item.block_id && validBlockIds.has(item.block_id)) {
+        const list = byBlock.get(item.block_id) || []
+        list.push(item)
+        byBlock.set(item.block_id, list)
+      } else if (item.section_id && validSectionIds.has(item.section_id)) {
+        const list = bySection.get(item.section_id) || []
+        list.push(item)
+        bySection.set(item.section_id, list)
+      } else {
+        orphan.push(item)
+      }
+    }
+    return { byBlock, bySection, orphan }
+  }, [doc.sections, userAnnotations])
 
   const activeEntry = activeAnnoKey ? annotationMap.get(activeAnnoKey) || null : null
   if (activeEntry) {
@@ -189,6 +245,7 @@ export default function StructuredNoteReader({
     hoverTargetRef.current = null
     lastActiveEntryRef.current = null
     setActiveAnnoKey(null)
+    setEditingUserAnnoId(null)
     setExpandedQuizId(null)
     setHoverVisible(false)
     setHoverTip(null)
@@ -320,6 +377,7 @@ export default function StructuredNoteReader({
   const selectAnno = (key: string, dotEl?: HTMLElement | null) => {
     pointerPressingAnnoRef.current = false
     setExpandedQuizId(null)
+    setEditingUserAnnoId(null)
     clearHoverTip()
     if (activeAnnoKey === key) {
       setActiveAnnoKey(null)
@@ -421,6 +479,43 @@ export default function StructuredNoteReader({
         }}
       >
         <AnnotationGlyph kind={anno.kind} />
+      </button>
+    )
+  }
+
+  const renderUserAnnoButton = (anno: UserAnnotationRecord, keyPrefix: string) => {
+    const annoKey = `user:${anno.id}`
+    const isOpen = activeAnnoKey === annoKey
+    const labelPrefix = anno.source === 'assistant' ? '助手沉淀批注' : '个人批注'
+    return (
+      <button
+        key={keyPrefix}
+        type="button"
+        className={`anno-dot is-user${anno.source === 'assistant' ? ' is-assistant' : ''}${isOpen ? ' is-open' : ''}`}
+        data-anno-id={annoKey}
+        data-annotation-id={anno.id}
+        aria-label={`查看${labelPrefix}：${anno.title}`}
+        aria-expanded={isOpen}
+        onMouseDown={() => {
+          pointerPressingAnnoRef.current = true
+          clearHoverTip()
+        }}
+        onMouseUp={() => {
+          pointerPressingAnnoRef.current = false
+        }}
+        onMouseEnter={e => showHoverTip(e.currentTarget, `${labelPrefix} · ${anno.title}`, annoKey)}
+        onMouseLeave={() => {
+          pointerPressingAnnoRef.current = false
+          clearHoverTip()
+        }}
+        onFocus={e => showHoverTip(e.currentTarget, `${labelPrefix} · ${anno.title}`, annoKey)}
+        onBlur={clearHoverTip}
+        onClick={e => {
+          e.stopPropagation()
+          selectAnno(annoKey, e.currentTarget)
+        }}
+      >
+        <UserNoteGlyph source={anno.source} />
       </button>
     )
   }
@@ -605,6 +700,18 @@ export default function StructuredNoteReader({
 
     if (!node) return null
 
+    const blockUserAnnos = userAnnotationsByPlacement.byBlock.get(blockId) || []
+    if (blockUserAnnos.length > 0 && block.type === 'paragraph') {
+      node = (
+        <p className="note-p">
+          {renderSpans(block.spans, sectionId, annoById, true)}
+          <span className="user-anno-tray">
+            {blockUserAnnos.map(item => renderUserAnnoButton(item, `ua-${item.id}`))}
+          </span>
+        </p>
+      )
+    }
+
     return (
       <div
         key={blockId}
@@ -623,6 +730,12 @@ export default function StructuredNoteReader({
           <ReadingBlockPickIcon />
         </button>
         {node}
+        {blockUserAnnos.length > 0 && block.type !== 'paragraph' && (
+          <div className="section-user-annos">
+            <span className="section-user-annos-label">批注</span>
+            {blockUserAnnos.map(item => renderUserAnnoButton(item, `ua-${item.id}`))}
+          </div>
+        )}
       </div>
     )
   }
@@ -726,6 +839,7 @@ export default function StructuredNoteReader({
                 {(section.core_takeaways || []).map((tk, tkIdx) => {
                   const tkBlockId = `note-block-s-${blockCounter++}`
                   const tkText = spansPlainText(tk.spans)
+                  const tkUserAnnos = userAnnotationsByPlacement.byBlock.get(tkBlockId) || []
                   return (
                     <div
                       key={`${sectionId}-tk-${tkIdx}`}
@@ -743,12 +857,30 @@ export default function StructuredNoteReader({
                       >
                         <ReadingBlockPickIcon />
                       </button>
-                      <p className="note-p is-takeaway">{renderSpans(tk.spans, sectionId, annoById, true)}</p>
+                      <p className="note-p is-takeaway">
+                        {renderSpans(tk.spans, sectionId, annoById, true)}
+                        {tkUserAnnos.length > 0 && (
+                          <span className="user-anno-tray">
+                            {tkUserAnnos.map(item => renderUserAnnoButton(item, `ua-${item.id}`))}
+                          </span>
+                        )}
+                      </p>
                     </div>
                   )
                 })}
 
                 {(section.blocks || []).map(block => renderBlock(block, section, sectionId, annoById))}
+
+                {((userAnnotationsByPlacement.byBlock.get(headingBlockId) || []).length > 0
+                  || (userAnnotationsByPlacement.bySection.get(sectionId) || []).length > 0) && (
+                  <div className="section-user-annos" aria-label="本节个人批注">
+                    <span className="section-user-annos-label">本节批注</span>
+                    {[
+                      ...(userAnnotationsByPlacement.byBlock.get(headingBlockId) || []),
+                      ...(userAnnotationsByPlacement.bySection.get(sectionId) || []),
+                    ].map(item => renderUserAnnoButton(item, `ua-sec-${item.id}`))}
+                  </div>
+                )}
 
                 {section.quiz && (
                   <div className="note-quiz-anchor" data-quiz-id={sectionId}>
@@ -775,6 +907,12 @@ export default function StructuredNoteReader({
               </section>
             )
           })}
+          {userAnnotationsByPlacement.orphan.length > 0 && (
+            <div className="section-user-annos" aria-label="其他个人批注">
+              <span className="section-user-annos-label">个人批注</span>
+              {userAnnotationsByPlacement.orphan.map(item => renderUserAnnoButton(item, `ua-orphan-${item.id}`))}
+            </div>
+          )}
         </div>
 
         <div
@@ -796,22 +934,22 @@ export default function StructuredNoteReader({
           style={{ left: `${popoverPos.left}px`, top: `${popoverPos.top}px` }}
           onClick={e => e.stopPropagation()}
         >
-          {displayPopoverEntry && (
+          {displayPopoverEntry && displayPopoverEntry.mode === 'ai' && (
             <>
               <div className="pop-header">
                 <div className="pop-meta">
-                  <span className="pop-tag">{KIND_LABELS[displayPopoverEntry.item.kind]}</span>
-                  {displayPopoverEntry.item.timestamp_label && (
+                  <span className="pop-tag">{KIND_LABELS[displayPopoverEntry.data.item.kind]}</span>
+                  {displayPopoverEntry.data.item.timestamp_label && (
                     <button
                       type="button"
                       className="pop-ts"
                       onClick={() => {
-                        if (typeof displayPopoverEntry.item.timestamp === 'number') {
-                          triggerTimeJump(displayPopoverEntry.item.timestamp)
+                        if (typeof displayPopoverEntry.data.item.timestamp === 'number') {
+                          triggerTimeJump(displayPopoverEntry.data.item.timestamp)
                         }
                       }}
                     >
-                      {displayPopoverEntry.item.timestamp_label}
+                      {displayPopoverEntry.data.item.timestamp_label}
                     </button>
                   )}
                 </div>
@@ -827,9 +965,135 @@ export default function StructuredNoteReader({
                   <HairlineCloseIcon />
                 </button>
               </div>
-              <p className="pop-content">{displayPopoverEntry.item.full_detail}</p>
+              <p className="pop-content">{displayPopoverEntry.data.item.full_detail}</p>
             </>
           )}
+
+          {displayPopoverEntry && displayPopoverEntry.mode === 'user' && (() => {
+            const u = displayPopoverEntry.data
+            const isEditing = editingUserAnnoId === u.id
+            return (
+              <>
+                <div className="pop-header">
+                  <div className="pop-meta">
+                    <span className="pop-tag">{u.source === 'assistant' ? '助手沉淀' : '个人批注'}</span>
+                    {u.section_title && <span className="pop-ts" style={{ cursor: 'default' }}>{u.section_title}</span>}
+                  </div>
+                  <button
+                    type="button"
+                    className="close-circle"
+                    aria-label="关闭批注"
+                    onClick={e => {
+                      e.stopPropagation()
+                      setEditingUserAnnoId(null)
+                      setActiveAnnoKey(null)
+                    }}
+                  >
+                    <HairlineCloseIcon />
+                  </button>
+                </div>
+
+                {u.anchor_text && (
+                  <blockquote className="pop-anchor-quote">“{u.anchor_text}”</blockquote>
+                )}
+
+                {isEditing ? (
+                  <form
+                    className="pop-edit-form"
+                    onSubmit={async event => {
+                      event.preventDefault()
+                      if (!onEditUserAnnotation || !editDetail.trim() || savingUserAnno) return
+                      setSavingUserAnno(true)
+                      try {
+                        await onEditUserAnnotation(u.id, {
+                          title: editTitle.trim(),
+                          detail: editDetail.trim(),
+                        })
+                        setEditingUserAnnoId(null)
+                      } finally {
+                        setSavingUserAnno(false)
+                      }
+                    }}
+                  >
+                    <input
+                      type="text"
+                      className="pop-edit-input"
+                      placeholder="批注标题"
+                      maxLength={80}
+                      value={editTitle}
+                      onChange={e => setEditTitle(e.target.value)}
+                    />
+                    <textarea
+                      className="pop-edit-textarea"
+                      placeholder="批注内容"
+                      maxLength={4000}
+                      value={editDetail}
+                      onChange={e => setEditDetail(e.target.value)}
+                    />
+                    <div className="pop-user-actions">
+                      <button
+                        type="button"
+                        className="pop-action-btn"
+                        disabled={savingUserAnno}
+                        onClick={() => setEditingUserAnnoId(null)}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="submit"
+                        className="pop-action-btn is-primary"
+                        disabled={savingUserAnno || !editDetail.trim()}
+                      >
+                        {savingUserAnno ? '保存中…' : '保存'}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <>
+                    {u.title && <p className="pop-user-title">{u.title}</p>}
+                    <p className="pop-content" style={{ whiteSpace: 'pre-wrap' }}>{u.detail}</p>
+                    {(onEditUserAnnotation || onDeleteUserAnnotation) && (
+                      <div className="pop-user-actions">
+                        {onEditUserAnnotation && (
+                          <button
+                            type="button"
+                            className="pop-action-btn"
+                            onClick={() => {
+                              setEditTitle(u.title || '')
+                              setEditDetail(u.detail || '')
+                              setEditingUserAnnoId(u.id)
+                            }}
+                          >
+                            <Pencil size={11} strokeWidth={1.7} />
+                            <span>编辑</span>
+                          </button>
+                        )}
+                        {onDeleteUserAnnotation && (
+                          <button
+                            type="button"
+                            className="pop-action-btn is-danger"
+                            onClick={async () => {
+                              if (savingUserAnno) return
+                              setSavingUserAnno(true)
+                              try {
+                                await onDeleteUserAnnotation(u.id)
+                                setActiveAnnoKey(null)
+                              } finally {
+                                setSavingUserAnno(false)
+                              }
+                            }}
+                          >
+                            <Trash2 size={11} strokeWidth={1.7} />
+                            <span>删除</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )
+          })()}
         </div>
       </div>
     </div>

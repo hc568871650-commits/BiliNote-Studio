@@ -49,57 +49,19 @@ import GenerationOptionsFields from '@/components/GenerationOptionsFields'
 import { normalizeGenerationOptions, readGenerationDefaults, saveGenerationDefaults } from '@/utils/generationOptions'
 import type { GenerationOptions } from '@/services/generationRuns'
 import { useDistillQueueStore } from '@/store/distillQueueStore'
+import { useInterfaceStore } from '@/store/interfaceStore'
+import {
+  extractShareInput,
+  isDocumentSourceName,
+  isSubtitleSourceName,
+  LINK_PLATFORMS,
+  looksLikeCollectionUrl,
+  PLATFORM_LABELS,
+  withScheme,
+} from '@/utils/sourceUrl'
 import './generation.css'
 
-const withScheme = (url: string) => /^[a-z][a-z\d+.-]*:\/\//i.test(url) ? url.trim() : `https://${url.trim()}`
-const TRACKING_PARAMS = new Set([
-  'spm_id_from', 'vd_source', 'share_source', 'share_medium', 'share_plat',
-  'share_session_id', 'share_tag', 'share_times', 'bbid', 'ts', 'from_spmid',
-  'buvid', 'mid', 'unique_k', 'si', 'feature', 'pp', 'utm_source', 'utm_medium',
-  'utm_campaign', 'utm_term', 'utm_content',
-])
-
-const cleanExtractedUrl = (raw: string): string => {
-  try {
-    const parsed = new URL(withScheme(raw))
-    for (const key of Array.from(parsed.searchParams.keys())) {
-      if (TRACKING_PARAMS.has(key.toLowerCase())) parsed.searchParams.delete(key)
-    }
-    if (/^\/video\/BV[0-9A-Za-z]{10}\/$/.test(parsed.pathname)) {
-      parsed.pathname = parsed.pathname.slice(0, -1)
-    }
-    return parsed.toString()
-  } catch {
-    return raw.trim()
-  }
-}
-
-const extractShareInput = (raw: string): { url: string; platform: string | null; extracted: boolean } => {
-  const trimmed = raw.trim()
-  if (!trimmed) return { url: '', platform: null, extracted: false }
-  const urlMatch = trimmed.match(/https?:\/\/[^\s"'<>，。！？、）】\]》]+/i)
-  if (urlMatch) {
-    const cleaned = cleanExtractedUrl(urlMatch[0].replace(/[.,;:!?。，；！？）》\]】]+$/, ''))
-    const detected = inferPlatform(cleaned)
-    return { url: cleaned, platform: detected, extracted: cleaned !== trimmed }
-  }
-  const bvMatch = trimmed.match(/\b(BV[0-9A-Za-z]{10})\b/)
-  if (bvMatch) {
-    const cleaned = `https://www.bilibili.com/video/${bvMatch[1]}`
-    return { url: cleaned, platform: 'bilibili', extracted: cleaned !== trimmed }
-  }
-  return { url: trimmed, platform: inferPlatform(trimmed), extracted: false }
-}
-
-const isSubtitleSourceName = (value: string): boolean => /\.(srt|vtt)(?:[?#].*)?$/i.test(value.trim())
-
-const looksLikeCollectionUrl = (value: string): boolean => {
-  const text = value.trim()
-  if (!text) return false
-  return /[?&]list=|\/playlist\b|\/medialist\b|collectiondetail|favlist|\/lists\/|[?&]p=\d+/i.test(text)
-}
-
-const platformLabels: Record<string, string> = { bilibili: '哔哩哔哩', youtube: 'YouTube', kuaishou: '快手' }
+const platformLabels = PLATFORM_LABELS
 const schema = z.object({
   video_url: z.string().default(''), platform: z.string(), model_name: z.string().min(1, '请选择生成模型'),
   style: z.enum(['tutorial', 'knowledge']), quality: z.enum(['fast', 'medium', 'slow']),
@@ -117,21 +79,7 @@ const schema = z.object({
 export type NoteFormValues = z.output<typeof schema>
 export type FormInput = z.input<typeof schema>
 const errorText = (error: unknown) => { const e = error as { msg?: string; message?: string }; return e?.msg || e?.message || '暂时无法连接服务，请稍后重试' }
-const platforms = [{ value: 'bilibili', label: '哔哩哔哩' }, { value: 'youtube', label: 'YouTube' }, { value: 'kuaishou', label: '快手' }]
-const inferPlatform = (value: string) => {
-  const trimmed = value.trim()
-  if (/\bBV[0-9A-Za-z]{10}\b/.test(trimmed)) return 'bilibili'
-  try {
-    const host = new URL(withScheme(trimmed)).hostname.toLowerCase()
-    return /(^|\.)(bilibili\.com|b23\.tv)$/.test(host)
-      ? 'bilibili'
-      : /(^|\.)(youtube\.com|youtu\.be)$/.test(host)
-        ? 'youtube'
-        : /(^|\.)(kuaishou\.com|gifshow\.com)$/.test(host)
-          ? 'kuaishou'
-          : null
-  } catch { return null }
-}
+const platforms = LINK_PLATFORMS
 
 export default function NoteForm({ onSubmitted, creating = false }: { onSubmitted?: () => void; creating?: boolean }) {
   const navigate = useNavigate()
@@ -302,9 +250,10 @@ export default function NoteForm({ onSubmitted, creating = false }: { onSubmitte
     if (!modelList.some(model => model.model_name === values.model_name && model.provider_id === providerId)) { setNotice('当前模型不可用，请重新选择或刷新模型列表'); return }
     submitGuard.current = true
     setSubmitting(true); setNotice(''); setSubmittedAt(Date.now()); setNow(Date.now())
+    const outputLanguage = useInterfaceStore.getState().outputLanguage || 'zh-CN'
     const payload: GenerateNotePayload = { ...values, video_url: values.platform === 'local' ? values.video_url.trim() : withScheme(values.video_url),
       format: normalizeNoteFormats(values.format), link: true, screenshot: values.format.includes('screenshot'), provider_id: providerId,
-      task_id: currentTask?.id || crypto.randomUUID(), request_id: crypto.randomUUID(), generation_options: normalizeGenerationOptions(generationOptions) }
+      task_id: currentTask?.id || crypto.randomUUID(), request_id: crypto.randomUUID(), output_language: outputLanguage, generation_options: normalizeGenerationOptions(generationOptions) }
     if (creating) setPending(payload)
     try {
       if (!creating && currentTask) {
@@ -408,6 +357,7 @@ export default function NoteForm({ onSubmitted, creating = false }: { onSubmitte
         video_interval: Number(values.video_interval) || 6,
         grid_size: Array.isArray(values.grid_size) ? values.grid_size.map(Number) : [2, 2],
         frame_mode: values.frame_mode || 'dynamic',
+        output_language: useInterfaceStore.getState().outputLanguage || 'zh-CN',
         generation_options: normalizeGenerationOptions(generationOptions),
         create_folder: createFolder,
         folder_name: createFolder ? folderName : undefined,
@@ -457,6 +407,7 @@ export default function NoteForm({ onSubmitted, creating = false }: { onSubmitte
 
   const isLocal = platform === 'local'
   const isSubtitleSource = isLocal && (isSubtitleSourceName(fileName) || isSubtitleSourceName(videoUrl || ''))
+  const isDocumentSource = isLocal && (isDocumentSourceName(fileName) || isDocumentSourceName(videoUrl || ''))
   const qualityOptions = [
     { value: 'fast', label: '较小' },
     { value: 'medium', label: '标准' },
@@ -581,26 +532,28 @@ export default function NoteForm({ onSubmitted, creating = false }: { onSubmitte
                               autoCapitalize="none"
                               spellCheck={false}
                               enterKeyHint="done"
-                              placeholder="粘贴视频链接、分享口令或 BV 号，自动识别平台…"
+                              placeholder="粘贴视频、X、小宇宙播客或网页文章链接，自动识别来源…"
                               onChange={event => handleUrlInput(event.target.value, field.onChange)}
                             />
                           </FormControl>
                           {Boolean(field.value) && !locked && (
                             <>
-                              <button
-                                type="button"
-                                className="composer-collection-trigger"
-                                disabled={resolvingCollection || batchSubmitting}
-                                title="解析多 P 合集或播放列表"
-                                onClick={() => void triggerResolveCollection(field.value || '')}
-                              >
-                                {resolvingCollection ? (
-                                  <Loader2 size={12} className="generation-spin" aria-hidden="true" />
-                                ) : (
-                                  <Layers size={12} strokeWidth={1.75} aria-hidden="true" />
-                                )}
-                                <span>{resolvingCollection ? '解析中…' : '解析合集'}</span>
-                              </button>
+                              {platforms.find(item => item.value === platform)?.supportsCollection !== false && (
+                                <button
+                                  type="button"
+                                  className="composer-collection-trigger"
+                                  disabled={resolvingCollection || batchSubmitting}
+                                  title="解析多 P 合集或播放列表"
+                                  onClick={() => void triggerResolveCollection(field.value || '')}
+                                >
+                                  {resolvingCollection ? (
+                                    <Loader2 size={12} className="generation-spin" aria-hidden="true" />
+                                  ) : (
+                                    <Layers size={12} strokeWidth={1.75} aria-hidden="true" />
+                                  )}
+                                  <span>{resolvingCollection ? '解析中…' : '解析合集'}</span>
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 className="composer-url-clear"
@@ -636,7 +589,7 @@ export default function NoteForm({ onSubmitted, creating = false }: { onSubmitte
                     <input
                       ref={fileInput}
                       type="file"
-                      accept="video/*,audio/*,.srt,.vtt"
+                      accept="video/*,audio/*,.srt,.vtt,.pdf,.md,.markdown,.txt"
                       hidden
                       disabled={locked}
                       onChange={event => {
@@ -659,24 +612,26 @@ export default function NoteForm({ onSubmitted, creating = false }: { onSubmitte
                       }}
                     >
                       <span className="composer-upload-icon" aria-hidden="true">
-                        {uploading ? <Loader2 size={18} className="generation-spin" /> : isSubtitleSource ? <FileText size={18} strokeWidth={1.65} /> : <UploadCloud size={18} strokeWidth={1.65} />}
+                        {uploading ? <Loader2 size={18} className="generation-spin" /> : (isSubtitleSource || isDocumentSource) ? <FileText size={18} strokeWidth={1.65} /> : <UploadCloud size={18} strokeWidth={1.65} />}
                       </span>
                       <span className="composer-upload-copy">
-                        <strong>{uploading ? `正在上传${uploadProgress === null ? '…' : ` · ${uploadProgress}%`}` : fileName || '拖入音视频或字幕文件，或点击选择'}</strong>
+                        <strong>{uploading ? `正在上传${uploadProgress === null ? '…' : ` · ${uploadProgress}%`}` : fileName || '拖入音视频、字幕或文档，或点击选择'}</strong>
                         <span>
                           {isSubtitleSource
                             ? '已识别字幕文件，将跳过转写直接生成'
-                            : fileName && !uploading && uploadProgress === 100
-                              ? '文件已就绪，可直接开始生成'
-                              : '支持 MP4、MKV、MOV、MP3、M4A、WAV、SRT、VTT'}
+                            : isDocumentSource
+                              ? '已识别本地文档，将跳过转写直接生成'
+                              : fileName && !uploading && uploadProgress === 100
+                                ? '文件已就绪，可直接开始生成'
+                                : '支持 MP4、MKV、MP3、M4A、SRT、VTT、PDF、MD、TXT'}
                         </span>
                       </span>
                       {uploading && <progress className="composer-upload-progress" max="100" value={uploadProgress ?? undefined} aria-label="文件上传进度" />}
                     </button>
-                    {isSubtitleSource && (
+                    {(isSubtitleSource || isDocumentSource) && (
                       <p className="composer-subtitle-pill" role="status">
                         <Sparkles size={12} strokeWidth={1.7} aria-hidden="true" />
-                        <span>已识别字幕文件，将跳过转写直接生成</span>
+                        <span>{isDocumentSource ? '已识别本地文档，将跳过转写直接生成' : '已识别字幕文件，将跳过转写直接生成'}</span>
                       </p>
                     )}
                     {pathOpen && (

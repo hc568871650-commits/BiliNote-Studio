@@ -52,3 +52,85 @@ export const getDeployStatus = async (): Promise<DeployStatus> => {
   return await request.get('/deploy_status')
 }
 
+export interface StorageCategory {
+  id: 'temp_media' | 'note_results' | 'screenshots' | 'vector_db' | 'database'
+  label: string
+  bytes: number
+  files: number
+  clearable: boolean
+}
+
+export interface PlaybackCachePolicy {
+  enabled: boolean
+  retention_days: 0 | 7 | 30 | 90
+  max_size_mb: number
+}
+
+export interface StorageSummary {
+  total_bytes: number
+  categories: StorageCategory[]
+  playback_cache: PlaybackCachePolicy
+}
+
+export const getSystemStorage = async (): Promise<StorageSummary> => {
+  return await request.get('/system/storage', { suppressToast: true })
+}
+
+export const clearTempMediaCache = async (): Promise<{
+  deleted_files: number
+  freed_bytes: number
+  storage: StorageSummary
+}> => {
+  return await request.post('/system/storage/clear-cache', {}, { suppressToast: true })
+}
+
+export const getPlaybackCachePolicy = async (): Promise<PlaybackCachePolicy> => {
+  return await request.get('/system/playback-cache', { suppressToast: true })
+}
+
+export const updatePlaybackCachePolicy = async (
+  payload: Partial<PlaybackCachePolicy>,
+): Promise<PlaybackCachePolicy> => {
+  return await request.put('/system/playback-cache', payload, { suppressToast: true })
+}
+
+export const getBackupDownloadUrl = (includeSecrets = false): string => {
+  const apiBase = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
+  return `${apiBase}/system/backup?include_secrets=${includeSecrets ? 'true' : 'false'}`
+}
+
+export interface RestoreBackupResult {
+  restored_files: number
+  pre_backup_path: string
+  backup_created_at?: string | null
+  include_secrets: boolean
+}
+
+export const restoreLibraryBackup = async (file: File): Promise<RestoreBackupResult> => {
+  const form = new FormData()
+  form.append('file', file)
+  return await request.post('/system/restore', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 180000,
+    suppressToast: true,
+  })
+}
+
+export interface UpdateCheckResult {
+  checked: boolean
+  has_update: boolean
+  current_version: string
+  latest_version: string
+  release_url: string
+  summary: string
+  published_at?: string | null
+}
+
+export const checkAppUpdate = async (currentVersion?: string): Promise<UpdateCheckResult> => {
+  return await request.get('/system/check-update', {
+    params: currentVersion ? { current_version: currentVersion } : undefined,
+    suppressToast: true,
+    timeout: 12000,
+  })
+}
+

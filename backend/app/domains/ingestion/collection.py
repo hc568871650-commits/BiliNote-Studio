@@ -217,6 +217,7 @@ def _run_single_batch_item(
     frame_mode: str,
     generation_options: Any,
     request_id: str,
+    output_language: str = "zh-CN",
 ) -> None:
     from app.routers.note import run_note_task
 
@@ -238,6 +239,7 @@ def _run_single_batch_item(
         frame_mode=frame_mode,
         generation_options=generation_options,
         request_id=request_id,
+        output_language=output_language,
     )
 
 
@@ -256,6 +258,7 @@ def enqueue_batch_items(
     video_interval: int = 0,
     grid_size: list[int] | None = None,
     frame_mode: str = "dynamic",
+    output_language: str = "zh-CN",
     generation_options: Any = None,
     create_folder: bool = False,
     folder_name: str | None = None,
@@ -307,6 +310,7 @@ def enqueue_batch_items(
             "video_interval": video_interval,
             "grid_size": grid_list,
             "frame_mode": frame_mode,
+            "output_language": output_language,
             "request_id": request_id,
             "batch_id": batch_id,
         }
@@ -355,6 +359,7 @@ def enqueue_batch_items(
                     frame_mode=frame_mode,
                     generation_options=generation_options,
                     request_id=_request_id,
+                    output_language=output_language,
                 )
                 token.raise_if_cancelled()
                 stored = note_storage.get_task(_task_id) or {}

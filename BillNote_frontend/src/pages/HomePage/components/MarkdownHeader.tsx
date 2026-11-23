@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { formatVersionLabel } from '@/utils/versionLabel'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useTaskStore } from '@/store/taskStore'
+import { fetchReviewBank } from '@/services/note'
 import toast from 'react-hot-toast'
 import { ReaderToolbarContext, useToolbarFocusGroup, useWorkspaceTopbar } from '@/layouts/WorkspaceTopbarContext'
 import '@/layouts/topbar.css'
@@ -61,11 +62,28 @@ export function MarkdownHeader({
   const task = useTaskStore(state => state.tasks.find(item => item.id === currentTask?.id))
   const [diagnosticsId, setDiagnosticsId] = useState<string | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
+  const [dueCount, setDueCount] = useState(0)
   const [statusSlot, setStatusSlot] = useState<HTMLDivElement | null>(null)
   const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null)
   const [hasReaderToolbar, setHasReaderToolbar] = useState(false)
   const toolbarRef = useRef<HTMLDivElement | null>(null)
   const failed = task?.status === 'FAILED'
+
+  const refreshDueCount = useCallback(() => {
+    void fetchReviewBank({ kind: 'all', status: 'due', limit: 1 })
+      .then(res => setDueCount(res.due_total ?? res.total ?? 0))
+      .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    refreshDueCount()
+  }, [currentTask?.id, refreshDueCount])
+
+  useEffect(() => {
+    const onOpenReview = () => setReviewOpen(true)
+    window.addEventListener('bilinote-open-review-bank', onOpenReview)
+    return () => window.removeEventListener('bilinote-open-review-bank', onOpenReview)
+  }, [])
 
   const portalActive = !workspaceTopbar || workspaceTopbar.active
 
@@ -181,11 +199,16 @@ export function MarkdownHeader({
           type="button"
           onClick={() => setReviewOpen(true)}
           className="workspace-topbar-btn"
-          title="错题与高频避坑回顾"
-          aria-label="错题与高频避坑回顾"
+          title={dueCount > 0 ? `错题与高频避坑回顾（今日到期 ${dueCount} 项）` : '错题与高频避坑回顾'}
+          aria-label={dueCount > 0 ? `复习库，今日到期 ${dueCount} 项` : '复习库'}
         >
           <BookMarked className="h-4 w-4" strokeWidth={1.6} aria-hidden="true" />
           <span className="topbar-btn-label">复习库</span>
+          {dueCount > 0 && (
+            <span className="ml-0.5 inline-flex min-w-[16px] items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--reading-accent,var(--primary))_18%,transparent)] px-1 text-[10px] font-semibold leading-[15px] tabular-nums text-[var(--reading-accent,var(--primary))]">
+              {dueCount > 99 ? '99+' : dueCount}
+            </span>
+          )}
         </button>
         {workspaceTopbar?.onConfigure && (
           <button
@@ -222,7 +245,14 @@ export function MarkdownHeader({
       {children}
       {reviewOpen && (
         <Suspense fallback={null}>
-          <ReviewBankDialog open={reviewOpen} onOpenChange={setReviewOpen} />
+          <ReviewBankDialog
+            open={reviewOpen}
+            onOpenChange={open => {
+              setReviewOpen(open)
+              if (!open) refreshDueCount()
+            }}
+            onStatsChanged={refreshDueCount}
+          />
         </Suspense>
       )}
       {task && diagnosticsId === task.id && (

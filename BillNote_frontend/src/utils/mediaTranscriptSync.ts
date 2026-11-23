@@ -2,6 +2,38 @@ export interface TranscriptSegmentLike {
   start: number
   end: number
   text?: string
+  translated_text?: string
+}
+
+export interface MediaConcatSegment {
+  index?: number
+  label?: string
+  start: number
+  end: number
+  duration?: number
+}
+
+const CJK_CHAR_RE = /[\u4e00-\u9fff]/g
+const FOREIGN_CHAR_RE = /[A-Za-z\u00c0-\u024f\u0400-\u04ff\u3040-\u30ff\uac00-\ud7af]/g
+
+export function hasTranslatedCaptions(segments: readonly TranscriptSegmentLike[] | null | undefined): boolean {
+  return Boolean(segments?.some(seg => Boolean(seg.translated_text?.trim())))
+}
+
+export function hasUntranslatedCaptions(segments: readonly TranscriptSegmentLike[] | null | undefined): boolean {
+  if (!segments || segments.length === 0) return false
+  return segments.some(seg => Boolean(seg.text?.trim()) && !seg.translated_text?.trim())
+}
+
+export function isForeignTranscript(segments: readonly TranscriptSegmentLike[] | null | undefined): boolean {
+  if (!segments || segments.length === 0) return false
+  const joined = segments.map(seg => (seg.text || '').trim()).filter(Boolean).join(' ')
+  const compact = joined.replace(/\s+/g, '')
+  if (compact.length < 12) return false
+  const foreignCount = (compact.match(FOREIGN_CHAR_RE) || []).length
+  if (foreignCount < 8) return false
+  const cjkCount = (compact.match(CJK_CHAR_RE) || []).length
+  return cjkCount / compact.length < 0.22
 }
 
 export const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 2] as const

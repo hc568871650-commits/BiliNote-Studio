@@ -126,6 +126,14 @@ export function buildOriginTimeUrl(
     const qs = new URLSearchParams({ v: videoId, t: `${sec}s` })
     return `https://www.youtube.com/watch?${qs.toString()}`
   }
+  if (platform === 'x') {
+    if (videoUrl && /^https?:\/\//i.test(videoUrl)) return videoUrl
+    if (videoId) return `https://x.com/i/status/${encodeURIComponent(videoId)}`
+  }
+  if (platform === 'xiaoyuzhou') {
+    if (videoUrl && /^https?:\/\//i.test(videoUrl)) return videoUrl
+    if (videoId) return `https://www.xiaoyuzhoufm.com/episode/${encodeURIComponent(videoId)}`
+  }
   if (videoUrl && /^https?:\/\//i.test(videoUrl)) {
     return videoUrl
   }

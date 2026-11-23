@@ -1198,3 +1198,196 @@
     transition: none;
   }
 }
+
+/* 读者自建批注 & 助手沉淀批注独立柔光锚点与毛玻璃卡片 */
+.structured-note-shell .anno-dot.is-user {
+  background: color-mix(in oklab, var(--app-accent) 9%, rgba(255, 255, 255, 0.78));
+  border: 1px dashed color-mix(in oklab, var(--app-accent) 46%, transparent);
+}
+
+.dark .structured-note-shell .anno-dot.is-user {
+  background: color-mix(in oklab, var(--app-accent) 18%, rgba(255, 255, 255, 0.08));
+  border: 1px dashed color-mix(in oklab, var(--app-accent) 56%, rgba(255, 255, 255, 0.16));
+}
+
+.structured-note-shell .anno-dot.is-user.is-assistant {
+  border-style: solid;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--app-accent) 26%, transparent);
+}
+
+.structured-note-shell .user-anno-tray {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.18em;
+  margin-left: 0.25em;
+  vertical-align: baseline;
+}
+
+.structured-note-shell .section-user-annos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35em;
+  margin: 0.35em 0 0.65em;
+}
+
+.structured-note-shell .section-user-annos-label {
+  font-size: 0.76em;
+  color: var(--ui-muted);
+}
+
+.structured-note-shell .pop-anchor-quote {
+  margin: 0 0 0.55em;
+  padding: 0.42em 0.65em;
+  border-left: 2px solid color-mix(in oklab, var(--app-accent) 52%, transparent);
+  border-radius: 0 0.48em 0.48em 0;
+  background: color-mix(in oklab, var(--app-accent) 7%, transparent);
+  font-size: 0.8em;
+  line-height: 1.5;
+  color: var(--ui-muted);
+}
+
+.structured-note-shell .pop-user-title {
+  margin: 0 0 0.32em;
+  font-size: 0.9em;
+  font-weight: 600;
+  color: var(--ui-ink);
+}
+
+.structured-note-shell .pop-user-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4em;
+  margin-top: 0.68em;
+  padding-top: 0.52em;
+  border-top: 0.75px solid color-mix(in oklab, var(--ui-ink) 8%, transparent);
+}
+
+.structured-note-shell .pop-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
+  height: 1.9em;
+  padding: 0 0.68em;
+  border-radius: 999px;
+  border: 0.75px solid color-mix(in oklab, var(--ui-ink) 12%, transparent);
+  background: transparent;
+  color: var(--ui-muted);
+  font-size: 0.76em;
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.structured-note-shell .pop-action-btn:hover {
+  background: var(--app-accent-soft);
+  color: var(--app-accent);
+  border-color: color-mix(in oklab, var(--app-accent) 28%, transparent);
+}
+
+.structured-note-shell .pop-action-btn.is-danger:hover {
+  background: var(--ui-err-soft);
+  color: var(--ui-err);
+  border-color: color-mix(in oklab, var(--ui-err) 35%, transparent);
+}
+
+.structured-note-shell .pop-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.48em;
+}
+
+.structured-note-shell .pop-edit-input,
+.structured-note-shell .pop-edit-textarea {
+  width: 100%;
+  border-radius: 0.62em;
+  border: 0.75px solid color-mix(in oklab, var(--ui-ink) 14%, transparent);
+  background: color-mix(in oklab, var(--ui-bg) 82%, transparent);
+  color: var(--ui-ink);
+  font: inherit;
+  font-size: 0.84em;
+  padding: 0.45em 0.65em;
+  outline: none;
+}
+
+.structured-note-shell .pop-edit-input:focus,
+.structured-note-shell .pop-edit-textarea:focus {
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--app-accent) 18%, transparent);
+}
+
+.structured-note-shell .pop-edit-textarea {
+  min-height: 4.8em;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.structured-note-shell .pop-action-btn.is-primary {
+  background: var(--app-accent);
+  color: #ffffff;
+  border-color: transparent;
+}
+
+.structured-note-shell .pop-action-btn.is-primary:hover {
+  filter: brightness(1.06);
+  color: #ffffff;
+}
+
+/* 文末库内相关笔记轻量推荐条 */
+.related-notes-strip {
+  margin-top: 2rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid var(--surface-hairline);
+}
+
+.related-notes-heading {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+  margin: 0 0 0.65rem;
+}
+
+.related-notes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.65rem;
+}
+
+.related-note-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.72rem 0.85rem;
+  border-radius: 13px;
+  border: 0.75px solid var(--surface-hairline);
+  background: color-mix(in srgb, var(--surface-raised) 70%, transparent);
+  transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.2s var(--ease-apple, cubic-bezier(0.22, 1, 0.36, 1));
+  cursor: pointer;
+}
+
+.related-note-card:hover {
+  border-color: color-mix(in srgb, var(--reading-accent, var(--primary)) 38%, transparent);
+  background: color-mix(in srgb, var(--reading-accent, var(--primary)) 7%, var(--surface-raised));
+  transform: translateY(-1px);
+}
+
+.related-note-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--foreground);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.related-note-card-meta {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}

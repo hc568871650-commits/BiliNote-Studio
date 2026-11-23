@@ -11,11 +11,11 @@
 
 .distill-queue-popover {
   position: fixed;
-  top: 10px;
+  top: calc(var(--studio-titlebar-height, 0px) + 10px);
   left: 54px;
   z-index: 48;
   width: min(356px, calc(100vw - 68px));
-  max-height: min(520px, calc(100dvh - 28px));
+  max-height: min(520px, calc(100dvh - var(--studio-titlebar-height, 0px) - 24px));
   border-radius: 18px;
   display: flex;
   flex-direction: column;

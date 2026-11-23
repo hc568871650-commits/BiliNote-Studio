@@ -34,11 +34,27 @@ import { beginReadingTurn, updateReadingTurn, readingRecoveryState, restoreReadi
 import ReadingVisionStatus from '@/components/ReadingVisionStatus'
 import './reading-recovery.css'
 
+export interface AssistantAnnotationDraft {
+  blockId?: string
+  anchorText?: string
+  title: string
+  detail: string
+}
+
 type ChatMode = 'half' | 'full'
 const durationLabel = (seconds: number) => seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分钟 ${seconds % 60} 秒`
-interface Props { taskId: string; mode: ChatMode; onModeChange: (mode: ChatMode) => void; temporary?: boolean; active?: boolean; onClose?: () => void; onTransfer?: () => void }
+interface Props {
+  taskId: string
+  mode: ChatMode
+  onModeChange: (mode: ChatMode) => void
+  temporary?: boolean
+  active?: boolean
+  onClose?: () => void
+  onTransfer?: () => void
+  onSaveAssistantAnnotation?: (draft: AssistantAnnotationDraft) => Promise<void>
+}
 const empty: ReadingSession = { messages: [], input: '', attachments: [], controls: undefined, context: undefined, model: undefined }
-export default function ChatPanel({ taskId, mode, onModeChange, temporary = false, active = true, onClose, onTransfer }: Props) {
+export default function ChatPanel({ taskId, mode, onModeChange, temporary = false, active = true, onClose, onTransfer, onSaveAssistantAnnotation }: Props) {
   const navigate = useNavigate()
   const sessionKey = temporary ? temporarySessionKey(taskId) : permanentSessionKey(taskId)
   const session = useReadingAssistantStore(state => state.sessions[sessionKey]) || empty
@@ -66,6 +82,8 @@ export default function ChatPanel({ taskId, mode, onModeChange, temporary = fals
   const [errorDetails, setErrorDetails] = useState<ChatErrorDetails | null>(null)
   const [preview, setPreview] = useState<ReadingAttachment | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [savedAnnoIds, setSavedAnnoIds] = useState<Record<string, boolean>>({})
+  const [savingAnnoId, setSavingAnnoId] = useState<string | null>(null)
   const streamReading = useInterfaceStore(state => state.streamReading)
   const [streamText, setStreamText] = useState('')
   const [streamPhase, setStreamPhase] = useState('')
@@ -300,6 +318,33 @@ export default function ChatPanel({ taskId, mode, onModeChange, temporary = fals
     || historyHasImages
 
   const compactQuotes = session.attachments.length >= 2 && session.attachments.every(item => item.type === 'quote')
+  const handleSaveReplyAnnotation = useCallback(async (message: ReadingSession['messages'][number]) => {
+    if (!onSaveAssistantAnnotation || savingAnnoId || savedAnnoIds[message.id]) return
+    const questionMsg = message.reply_to
+      ? messageById.get(message.reply_to)
+      : (() => {
+          const idx = session.messages.findIndex(item => item.id === message.id)
+          for (let i = idx - 1; i >= 0; i--) {
+            if (session.messages[i].role === 'user') return session.messages[i]
+          }
+          return undefined
+        })()
+    const quoteAttachment = questionMsg?.attachments?.find(a => a.type === 'quote' && (!a.taskId || a.taskId === taskId))
+    const rawTitle = (questionMsg?.content || '').replace(/\s+/g, ' ').trim()
+    const title = rawTitle ? rawTitle.slice(0, 32) : message.content.replace(/[#*`>\s]+/g, ' ').trim().slice(0, 32)
+    setSavingAnnoId(message.id)
+    try {
+      await onSaveAssistantAnnotation({
+        blockId: quoteAttachment?.blockId || quoteAttachment?.blocks?.[0]?.blockId,
+        anchorText: (quoteAttachment?.sourceText || quoteAttachment?.text || '').replace(/\s+/g, ' ').trim().slice(0, 200),
+        title: title || '助手沉淀',
+        detail: message.content.trim().slice(0, 4000),
+      })
+      setSavedAnnoIds(prev => ({ ...prev, [message.id]: true }))
+    } finally {
+      setSavingAnnoId(null)
+    }
+  }, [messageById, onSaveAssistantAnnotation, savedAnnoIds, savingAnnoId, session.messages, taskId])
 
   return <section className={`reading-chat ${temporary ? 'reading-chat--temporary' : ''}`} aria-label={temporary ? '临时聊天' : '常驻阅读对话'}>
     <header className="reading-chat-header"><strong>{temporary ? '临时聊天' : '阅读助手'}</strong><div className="flex-1" />
@@ -314,7 +359,10 @@ export default function ChatPanel({ taskId, mode, onModeChange, temporary = fals
         onQuote={jump} onImage={jumpImage} onPreview={setPreview}
         recovery={message.incomplete ? readingRecoveryState(session, message.id) : undefined}
         questionStatus={message.incomplete ? messageById.get(message.reply_to || '')?.delivery_status : undefined}
-        busy={message.incomplete && busy} onRestore={message.incomplete ? restoreQuestion : undefined} />)}
+        busy={message.incomplete && busy} onRestore={message.incomplete ? restoreQuestion : undefined}
+        onSaveAnnotation={onSaveAssistantAnnotation && message.role === 'assistant' ? handleSaveReplyAnnotation : undefined}
+        savedAsAnnotation={Boolean(savedAnnoIds[message.id])}
+        savingAnnotation={savingAnnoId === message.id} />)}
       {busy && <article className="reading-message reading-message--assistant">
         <WorkProgress active entries={streamWork} text={streamText} events={streamTools} phase={compacting ? 'compacting' : streamPhase} elapsed={durationLabel(waitSeconds)} />
       </article>}

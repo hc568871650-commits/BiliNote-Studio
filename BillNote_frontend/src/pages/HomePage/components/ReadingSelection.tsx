@@ -21,11 +21,26 @@ export function rehypeReadingBlocks() {
     })
   }
 }
-interface Props { children: ReactNode; taskId: string; versionId: string; title: string; onQuote: (quotes: ReadingAttachment[], openChat: boolean) => boolean; onRefine?: (texts: string[]) => void }
-export default function ReadingSelection({ children, taskId, versionId, title, onQuote, onRefine }: Props) {
+export interface SelectionAnnotationDraft {
+  text: string
+  blockId?: string
+  sectionId?: string
+  sectionTitle?: string
+}
+
+interface Props {
+  children: ReactNode
+  taskId: string
+  versionId: string
+  title: string
+  onQuote: (quotes: ReadingAttachment[], openChat: boolean) => boolean
+  onRefine?: (texts: string[]) => void
+  onAnnotate?: (draft: SelectionAnnotationDraft) => void
+}
+export default function ReadingSelection({ children, taskId, versionId, title, onQuote, onRefine, onAnnotate }: Props) {
   const container = useRef<HTMLDivElement>(null)
   const [selected, setSelected] = useState<string[]>([])
-  const [selection, setSelection] = useState<{ text: string; x: number; y: number; blockId?: string; sourceText?: string } | null>(null)
+  const [selection, setSelection] = useState<{ text: string; x: number; y: number; blockId?: string; sourceText?: string; sectionId?: string; sectionTitle?: string } | null>(null)
   const quote = (text: string, blockId?: string, sourceText?: string): ReadingAttachment => ({ id: crypto.randomUUID(), type: 'quote', name: title, text, taskId, versionId, blockId, ...(sourceText ? { sourceText } : {}) })
   useEffect(() => {
     container.current?.querySelectorAll<HTMLElement>('[data-note-block]').forEach(el => {
@@ -140,6 +155,11 @@ export default function ReadingSelection({ children, taskId, versionId, title, o
         if (!rect.width && !rect.height) { setSelection(null); return }
         const start = range.startContainer
         const block = (start instanceof HTMLElement ? start : start.parentElement)?.closest<HTMLElement>('[data-note-block]')
+        const sectionEl = (start instanceof HTMLElement ? start : start.parentElement)?.closest<HTMLElement>('[data-section-id]')
+        const sectionId = sectionEl?.dataset.sectionId
+        const sectionTitle = sectionEl?.querySelector<HTMLElement>('[data-note-heading]')?.dataset.noteLabel
+          || sectionEl?.querySelector<HTMLElement>('[data-note-heading]')?.textContent?.trim()
+          || undefined
         // A mouse selection can span blocks. Keep a bounded anchor excerpt from
         // its first block while retaining the complete selected text for the chat.
         let sourceText: string | undefined
@@ -151,7 +171,7 @@ export default function ReadingSelection({ children, taskId, versionId, title, o
           sourceText = fragment.textContent?.trim().slice(0, 512) || undefined
         }
         const top = rect.top > 56 ? rect.top - 44 : Math.min(window.innerHeight - 48, rect.bottom + 8)
-        setSelection({ text, blockId: block?.dataset.noteBlock, sourceText, x: Math.max(8, Math.min(rect.left, window.innerWidth - 240)), y: Math.max(8, top) })
+        setSelection({ text, blockId: block?.dataset.noteBlock, sourceText, sectionId, sectionTitle, x: Math.max(8, Math.min(rect.left, window.innerWidth - 310)), y: Math.max(8, top) })
       })
     }}
     onClick={event => {
@@ -171,6 +191,7 @@ export default function ReadingSelection({ children, taskId, versionId, title, o
     {selection && <div ref={popoverRef} className="reading-selection-popover" style={{ left: selection.x, top: selection.y }} role="toolbar" aria-label="选中文字操作" onMouseDown={event => event.preventDefault()}>
       <button type="button" onClick={() => { if (onQuote([quote(selection.text, selection.blockId, selection.sourceText)], true)) { setSelection(null); window.getSelection()?.removeAllRanges() } }}>问 AI 助手</button>
       <button type="button" onClick={() => { if (onQuote([quote(selection.text, selection.blockId, selection.sourceText)], false)) { setSelection(null); window.getSelection()?.removeAllRanges() } }}>加入引用</button>
+      {onAnnotate && <button type="button" onClick={() => { onAnnotate({ text: selection.text, blockId: selection.blockId, sectionId: selection.sectionId, sectionTitle: selection.sectionTitle }); setSelection(null); window.getSelection()?.removeAllRanges() }}>记批注</button>}
     </div>}
   </div>
 }

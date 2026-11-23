@@ -16,10 +16,11 @@ import { classifyProvider } from '@/utils/providerProfiles'
 import { isQuickEdition } from '@/utils/edition'
 import './api-settings.css'
 
-const purposes: { key: ModelPurpose; name: string; description: string }[] = [
+const purposes: { key: ModelPurpose; name: string; description: string; allowFollowPrimary?: boolean }[] = [
   { key: 'generation', name: '笔记生成', description: '新建笔记或重蒸馏时默认选用' },
   { key: 'reading', name: '阅读问答', description: '阅读助手默认对话模型' },
   { key: 'organizer', name: '资料库助手', description: '全库检索、对比与整理' },
+  { key: 'translation', name: '字幕翻译', description: '外语双语字幕翻译；默认跟随主模型，可单独选免费或轻量模型', allowFollowPrimary: true },
 ]
 
 const Provider = () => {
@@ -79,6 +80,8 @@ const Provider = () => {
           <PurposeModelPicker
             label={`${purpose.name}模型`}
             value={defaults[purpose.key]}
+            allowFollowPrimary={purpose.allowFollowPrimary}
+            followLabel="跟随主模型（默认）"
             onChange={selection => {
               setDefault(purpose.key, selection)
               setSavedPurpose(purpose.key)

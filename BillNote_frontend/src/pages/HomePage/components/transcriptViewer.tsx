@@ -2,31 +2,34 @@
 
 import { useTaskStore } from '@/store/taskStore'
 import { scrollMotion } from '@/utils/motion'
-import { findSegmentIndexForTime, formatMediaTime } from '@/utils/mediaTranscriptSync'
-import { useEffect, useState, useRef } from 'react'
-import { Play, ScrollText, X } from 'lucide-react'
+import {
+  findSegmentIndexForTime,
+  formatMediaTime,
+  hasTranslatedCaptions,
+  hasUntranslatedCaptions,
+  isForeignTranscript,
+} from '@/utils/mediaTranscriptSync'
+import { useEffect, useMemo, useState, useRef } from 'react'
+import { Languages, Loader2, Play, RefreshCw, ScrollText, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface Segment {
   start: number
   end: number
   text: string
+  translated_text?: string
   speaker?: string
-}
-
-interface Task {
-  id?: string
-  transcript?: {
-    segments?: Segment[]
-  }
 }
 
 const TranscriptViewer = ({
   onClose,
   highlightTime,
   playbackTime,
+  taskId,
   mediaAvailable = false,
   playerOpen = false,
+  translatingCaptions = false,
+  onTranslateCaptions,
   onSeekTime,
   onTogglePlayer,
 }: {
@@ -37,23 +40,28 @@ const TranscriptViewer = ({
   baseURL?: string
   mediaAvailable?: boolean
   playerOpen?: boolean
+  translatingCaptions?: boolean
+  onTranslateCaptions?: (options?: { force?: boolean }) => void | Promise<void>
   onSeekTime?: (seconds: number) => void
   onTogglePlayer?: () => void
 }) => {
-  const getCurrentTask = useTaskStore(state => state.getCurrentTask)
   const currentTaskId = useTaskStore(state => state.currentTaskId)
-  const [task, setTask] = useState<Task | null>(null)
+  const resolvedTaskId = taskId || currentTaskId
+  const task = useTaskStore(state => state.tasks.find(item => item.id === resolvedTaskId) || null)
   const [activeSegment, setActiveSegment] = useState<number | null>(null)
+  const [showTranslation, setShowTranslation] = useState(true)
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([])
   const lastScrolledIdxRef = useRef<number | null>(null)
 
   useEffect(() => {
-    setTask(getCurrentTask())
     setActiveSegment(null)
     lastScrolledIdxRef.current = null
-  }, [currentTaskId, getCurrentTask])
+  }, [resolvedTaskId])
 
-  const segments = task?.transcript?.segments || []
+  const segments: Segment[] = task?.transcript?.segments || []
+  const hasTranslation = useMemo(() => hasTranslatedCaptions(segments), [segments])
+  const hasUntranslated = useMemo(() => hasUntranslatedCaptions(segments), [segments])
+  const needsTranslation = useMemo(() => !hasTranslation && isForeignTranscript(segments), [hasTranslation, segments])
 
   // 响应外部显式跳转时间点（点击笔记时间戳或引用跳转）
   useEffect(() => {
@@ -100,6 +108,67 @@ const TranscriptViewer = ({
           </span>
         )}
         <div className="flex-1" />
+        {(hasTranslation || (needsTranslation && onTranslateCaptions)) && (
+          <button
+            type="button"
+            disabled={translatingCaptions}
+            aria-pressed={hasTranslation ? showTranslation : undefined}
+            title={
+              translatingCaptions
+                ? '正在翻译字幕…'
+                : hasTranslation
+                  ? (showTranslation ? '隐藏中文译文' : '显示中文译文')
+                  : '翻译外语字幕为中文'
+            }
+            aria-label={
+              translatingCaptions
+                ? '正在翻译字幕'
+                : hasTranslation
+                  ? (showTranslation ? '隐藏中文译文' : '显示中文译文')
+                  : '翻译外语字幕为中文'
+            }
+            onClick={(event) => {
+              if (event.shiftKey && onTranslateCaptions) {
+                void onTranslateCaptions({ force: true })
+                return
+              }
+              if (hasTranslation) {
+                setShowTranslation(prev => !prev)
+              } else if (onTranslateCaptions) {
+                void onTranslateCaptions()
+              }
+            }}
+          >
+            {translatingCaptions ? (
+              <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Languages size={13} strokeWidth={1.7} aria-hidden="true" />
+            )}
+          </button>
+        )}
+        {hasTranslation && onTranslateCaptions && (
+          <button
+            type="button"
+            disabled={translatingCaptions}
+            title={
+              translatingCaptions
+                ? '正在重新翻译字幕…'
+                : hasUntranslated
+                  ? '补译缺失字幕（Shift+点击强制重译全部）'
+                  : '重新翻译全部字幕'
+            }
+            aria-label={hasUntranslated ? '补译缺失字幕' : '重新翻译全部字幕'}
+            onClick={(event) => {
+              if (hasUntranslated && !event.shiftKey) {
+                void onTranslateCaptions({ force: false })
+              } else {
+                void onTranslateCaptions({ force: true })
+              }
+            }}
+          >
+            <RefreshCw size={12.5} strokeWidth={1.7} className={translatingCaptions ? 'animate-spin' : ''} aria-hidden="true" />
+          </button>
+        )}
         {mediaAvailable && onTogglePlayer && (
           <button
             type="button"
@@ -151,7 +220,16 @@ const TranscriptViewer = ({
                         {segment.speaker}
                       </span>
                     )}
-                    {segment.text}
+                    {showTranslation && segment.translated_text ? (
+                      <>
+                        <span className="block">{segment.translated_text}</span>
+                        <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
+                          {segment.text}
+                        </span>
+                      </>
+                    ) : (
+                      segment.text
+                    )}
                   </span>
                 </button>
               )

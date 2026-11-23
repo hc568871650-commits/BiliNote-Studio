@@ -16,6 +16,9 @@ _PLATFORM_FACTORIES: dict[str, tuple[str, str]] = {
     "youtube": ("app.downloaders.youtube_downloader", "YoutubeDownloader"),
     "bilibili": ("app.downloaders.bilibili_downloader", "BilibiliDownloader"),
     "kuaishou": ("app.downloaders.kuaishou_downloader", "KuaiShouDownloader"),
+    "x": ("app.downloaders.x_downloader", "XDownloader"),
+    "xiaoyuzhou": ("app.downloaders.xiaoyuzhoufm_download", "XiaoyuzhouDownloader"),
+    "web": ("app.downloaders.web_downloader", "WebArticleDownloader"),
     "local": ("app.downloaders.local_downloader", "LocalDownloader"),
 }
 

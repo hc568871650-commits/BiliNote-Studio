@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { fetchPurposePreferences, savePurposePreferences } from '@/services/model'
 
-export type ModelPurpose = 'generation' | 'reading' | 'organizer'
+export type ModelPurpose = 'generation' | 'reading' | 'organizer' | 'translation'
 export interface PurposeModelSelection { provider_id: string; model_name: string }
 interface PurposeModelStore {
   defaults: Record<ModelPurpose, PurposeModelSelection | null>
@@ -23,7 +23,7 @@ const normalizeSelection = (value: unknown): PurposeModelSelection | null => {
 
 // Only model identities are persisted; credentials remain in existing provider configuration.
 export const usePurposeModelStore = create<PurposeModelStore>()(persist((set, get) => ({
-  defaults: { generation: null, reading: null, organizer: null },
+  defaults: { generation: null, reading: null, organizer: null, translation: null },
   synced: false,
   setDefault: (purpose, selection) => {
     set(state => ({ defaults: { ...state.defaults, [purpose]: selection } }))
@@ -39,10 +39,11 @@ export const usePurposeModelStore = create<PurposeModelStore>()(persist((set, ge
         generation: 'generation' in data ? normalizeSelection(data.generation) : current.generation,
         reading: 'reading' in data ? normalizeSelection(data.reading) : current.reading,
         organizer: 'organizer' in data ? normalizeSelection(data.organizer) : current.organizer,
+        translation: 'translation' in data ? normalizeSelection(data.translation) : current.translation,
       }
       // If server is empty while local already had selections, migrate local once to backend.
-      const serverHasAny = Boolean(next.generation || next.reading || next.organizer)
-      const localHasAny = Boolean(current.generation || current.reading || current.organizer)
+      const serverHasAny = Boolean(next.generation || next.reading || next.organizer || next.translation)
+      const localHasAny = Boolean(current.generation || current.reading || current.organizer || current.translation)
       if (!serverHasAny && localHasAny) {
         void savePurposePreferences(current, { silent: true }).catch(() => undefined)
         set({ synced: true })

@@ -47,6 +47,7 @@ export interface GenerateNotePayload {
   screenshot?: boolean
   video_understanding?: boolean
   request_id?: string
+  output_language?: 'zh-CN' | 'source'
   generation_options?: GenerationOptions
 }
 
@@ -87,21 +88,39 @@ export const upgradeNoteStructured = (taskId: string, payload: UpgradeStructured
   request.post(`/notes/${encodeURIComponent(taskId)}/upgrade-structured`, payload, { timeout: 180000 }) as unknown as Promise<Task>
 
 export interface QuizAttemptRecord {
-  picked_key: string
+  picked_key?: string
+  selected_key?: string
   correct_key?: string
   is_correct: boolean
   question?: string
   section_title?: string
   explanation?: string
-  updated_at?: number
+  interval_days?: number
+  ease?: number
+  next_review_at?: string | null
+  updated_at?: number | string
+}
+
+export interface UserAnnotationRecord {
+  id: string
+  section_id: string
+  section_title?: string
+  block_id?: string
+  anchor_text?: string
+  title: string
+  detail: string
+  source: 'manual' | 'assistant'
+  created_at?: string
+  updated_at?: string
 }
 
 export interface NoteLearningState {
-  task_id: string
+  task_id?: string
   quiz_attempts: Record<string, QuizAttemptRecord>
-  pinned_annotations: Record<string, { pinned: boolean; note?: string; updated_at?: number }>
+  pinned_annotations: Record<string, { pinned: boolean; note?: string; updated_at?: number | string }>
   checklist_states: Record<string, boolean>
-  updated_at?: number
+  user_annotations?: UserAnnotationRecord[]
+  updated_at?: number | string | null
 }
 
 export const getNoteLearningState = (taskId: string) =>
@@ -112,6 +131,44 @@ export const updateNoteLearningState = (
   payload: Partial<Pick<NoteLearningState, 'quiz_attempts' | 'pinned_annotations' | 'checklist_states'>>,
 ) =>
   request.put(`/notes/${encodeURIComponent(taskId)}/learning-state`, payload, { suppressToast: true }) as unknown as Promise<NoteLearningState>
+
+export const createUserAnnotation = (
+  taskId: string,
+  payload: {
+    section_id?: string
+    section_title?: string
+    block_id?: string
+    anchor_text?: string
+    title?: string
+    detail: string
+    source?: 'manual' | 'assistant'
+  },
+) =>
+  request.post(`/learning/notes/${encodeURIComponent(taskId)}/annotations`, payload, { suppressToast: true }) as unknown as Promise<UserAnnotationRecord>
+
+export const updateUserAnnotation = (
+  taskId: string,
+  annotationId: string,
+  payload: {
+    section_id?: string
+    section_title?: string
+    block_id?: string
+    anchor_text?: string
+    title?: string
+    detail?: string
+  },
+) =>
+  request.put(
+    `/learning/notes/${encodeURIComponent(taskId)}/annotations/${encodeURIComponent(annotationId)}`,
+    payload,
+    { suppressToast: true },
+  ) as unknown as Promise<UserAnnotationRecord>
+
+export const deleteUserAnnotation = (taskId: string, annotationId: string) =>
+  request.delete(
+    `/learning/notes/${encodeURIComponent(taskId)}/annotations/${encodeURIComponent(annotationId)}`,
+    { suppressToast: true },
+  ) as unknown as Promise<{ deleted: boolean; id: string }>
 
 export interface ReviewBankQuizOption {
   key: string
@@ -139,6 +196,10 @@ export interface ReviewBankItem {
   mastered?: boolean
   review_count?: number
   last_reviewed_at?: string | null
+  next_review_at?: string | null
+  interval_days?: number
+  ease?: number
+  is_due?: boolean
   updated_at?: number
 }
 
@@ -146,6 +207,9 @@ export interface ReviewBankResponse {
   total: number
   wrong_quiz_count: number
   pit_count: number
+  due_total?: number
+  due_wrong_quizzes?: number
+  due_pit_annotations?: number
   pending_total?: number
   mastered_total?: number
   items: ReviewBankItem[]
@@ -168,6 +232,10 @@ interface RawBackendWrongQuiz {
   mastered?: boolean
   review_count?: number
   last_reviewed_at?: string | null
+  next_review_at?: string | null
+  interval_days?: number
+  ease?: number
+  is_due?: boolean
   updated_at?: number | string
 }
 
@@ -188,6 +256,10 @@ interface RawBackendPitAnnotation {
   mastered?: boolean
   review_count?: number
   last_reviewed_at?: string | null
+  next_review_at?: string | null
+  interval_days?: number
+  ease?: number
+  is_due?: boolean
   updated_at?: number | string
 }
 
@@ -195,6 +267,9 @@ interface RawReviewBankPayload {
   total?: number
   wrong_quiz_count?: number
   pit_count?: number
+  due_total?: number
+  due_wrong_quizzes?: number
+  due_pit_annotations?: number
   pending_total?: number
   mastered_total?: number
   items?: ReviewBankItem[]
@@ -203,6 +278,9 @@ interface RawReviewBankPayload {
   counts?: {
     wrong_quizzes?: number
     pit_annotations?: number
+    due_total?: number
+    due_wrong_quizzes?: number
+    due_pit_annotations?: number
     pending_total?: number
     mastered_total?: number
   }
@@ -251,6 +329,10 @@ export function normalizeReviewBankResponse(raw: unknown): ReviewBankResponse {
     mastered: Boolean(item.mastered),
     review_count: Number(item.review_count || 0),
     last_reviewed_at: item.last_reviewed_at ?? null,
+    next_review_at: item.next_review_at ?? null,
+    interval_days: Number.isFinite(item.interval_days) ? Number(item.interval_days) : undefined,
+    ease: Number.isFinite(item.ease) ? Number(item.ease) : undefined,
+    is_due: typeof item.is_due === 'boolean' ? item.is_due : undefined,
     updated_at: toTimestampNumber(item.updated_at),
   }))
 
@@ -269,6 +351,10 @@ export function normalizeReviewBankResponse(raw: unknown): ReviewBankResponse {
     mastered: Boolean(item.mastered),
     review_count: Number(item.review_count || 0),
     last_reviewed_at: item.last_reviewed_at ?? null,
+    next_review_at: item.next_review_at ?? null,
+    interval_days: Number.isFinite(item.interval_days) ? Number(item.interval_days) : undefined,
+    ease: Number.isFinite(item.ease) ? Number(item.ease) : undefined,
+    is_due: typeof item.is_due === 'boolean' ? item.is_due : undefined,
     updated_at: toTimestampNumber(item.updated_at),
   }))
 
@@ -283,13 +369,16 @@ export function normalizeReviewBankResponse(raw: unknown): ReviewBankResponse {
     total: wrongCount + pitCount,
     wrong_quiz_count: wrongCount,
     pit_count: pitCount,
+    due_total: payload.counts?.due_total ?? payload.due_total,
+    due_wrong_quizzes: payload.counts?.due_wrong_quizzes ?? payload.due_wrong_quizzes,
+    due_pit_annotations: payload.counts?.due_pit_annotations ?? payload.due_pit_annotations,
     pending_total: payload.counts?.pending_total ?? payload.pending_total,
     mastered_total: payload.counts?.mastered_total ?? payload.mastered_total,
     items: [...wrongItems, ...pitItems],
   }
 }
 
-export const fetchReviewBank = async (params: { kind?: 'all' | 'wrong_quiz' | 'pit'; status?: 'pending' | 'mastered' | 'all'; limit?: number } = {}) => {
+export const fetchReviewBank = async (params: { kind?: 'all' | 'wrong_quiz' | 'pit'; status?: 'due' | 'pending' | 'mastered' | 'all'; limit?: number } = {}) => {
   const raw = await (request.get('/learning/review-bank', { params, suppressToast: true }) as unknown as Promise<unknown>)
   return normalizeReviewBankResponse(raw)
 }
@@ -304,6 +393,10 @@ export interface ReviewQuizPracticeResult {
   mastered: boolean
   review_count: number
   last_reviewed_at: string
+  interval_days?: number
+  ease?: number
+  next_review_at?: string | null
+  is_due?: boolean
   explanation?: string
 }
 
@@ -320,9 +413,74 @@ export const updateReviewPitStatus = async (payload: {
   task_id: string
   section_id: string
   annotation_id: string
+  mastered?: boolean
+  remembered?: boolean
+}): Promise<{
+  task_id: string
+  section_id: string
+  annotation_id: string
   mastered: boolean
-}): Promise<{ task_id: string; section_id: string; annotation_id: string; mastered: boolean; review_count: number }> => {
+  review_count: number
+  interval_days?: number
+  next_review_at?: string | null
+  is_due?: boolean
+}> => {
   return await request.post('/learning/review-bank/pit-status', payload, { suppressToast: true })
+}
+
+export interface TopicQuizQuestion {
+  task_id: string
+  version_id?: string | null
+  note_title: string
+  section_id: string
+  section_title: string
+  short_prompt?: string
+  full_question: string
+  options: ReviewBankQuizOption[]
+  correct_key: string
+  explanation?: string
+  ever_wrong?: boolean
+  attempt_count?: number
+}
+
+export interface TopicQuizResponse {
+  questions: TopicQuizQuestion[]
+  total_available: number
+  note_count: number
+}
+
+export const fetchTopicQuiz = async (payload: {
+  folder_id?: string
+  task_ids?: string[]
+  limit?: number
+  include_archived?: boolean
+}): Promise<TopicQuizResponse> => {
+  return await request.post('/learning/topic-quiz', payload, { suppressToast: true })
+}
+
+export interface RelatedNoteItem {
+  task_id: string
+  title: string
+  platform?: string
+  score: number
+  shared_tags: string[]
+  reason: string
+}
+
+export const fetchRelatedNotes = async (taskId: string, limit = 3): Promise<RelatedNoteItem[]> => {
+  const res = (await request.get(`/learning/notes/${encodeURIComponent(taskId)}/related`, {
+    params: { limit },
+    suppressToast: true,
+  })) as unknown as { items?: RelatedNoteItem[] }
+  return Array.isArray(res?.items) ? res.items : []
+}
+
+export interface MediaConcatSegment {
+  index?: number
+  label?: string
+  start: number
+  end: number
+  duration?: number
 }
 
 export interface NoteMediaInfo {
@@ -331,6 +489,7 @@ export interface NoteMediaInfo {
   size: number
   url: string | null
   synthetic?: boolean
+  concat_segments?: MediaConcatSegment[]
 }
 
 export const getNoteMediaInfo = async (taskId: string): Promise<NoteMediaInfo> => {
@@ -338,6 +497,43 @@ export const getNoteMediaInfo = async (taskId: string): Promise<NoteMediaInfo> =
     suppressToast: true,
     timeout: 6000,
   })
+}
+
+export interface TranslatedTranscriptSegment {
+  start: number
+  end: number
+  text: string
+  translated_text?: string
+}
+
+export interface TranslateCaptionsResponse {
+  task_id: string
+  translated: boolean
+  cached: boolean
+  translated_count?: number
+  total_count?: number
+  missing_count?: number
+  language?: string
+  segments: TranslatedTranscriptSegment[]
+}
+
+export const translateNoteCaptions = async (
+  taskId: string,
+  options?: { target_lang?: string; force?: boolean; provider_id?: string; model_name?: string },
+): Promise<TranslateCaptionsResponse> => {
+  return await request.post(
+    `/media/${encodeURIComponent(taskId)}/translate-captions`,
+    {
+      target_lang: options?.target_lang || 'zh-CN',
+      force: Boolean(options?.force),
+      provider_id: options?.provider_id,
+      model_name: options?.model_name,
+    },
+    {
+      suppressToast: true,
+      timeout: 120000,
+    },
+  )
 }
 
 export const noteMediaStreamUrl = (baseURL: string, taskId: string) => {
@@ -387,6 +583,7 @@ export interface EnqueueBatchPayload {
   video_interval?: number
   grid_size?: number[]
   frame_mode?: 'dynamic' | 'fixed'
+  output_language?: 'zh-CN' | 'source'
   generation_options?: GenerationOptions
   create_folder?: boolean
   folder_name?: string

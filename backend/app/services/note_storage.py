@@ -842,6 +842,39 @@ def cleanup_completed_runs(temp_root=None):
     return pending
 
 
+def update_transcript(task_id, transcript):
+    """原子更新单篇笔记的转写段落（例如回写字幕翻译缓存），不触碰正文与版本。"""
+    valid_id(task_id)
+    if not isinstance(transcript, dict):
+        raise ValueError("Invalid transcript payload")
+    with LOCK:
+        folder = _note_dir(task_id)
+        if not folder:
+            raise FileNotFoundError("笔记不存在")
+        manifest = _manifest(task_id)
+        if not manifest:
+            raise FileNotFoundError("笔记元数据不存在")
+        meta_dir = folder / "_meta"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        task = manifest["task"]
+        task["transcript"] = transcript
+        manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
+        _atomic_json(meta_dir / "manifest.json", manifest)
+        _atomic_json(meta_dir / "transcript.json", transcript)
+        result_path = meta_dir / "result.json"
+        if result_path.is_file():
+            existing_result = _read_json(result_path)
+            existing_result["transcript"] = transcript
+            _atomic_json(result_path, existing_result)
+        t_cache = cache_path(task_id, "transcript")
+        if t_cache.is_file():
+            try:
+                _atomic_json(t_cache, transcript)
+            except OSError:
+                pass
+        return transcript
+
+
 def recover_interrupted_runs():
     """No job survives backend restart; keep its data but make retry possible."""
     recovered = []

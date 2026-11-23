@@ -85,3 +85,31 @@ export function AskChatIcon() {
     </svg>
   )
 }
+
+export function UserNoteGlyph({ source = 'manual' }: { source?: 'manual' | 'assistant' }) {
+  if (source === 'assistant') {
+    return (
+      <svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path
+          d="M5.5 6.8C5.5 5.8 6.3 5 7.3 5H12.7C13.7 5 14.5 5.8 14.5 6.8V10.8C14.5 11.8 13.7 12.6 12.7 12.6H8.8L6.2 14.6V12.6C5.8 12.3 5.5 11.6 5.5 10.8V6.8Z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+        />
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path
+        d="M6.4 13.8L7.2 10.9L12.3 5.8C12.8 5.3 13.6 5.3 14.1 5.8L14.2 5.9C14.7 6.4 14.7 7.2 14.2 7.7L9.1 12.8L6.4 13.8Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.45"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}

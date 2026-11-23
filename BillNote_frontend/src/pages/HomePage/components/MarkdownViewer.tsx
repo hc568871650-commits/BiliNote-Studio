@@ -5,7 +5,19 @@ import { renderedNoteMarkdown, resolveSearchTarget, scrollToSearchMatch } from '
 import ReactMarkdown from 'react-markdown'
 import { Play, ExternalLink, Sparkles, Loader2 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
-import { getNoteLearningState, getNoteMediaInfo, noteMediaStreamUrl, updateNoteLearningState, upgradeNoteStructured, type NoteMediaInfo } from '@/services/note'
+import {
+  createUserAnnotation,
+  deleteUserAnnotation,
+  getNoteLearningState,
+  getNoteMediaInfo,
+  noteMediaStreamUrl,
+  translateNoteCaptions,
+  updateNoteLearningState,
+  updateUserAnnotation,
+  upgradeNoteStructured,
+  type NoteMediaInfo,
+  type UserAnnotationRecord,
+} from '@/services/note'
 import { findSegmentIndexForTime, resolveOnlineVideoEmbed, resolveTimestampAction } from '@/utils/mediaTranscriptSync'
 import MiniMediaPlayer, { type MediaSeekCommand } from './MiniMediaPlayer'
 import { buildOriginTimeUrl } from '@/types/structuredNote'
@@ -29,7 +41,9 @@ import { scrollMotion } from '@/utils/motion'
 import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
 import ReaderPane from '@/pages/HomePage/components/ReaderPane'
 import { rehypeNoteOutline, resolveChapter, scrollToChapter } from '@/utils/noteOutline'
-import ReadingSelection, { rehypeReadingBlocks } from './ReadingSelection'
+import ReadingSelection, { rehypeReadingBlocks, type SelectionAnnotationDraft } from './ReadingSelection'
+import RelatedNotesSection from './RelatedNotesSection'
+import type { AssistantAnnotationDraft } from './ChatPanel'
 import { useReadingAssistantStore, permanentSessionKey, type ReadingAttachment } from '@/store/readingAssistantStore'
 import { resolveStructuredNote, structuredNoteToMindmapMarkdown, type StructuredNoteDocument } from '@/types/structuredNote'
 import { useWorkspaceTopbar } from '@/layouts/WorkspaceTopbarContext'
@@ -332,6 +346,11 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const [structuredAnchor, setStructuredAnchor] = useState<StructuredFocusAnchor | null>(null)
   const [upgradingStructured, setUpgradingStructured] = useState(false)
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({})
+  const [userAnnotations, setUserAnnotations] = useState<UserAnnotationRecord[]>([])
+  const [annoDraft, setAnnoDraft] = useState<SelectionAnnotationDraft | null>(null)
+  const [annoTitleInput, setAnnoTitleInput] = useState('')
+  const [annoDetailInput, setAnnoDetailInput] = useState('')
+  const [annoSaving, setAnnoSaving] = useState(false)
   const defaultGenerationModel = usePurposeModelStore(state => state.defaults.generation)
 
   useEffect(() => {
@@ -355,19 +374,117 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   }, [currentTaskId])
 
   useEffect(() => {
-    if (!currentTaskId) { setQuizAnswers({}); return }
+    setAnnoDraft(null)
+    if (!currentTaskId) {
+      setQuizAnswers({})
+      setUserAnnotations([])
+      return
+    }
     let active = true
     void getNoteLearningState(currentTaskId)
       .then(state => {
-        if (!active || !state?.quiz_attempts) return
+        if (!active) return
         const mapped: Record<string, string> = {}
-        for (const [secId, record] of Object.entries(state.quiz_attempts)) {
-          if (record?.picked_key) mapped[secId] = record.picked_key
+        for (const [secId, record] of Object.entries(state?.quiz_attempts || {})) {
+          const picked = record?.picked_key || record?.selected_key
+          if (picked) mapped[secId] = picked
         }
         setQuizAnswers(mapped)
+        setUserAnnotations(Array.isArray(state?.user_annotations) ? state.user_annotations : [])
       })
-      .catch(() => { if (active) setQuizAnswers({}) })
+      .catch(() => {
+        if (active) {
+          setQuizAnswers({})
+          setUserAnnotations([])
+        }
+      })
     return () => { active = false }
+  }, [currentTaskId])
+
+  const openSelectionAnnotator = useCallback((draft: SelectionAnnotationDraft) => {
+    setAnnoDraft(draft)
+    const compact = draft.text.replace(/\s+/g, ' ').trim()
+    setAnnoTitleInput(compact.slice(0, 24) + (compact.length > 24 ? '…' : ''))
+    setAnnoDetailInput('')
+  }, [])
+
+  const submitManualAnnotation = useCallback(async () => {
+    if (!currentTaskId || !annoDraft || !annoDetailInput.trim() || annoSaving) return
+    setAnnoSaving(true)
+    try {
+      const created = await createUserAnnotation(currentTaskId, {
+        section_id: annoDraft.sectionId || structuredNote?.sections?.[0]?.id || '',
+        section_title: annoDraft.sectionTitle || structuredNote?.sections?.[0]?.title || '',
+        block_id: annoDraft.blockId || '',
+        anchor_text: annoDraft.text.slice(0, 240),
+        title: annoTitleInput.trim(),
+        detail: annoDetailInput.trim(),
+        source: 'manual',
+      })
+      setUserAnnotations(prev => [...prev, created])
+      setAnnoDraft(null)
+      setAnnoTitleInput('')
+      setAnnoDetailInput('')
+      toast.success('已添加正文批注')
+    } catch {
+      toast.error('保存批注失败，请重试')
+    } finally {
+      setAnnoSaving(false)
+    }
+  }, [annoDetailInput, annoDraft, annoSaving, annoTitleInput, currentTaskId, structuredNote])
+
+  const handleSaveAssistantAnnotation = useCallback(async (draft: AssistantAnnotationDraft) => {
+    if (!currentTaskId) return
+    let sectionId = structuredNote?.sections?.[0]?.id || ''
+    let sectionTitle = structuredNote?.sections?.[0]?.title || ''
+    if (draft.blockId) {
+      const blockEl = document.getElementById(draft.blockId)
+      const secEl = blockEl?.closest<HTMLElement>('[data-section-id]')
+      if (secEl?.dataset.sectionId) {
+        sectionId = secEl.dataset.sectionId
+        sectionTitle = secEl.querySelector<HTMLElement>('[data-note-heading]')?.dataset.noteLabel
+          || secEl.querySelector<HTMLElement>('[data-note-heading]')?.textContent?.trim()
+          || sectionTitle
+      }
+    }
+    try {
+      const created = await createUserAnnotation(currentTaskId, {
+        section_id: sectionId,
+        section_title: sectionTitle,
+        block_id: draft.blockId || '',
+        anchor_text: draft.anchorText || '',
+        title: draft.title,
+        detail: draft.detail,
+        source: 'assistant',
+      })
+      setUserAnnotations(prev => [...prev, created])
+      toast.success('已沉淀为正文批注')
+    } catch {
+      toast.error('沉淀批注失败，请重试')
+      throw new Error('save failed')
+    }
+  }, [currentTaskId, structuredNote])
+
+  const handleEditUserAnnotation = useCallback(async (annotationId: string, payload: { title: string; detail: string }) => {
+    if (!currentTaskId) return
+    try {
+      const updated = await updateUserAnnotation(currentTaskId, annotationId, payload)
+      setUserAnnotations(prev => prev.map(item => (item.id === annotationId ? updated : item)))
+      toast.success('批注已更新')
+    } catch {
+      toast.error('更新批注失败，请重试')
+    }
+  }, [currentTaskId])
+
+  const handleDeleteUserAnnotation = useCallback(async (annotationId: string) => {
+    if (!currentTaskId) return
+    try {
+      await deleteUserAnnotation(currentTaskId, annotationId)
+      setUserAnnotations(prev => prev.filter(item => item.id !== annotationId))
+      toast.success('批注已删除')
+    } catch {
+      toast.error('删除批注失败，请重试')
+    }
   }, [currentTaskId])
 
   const handleAnswerQuiz = useCallback((payload: QuizAnswerPayload) => {
@@ -568,8 +685,8 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
           <Idle />
         </Suspense>
         <div className="text-center">
-          <p className="text-base font-medium text-foreground">输入视频链接并点击“生成笔记”</p>
-          <p className="mt-1.5 text-xs text-muted-foreground">支持哔哩哔哩、YouTube、快手及本地视频</p>
+          <p className="text-base font-medium text-foreground">粘贴链接或拖入本地文件开始生成</p>
+          <p className="mt-1.5 text-xs text-muted-foreground">支持视频、X 推文、播客、网页与本地文档</p>
         </div>
       </div>
     )
@@ -597,6 +714,56 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     }
     addQuotes([attachment], true)
   }
+
+  const [translatingCaptions, setTranslatingCaptions] = useState(false)
+
+  const handleTranslateCaptions = useCallback(async (options?: { force?: boolean }) => {
+    if (!currentTaskId || translatingCaptions) return
+    const force = Boolean(options?.force)
+    setTranslatingCaptions(true)
+    try {
+      const res = await translateNoteCaptions(currentTaskId, { force })
+      if (Array.isArray(res?.segments) && res.segments.length > 0) {
+        useTaskStore.setState(state => ({
+          tasks: state.tasks.map(t =>
+            t.id === currentTaskId
+              ? {
+                  ...t,
+                  transcript: {
+                    ...(t.transcript || { full_text: '', language: '', raw: null, segments: [] }),
+                    segments: res.segments,
+                  },
+                }
+              : t,
+          ),
+        }))
+        if (force) {
+          toast.success(
+            res.missing_count && res.missing_count > 0
+              ? `已重译 ${res.translated_count ?? 0}/${res.total_count ?? res.segments.length} 句字幕（剩余可再次补译）`
+              : '已重新翻译全部字幕',
+          )
+        } else if (res.missing_count && res.missing_count > 0) {
+          toast.success(`已翻译 ${res.translated_count ?? 0}/${res.total_count ?? res.segments.length} 句字幕（剩余可再次点击补译）`)
+        } else {
+          toast.success(res.cached ? '已加载字幕中文译文' : '字幕已翻译为中英双语')
+        }
+      }
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } }; msg?: string; message?: string })
+      toast.error(detail?.response?.data?.detail || detail?.msg || detail?.message || '字幕翻译失败，请稍后重试')
+    } finally {
+      setTranslatingCaptions(false)
+    }
+  }, [currentTaskId, translatingCaptions])
+
+  const mediaSpliceSegments = useMemo(() => {
+    if (Array.isArray(mediaInfo?.concat_segments) && mediaInfo.concat_segments.length >= 2) {
+      return mediaInfo.concat_segments
+    }
+    const rawSegs = currentTask?.audioMeta?.raw_info?.concat_segments
+    return Array.isArray(rawSegs) && rawSegs.length >= 2 ? rawSegs : []
+  }, [mediaInfo, currentTask])
 
   const mediaAvailable = Boolean(mediaInfo?.available)
   const onlineEmbed = useMemo(() => {
@@ -724,7 +891,15 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
                   </div>
                 )}
                 <NoteImageChatContext.Provider value={imageChatTarget}>
-                <ReadingSelection key={`${currentTask?.id}:${activeVersionId}`} taskId={currentTask?.id || ''} versionId={activeVersionId} title={currentTask?.audioMeta?.title || '笔记'} onQuote={addQuotes} onRefine={currentTask && !currentTask.archived_at ? texts => setRefinement({ taskId: currentTask.id, versionId: activeVersionId, texts }) : undefined}>
+                <ReadingSelection
+                  key={`${currentTask?.id}:${activeVersionId}`}
+                  taskId={currentTask?.id || ''}
+                  versionId={activeVersionId}
+                  title={currentTask?.audioMeta?.title || '笔记'}
+                  onQuote={addQuotes}
+                  onAnnotate={currentTask && !currentTask.archived_at ? openSelectionAnnotator : undefined}
+                  onRefine={currentTask && !currentTask.archived_at ? texts => setRefinement({ taskId: currentTask.id, versionId: activeVersionId, texts }) : undefined}
+                >
                 <div className={'markdown-body select-text w-full px-2'}>
                   {structuredNote ? (
                     <StructuredNoteReader
@@ -736,10 +911,13 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
                       videoId={currentTask?.audioMeta?.video_id}
                       checklistScopeKey={currentTask ? `${currentTask.id}:${activeVersionId}` : undefined}
                       initialQuizAnswers={quizAnswers}
+                      userAnnotations={userAnnotations}
                       focusAnchor={structuredAnchor}
                       onJumpTime={jumpNoteTime}
                       onAskAssistant={askQuizAssistant}
                       onAnswerQuiz={handleAnswerQuiz}
+                      onEditUserAnnotation={currentTask && !currentTask.archived_at ? handleEditUserAnnotation : undefined}
+                      onDeleteUserAnnotation={currentTask && !currentTask.archived_at ? handleDeleteUserAnnotation : undefined}
                       onRefineSection={
                         currentTask && !currentTask.archived_at
                           ? sectionId => setRefinement({ taskId: currentTask.id, versionId: activeVersionId, texts: [], sectionIds: [sectionId] })
@@ -747,20 +925,65 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
                       }
                     />
                   ) : (
-                    <MarkdownContent content={selectedContent} components={markdownComponents} />
+                    <>
+                      <MarkdownContent content={selectedContent} components={markdownComponents} />
+                      {userAnnotations.length > 0 && (
+                        <section className="related-notes-strip" aria-label="个人批注">
+                          <h4 className="related-notes-heading">个人批注 ({userAnnotations.length})</h4>
+                          <div className="flex flex-col gap-2">
+                            {userAnnotations.map(item => (
+                              <div key={item.id} className="rounded-xl border border-[var(--surface-hairline)] bg-[var(--surface-raised)]/70 p-3 text-xs">
+                                <div className="mb-1 flex items-center justify-between gap-2">
+                                  <span className="font-medium text-foreground">
+                                    {item.source === 'assistant' ? '助手沉淀 · ' : ''}{item.title}
+                                  </span>
+                                  {currentTask && !currentTask.archived_at && (
+                                    <button
+                                      type="button"
+                                      className="text-[11px] text-muted-foreground hover:text-destructive"
+                                      onClick={() => void handleDeleteUserAnnotation(item.id)}
+                                    >
+                                      删除
+                                    </button>
+                                  )}
+                                </div>
+                                {item.anchor_text && <p className="mb-1 text-[11px] text-muted-foreground">“{item.anchor_text}”</p>}
+                                <p className="whitespace-pre-wrap leading-relaxed text-foreground/90">{item.detail}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      )}
+                    </>
                   )}
                 </div>
                 </ReadingSelection>
+                {currentTaskId && <RelatedNotesSection taskId={currentTaskId} />}
                 </NoteImageChatContext.Provider>
               </ReaderPane>
             ) : (
               <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
                 <p className="text-sm font-medium text-foreground">暂无可读笔记内容</p>
-                <p className="text-xs">输入视频链接并点击“生成笔记”，支持哔哩哔哩、YouTube、快手及本地视频</p>
+                <p className="text-xs">粘贴链接或拖入本地文件开始生成，支持视频、X 推文、播客、网页与文档</p>
               </div>
             )}
           </div>
         )}
+        {!miniPlayerOpen && playerAvailable && (() => {
+          const isAudioOnly = Boolean(mediaInfo?.media_type?.toLowerCase().startsWith('audio/') && !onlineEmbed)
+          const reopenLabel = isAudioOnly ? '打开音频播放器' : '打开视频播放器'
+          return (
+            <button
+              type="button"
+              className="apple-pip-reopen-fab"
+              aria-label={reopenLabel}
+              title={reopenLabel}
+              onClick={() => setMiniPlayerOpen(true)}
+            >
+              <Play size={15} strokeWidth={1.9} fill="currentColor" className="translate-x-[1px]" aria-hidden="true" />
+            </button>
+          )
+        })()}
         <MiniMediaPlayer
           open={miniPlayerOpen && playerAvailable}
           src={mediaSrc}
@@ -768,9 +991,12 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
           synthetic={Boolean(mediaInfo?.synthetic)}
           onlineEmbed={mediaAvailable ? null : onlineEmbed}
           transcriptSegments={currentTask?.transcript?.segments || []}
+          spliceSegments={mediaSpliceSegments}
           durationHint={currentTask?.audioMeta?.duration || 0}
           seekCommand={mediaSeekCommand}
           externalUrl={playerExternalUrl}
+          translatingCaptions={translatingCaptions}
+          onTranslateCaptions={currentTaskId ? handleTranslateCaptions : undefined}
           onTimeUpdate={setPlaybackTime}
           onUnavailable={() => {
             setMediaInfo({ available: false, media_type: null, size: 0, url: null })
@@ -795,6 +1021,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
                       setChatLayoutMode(next)
                       setRightDockTab('chat')
                     }}
+                    onSaveAssistantAnnotation={!currentTask.archived_at ? handleSaveAssistantAnnotation : undefined}
                     onClose={() => setRightDockTab(null)}
                   />
                 </Suspense>
@@ -810,6 +1037,8 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
                     playbackTime={playbackTime}
                     mediaAvailable={playerAvailable}
                     playerOpen={miniPlayerOpen}
+                    translatingCaptions={translatingCaptions}
+                    onTranslateCaptions={handleTranslateCaptions}
                     onSeekTime={(sec) => {
                       if (playerAvailable) {
                         seekLocalMedia(sec, true)
@@ -826,6 +1055,72 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
             </div>
           </div>
         )}>
+        {annoDraft && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-4 backdrop-blur-[2px]"
+            onClick={() => !annoSaving && setAnnoDraft(null)}
+          >
+            <div
+              role="dialog"
+              aria-label="添加正文批注"
+              className="w-full max-w-md rounded-2xl border border-[var(--glass-border)] bg-[var(--glass-bg-strong)] p-4 shadow-xl backdrop-blur-xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground">记批注</h3>
+                {annoDraft.sectionTitle && (
+                  <span className="max-w-[200px] truncate text-[11px] text-muted-foreground">{annoDraft.sectionTitle}</span>
+                )}
+              </div>
+              <blockquote className="mb-3 line-clamp-2 rounded-lg border-l-2 border-[var(--reading-accent,var(--primary))] bg-[color-mix(in_srgb,var(--reading-accent,var(--primary))_8%,transparent)] px-2.5 py-1.5 text-xs text-muted-foreground">
+                “{annoDraft.text}”
+              </blockquote>
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  maxLength={80}
+                  placeholder="批注短标题（悬停预览显示）"
+                  className="w-full rounded-xl border border-[var(--surface-hairline)] bg-[var(--surface-input)] px-3 py-1.5 text-xs text-foreground outline-none focus:border-[var(--reading-accent,var(--primary))]"
+                  value={annoTitleInput}
+                  onChange={e => setAnnoTitleInput(e.target.value)}
+                />
+                <textarea
+                  autoFocus
+                  rows={4}
+                  maxLength={4000}
+                  placeholder="写下你的理解、反例或待查事项…（Ctrl+Enter 保存）"
+                  className="w-full resize-none rounded-xl border border-[var(--surface-hairline)] bg-[var(--surface-input)] px-3 py-2 text-xs leading-relaxed text-foreground outline-none focus:border-[var(--reading-accent,var(--primary))]"
+                  value={annoDetailInput}
+                  onChange={e => setAnnoDetailInput(e.target.value)}
+                  onKeyDown={e => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                      e.preventDefault()
+                      void submitManualAnnotation()
+                    }
+                  }}
+                />
+              </div>
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={annoSaving}
+                  className="rounded-full border border-[var(--surface-hairline)] px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => setAnnoDraft(null)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={annoSaving || !annoDetailInput.trim()}
+                  className="rounded-full bg-[var(--reading-accent,var(--primary))] px-3.5 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-45"
+                  onClick={() => void submitManualAnnotation()}
+                >
+                  {annoSaving ? '保存中…' : '保存批注'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {refinement && currentTask && refinement.taskId === currentTask.id && refinement.versionId === (selectedVersion?.ver_id || currentVerId) && (
           <Suspense fallback={null}>
             <RefineNoteDialog key={`${refinement.taskId}:${refinement.versionId}:${(refinement.sectionIds || []).join(',')}`} task={currentTask} versionId={refinement.versionId} texts={refinement.texts} sectionIds={refinement.sectionIds} originalProtocol={selectedVersion?.protocol} originalModel={modelName && refinementProvider ? { provider_id: refinementProvider, model_name: modelName } : null} onClose={() => setRefinement(null)} onApplied={updated => {

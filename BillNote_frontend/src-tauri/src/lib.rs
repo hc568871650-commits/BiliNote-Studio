@@ -139,7 +139,9 @@ pub fn run() {
             get_install_path_diagnostics,
             restart_backend_sidecar,
             desktop::open_note_folder,
-            desktop::hide_to_tray
+            desktop::hide_to_tray,
+            desktop::read_clipboard_text,
+            desktop::configure_quick_capture_hotkey
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -166,6 +168,7 @@ pub fn run() {
                 // ExitRequested 在用户 Cmd-Q / 点关闭 / Dock 退出时触发，先于实际进程结束。
                 // Exit 是兜底——任何走到 Tauri 主循环结束的路径都会经过它。
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+                    desktop::stop_quick_capture_hotkey();
                     kill_backend_sidecar(app_handle);
                 }
                 _ => {}

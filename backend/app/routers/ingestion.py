@@ -46,6 +46,7 @@ class EnqueueBatchRequest(BaseModel):
     video_interval: int = 0
     grid_size: Optional[list[int]] = Field(default_factory=list)
     frame_mode: Literal["dynamic", "fixed"] = "dynamic"
+    output_language: Literal["zh-CN", "source"] = "zh-CN"
     generation_options: Optional[GenerationOptions] = None
     create_folder: bool = False
     folder_name: Optional[str] = None
@@ -119,6 +120,7 @@ def enqueue_batch_endpoint(data: EnqueueBatchRequest):
             video_interval=data.video_interval,
             grid_size=data.grid_size,
             frame_mode=data.frame_mode,
+            output_language=data.output_language,
             generation_options=data.generation_options,
             create_folder=data.create_folder,
             folder_name=data.folder_name,

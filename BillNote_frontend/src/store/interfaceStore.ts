@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-export interface InterfacePreferences { fontSize: number; codeSize: number; font: 'system' | 'yahei' | 'segoe'; reducedMotion: boolean; startPage: 'recent' | 'create'; sendKey: 'enter' | 'mod-enter'; streamReading: boolean; restoreReadingPosition: boolean }
-export const interfaceDefaults: InterfacePreferences = { fontSize: 14, codeSize: 13, font: 'system', reducedMotion: false, startPage: 'recent', sendKey: 'enter', streamReading: true, restoreReadingPosition: false }
+export type OutputLanguagePreference = 'zh-CN' | 'source'
+export interface InterfacePreferences { fontSize: number; codeSize: number; font: 'system' | 'yahei' | 'segoe'; reducedMotion: boolean; startPage: 'recent' | 'create'; sendKey: 'enter' | 'mod-enter'; streamReading: boolean; restoreReadingPosition: boolean; outputLanguage: OutputLanguagePreference; quickCaptureEnabled: boolean; quickCaptureShortcut: string }
+export const interfaceDefaults: InterfacePreferences = { fontSize: 14, codeSize: 13, font: 'system', reducedMotion: false, startPage: 'recent', sendKey: 'enter', streamReading: true, restoreReadingPosition: false, outputLanguage: 'zh-CN', quickCaptureEnabled: false, quickCaptureShortcut: 'Alt+Shift+B' }
 export const useInterfaceStore = create<InterfacePreferences & { update: (value: Partial<InterfacePreferences>) => void; resetAppearance: () => void }>()(persist(set => ({ ...interfaceDefaults,
   update: value => set(value), resetAppearance: () => set({ fontSize: 14, codeSize: 13, font: 'system', reducedMotion: false }),
 }), { name: 'bilinote-interface-v1' }))

@@ -29,7 +29,34 @@ class ReviewPitStatusRequest(BaseModel):
     task_id: str
     section_id: str
     annotation_id: str
-    mastered: bool
+    mastered: Optional[bool] = None
+    remembered: Optional[bool] = None
+
+
+class UserAnnotationCreateRequest(BaseModel):
+    section_id: str = ""
+    section_title: str = ""
+    block_id: str = ""
+    anchor_text: str = ""
+    title: str = ""
+    detail: str
+    source: str = "manual"
+
+
+class UserAnnotationUpdateRequest(BaseModel):
+    section_id: Optional[str] = None
+    section_title: Optional[str] = None
+    block_id: Optional[str] = None
+    anchor_text: Optional[str] = None
+    title: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class TopicQuizRequest(BaseModel):
+    folder_id: Optional[str] = None
+    task_ids: Optional[list[str]] = None
+    limit: int = 20
+    include_archived: bool = False
 
 
 def _get_state(task_id: str):
@@ -119,8 +146,87 @@ def update_review_pit_status(data: ReviewPitStatusRequest):
             data.section_id,
             data.annotation_id,
             mastered=data.mastered,
+            remembered=data.remembered,
         )
         return R.success(result)
+    except FileNotFoundError as exc:
+        return R.error(str(exc), code=404)
+    except ValueError as exc:
+        return R.error(str(exc), code=400)
+
+
+@router.post("/learning/notes/{task_id}/annotations")
+@router.post("/notes/{task_id}/annotations")
+def create_user_annotation(task_id: str, data: UserAnnotationCreateRequest):
+    from app.services import learning_state
+
+    try:
+        result = learning_state.add_user_annotation(task_id, data.model_dump())
+        return R.success(result)
+    except FileNotFoundError as exc:
+        return R.error(str(exc), code=404)
+    except ValueError as exc:
+        return R.error(str(exc), code=400)
+
+
+@router.put("/learning/notes/{task_id}/annotations/{annotation_id}")
+@router.put("/notes/{task_id}/annotations/{annotation_id}")
+def edit_user_annotation(task_id: str, annotation_id: str, data: UserAnnotationUpdateRequest):
+    from app.services import learning_state
+
+    try:
+        result = learning_state.update_user_annotation(
+            task_id,
+            annotation_id,
+            data.model_dump(exclude_none=True),
+        )
+        return R.success(result)
+    except FileNotFoundError as exc:
+        return R.error(str(exc), code=404)
+    except ValueError as exc:
+        return R.error(str(exc), code=400)
+
+
+@router.delete("/learning/notes/{task_id}/annotations/{annotation_id}")
+@router.delete("/notes/{task_id}/annotations/{annotation_id}")
+def remove_user_annotation(task_id: str, annotation_id: str):
+    from app.services import learning_state
+
+    try:
+        result = learning_state.delete_user_annotation(task_id, annotation_id)
+        return R.success(result)
+    except FileNotFoundError as exc:
+        return R.error(str(exc), code=404)
+    except ValueError as exc:
+        return R.error(str(exc), code=400)
+
+
+@router.post("/learning/topic-quiz")
+def get_topic_quiz(data: TopicQuizRequest):
+    from app.services import learning_state
+
+    try:
+        result = learning_state.collect_topic_quizzes(
+            folder_id=data.folder_id,
+            task_ids=data.task_ids,
+            limit=data.limit,
+            include_archived=data.include_archived,
+        )
+        return R.success(result)
+    except FileNotFoundError as exc:
+        return R.error(str(exc), code=404)
+    except ValueError as exc:
+        return R.error(str(exc), code=400)
+
+
+@router.get("/learning/notes/{task_id}/related")
+@router.get("/notes/{task_id}/related")
+def get_related_notes(task_id: str, limit: int = 3):
+    from app.services import related_notes
+
+    try:
+        items = related_notes.find_related_notes(task_id, limit=limit)
+        return R.success({"items": items})
     except FileNotFoundError as exc:
         return R.error(str(exc), code=404)
     except ValueError as exc:

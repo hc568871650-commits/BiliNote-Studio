@@ -16,7 +16,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "BillNote_frontend"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 PORTS = {"quick": 38483, "full": 38484}
 
 
@@ -46,21 +46,38 @@ def backend(args, work):
         "uvicorn",
         "fastapi",
         "starlette",
+        "PIL.Image",
+        "PIL.ImageChops",
+        "PIL.ImageStat",
+        "PIL.ImageOps",
+        "PIL.ImageDraw",
+        "PIL.ImageFilter",
+        "PIL.ImageFont",
+        "app.utils.dynamic_frames",
+        "app.utils.video_reader",
         "app.domains.ingestion.collection",
+        "app.domains.ingestion.document_parser",
         "app.domains.ingestion.subtitle_parser",
         "app.domains.learning.router",
         "app.domains.media.router",
         "app.domains.pipeline.runner",
+        "app.downloaders.web_downloader",
+        "app.downloaders.x_downloader",
+        "app.downloaders.xiaoyuzhoufm_download",
         "app.jobs.events",
         "app.jobs.manager",
         "app.jobs.models",
         "app.routers.ingestion",
         "app.routers.jobs",
+        "app.routers.system_maintenance",
         "app.services.media_io",
         "app.services.learning_state",
         "app.services.media_stream",
         "app.services.note_upgrade",
         "app.services.purpose_preferences",
+        "app.services.related_notes",
+        "app.services.system_maintenance",
+        "app.services.transcript_translator",
         "app.utils.secret_store",
     ]
     excludes = ["markdown_pdf", "fitz", "pymupdf"] if getattr(args, "installer", False) else []
@@ -73,9 +90,10 @@ def backend(args, work):
                          "langgraph-sdk", "langchain-core", "langchain-protocol", "langsmith", "aiosqlite", "ormsgpack", "uuid-utils"]
         hidden += ["app.services.organizer_sessions"]
     else:
-        excludes = ["app.transcriber.whisper", "app.transcriber.mlx_whisper_transcriber", "faster_whisper", "ctranslate2", "torch",
-                    "app.routers.organizer", "app.services.organizer", "app.services.organizer_sessions",
-                    "langgraph", "langchain_core", "langsmith", "sqlite_vec"]
+        excludes += ["app.transcriber.whisper", "app.transcriber.mlx_whisper_transcriber", "faster_whisper", "ctranslate2", "torch",
+                     "app.routers.organizer", "app.services.organizer", "app.services.organizer_sessions",
+                     "langgraph", "langchain_core", "langsmith", "sqlite_vec"]
+    excludes = list(dict.fromkeys(excludes))
     build_info = work / "build-info.json"
     build_info.write_text(json.dumps({"version": VERSION}), encoding="utf-8")
     spec = work / "BiliNoteBackend.spec"

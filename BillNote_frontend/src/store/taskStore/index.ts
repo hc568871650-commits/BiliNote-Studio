@@ -26,6 +26,7 @@ export interface Segment {
   start: number
   end: number
   text: string
+  translated_text?: string
 }
 
 export interface Transcript {

@@ -104,29 +104,49 @@ class LocalDownloader(Downloader):
             raise RuntimeError(f'MP3 音频未生成或为空: {output}')
         return str(output)
 
-    def download_video(self, video_url: str, output_dir: Optional[str] = None) -> str:
+    def is_text_post(self, video_url: str) -> bool:
+        from app.domains.ingestion.document_parser import is_document_path
+
+        return is_document_path(video_url)
+
+    def _resolve_original_name(self, source: Path) -> str:
+        if source.parent == (Path.cwd() / 'uploads').resolve():
+            try:
+                return str(json.loads((source.parent / '_names' / (source.name + '.json')).read_text(encoding='utf-8'))['filename'])
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+        return source.name
+
+    def download_video(self, video_url: str, output_dir: Optional[str] = None) -> Optional[str]:
+        from app.domains.ingestion.document_parser import is_document_path
+        from app.domains.ingestion.subtitle_parser import is_subtitle_path
+
+        if is_subtitle_path(video_url) or is_document_path(video_url):
+            return None
         return str(self._source(video_url))
 
     def download_subtitles(self, video_url: str, output_dir: Optional[str] = None, langs: list = None):
+        from app.domains.ingestion.document_parser import is_document_path, parse_document_file
         from app.domains.ingestion.subtitle_parser import is_subtitle_path, parse_subtitle_file
 
-        if not is_subtitle_path(video_url):
-            return None
-        source = self._source(video_url)
-        return parse_subtitle_file(source)
+        if is_subtitle_path(video_url):
+            source = self._source(video_url)
+            return parse_subtitle_file(source)
+        if is_document_path(video_url):
+            source = self._source(video_url)
+            transcript, _ = parse_document_file(source, original_name=self._resolve_original_name(source))
+            return transcript
+        return None
 
     def download(self, video_url: str, output_dir: Optional[str] = None,
-                 quality: DownloadQuality = 'fast', need_video: Optional[bool] = False) -> AudioDownloadResult:
+                 quality: DownloadQuality = 'fast', need_video: Optional[bool] = False,
+                 skip_download: bool = False) -> AudioDownloadResult:
+        from app.domains.ingestion.document_parser import is_document_path, parse_document_file
         from app.domains.ingestion.subtitle_parser import is_subtitle_path, parse_subtitle_file
 
         source = self._source(video_url)
-        title = source.stem
-        if source.parent == (Path.cwd() / 'uploads').resolve():
-            try:
-                original = json.loads((source.parent / '_names' / (source.name + '.json')).read_text(encoding='utf-8'))['filename']
-                title = Path(original).stem
-            except (OSError, ValueError, KeyError, TypeError):
-                pass
+        original_name = self._resolve_original_name(source)
+        title = Path(original_name).stem or source.stem
         if is_subtitle_path(source):
             transcript = parse_subtitle_file(source)
             duration = max((seg.end for seg in transcript.segments), default=0.0)
@@ -134,6 +154,32 @@ class LocalDownloader(Downloader):
                 file_path=str(source), title=title, duration=duration, cover_url='',
                 platform='local', video_id=source.stem,
                 raw_info={'path': str(source), 'source_path': str(source), 'is_subtitle': True},
+                video_path=None,
+            )
+        if is_document_path(source):
+            _, doc_meta = parse_document_file(source, original_name=original_name)
+            doc_type = str(doc_meta.get('document_type') or '').lower()
+            doc_type_label = {'pdf': 'PDF', 'markdown': 'Markdown', 'txt': 'TXT'}.get(doc_type, '文档')
+            return AudioDownloadResult(
+                file_path=str(source),
+                title=doc_meta.get('title') or title,
+                duration=0.0,
+                cover_url='',
+                platform='local',
+                video_id=source.stem,
+                raw_info={
+                    'path': str(source),
+                    'source_path': str(source),
+                    'media_kind': 'text_post',
+                    'source_kind': 'local_document',
+                    'is_document': True,
+                    'document_type': doc_type,
+                    'page_count': doc_meta.get('page_count'),
+                    'text_length': doc_meta.get('text_length'),
+                    'truncated': bool(doc_meta.get('truncated')),
+                    'post_context': doc_meta.get('post_context') or '',
+                    'uploader': doc_type_label,
+                },
                 video_path=None,
             )
         directory = self._output_directory(source, output_dir)

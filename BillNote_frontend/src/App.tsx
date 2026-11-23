@@ -1,8 +1,9 @@
 import './App.css'
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { BrowserRouter, HashRouter, Navigate, Routes, Route, Link } from 'react-router-dom'
 import { useTaskPolling } from '@/hooks/useTaskPolling.ts'
 import { useCheckBackend } from '@/hooks/useCheckBackend.ts'
+import { useQuickCapture } from '@/hooks/useQuickCapture'
 import { systemCheck } from '@/services/system.ts'
 import { usePurposeModelStore } from '@/store/purposeModelStore'
 import BackendInitDialog from '@/components/BackendInitDialog'
@@ -30,6 +31,8 @@ function OnboardingGuard({ children }: { children: React.ReactNode }) {
 const Model = lazy(() => import('@/pages/SettingPage/Model.tsx'))
 const ProviderForm = lazy(() => import('@/components/Form/modelForm/Form.tsx'))
 const AboutPage = lazy(() => import('@/pages/SettingPage/about.tsx'))
+const StoragePage = lazy(() => import('@/pages/SettingPage/Storage.tsx'))
+const CommandPalette = lazy(() => import('@/components/CommandPalette'))
 const Monitor = lazy(() => import('@/pages/SettingPage/Monitor.tsx'))
 const Downloader = lazy(() => import('@/pages/SettingPage/Downloader.tsx'))
 const DownloaderForm = lazy(() => import('@/components/Form/DownloaderForm/Form.tsx'))
@@ -42,6 +45,20 @@ const SettingsLanding = lazy(() => import('@/pages/SettingPage/SettingsLanding')
 function App() {
   useTaskPolling(3000) // 每 3 秒轮询一次
   const { loading, initialized, failed, lastError, retry } = useCheckBackend()
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  useQuickCapture(initialized)
+
+  useEffect(() => {
+    if (!initialized) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setPaletteOpen(open => !open)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [initialized])
 
   // 在后端初始化完成后执行系统检查并同步默认用途偏好
   useEffect(() => {
@@ -96,12 +113,16 @@ function App() {
                 </Route>
                 <Route path="transcriber" element={<TranscriberPage />} />
                 <Route path="monitor" element={<Monitor />}></Route>
+                <Route path="storage" element={<StoragePage />}></Route>
                 <Route path="about" element={<AboutPage />}></Route>
                 <Route path="*" element={<NotFoundPage />} />
               </Route>
               <Route path="*" element={<NotFoundPage />} />
             </Route>
           </Routes>
+          {paletteOpen && (
+            <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+          )}
         </Suspense>
       </Router>
     </>

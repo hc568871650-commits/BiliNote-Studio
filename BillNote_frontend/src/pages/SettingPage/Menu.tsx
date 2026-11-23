@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Captions, Cpu, HardDriveDownload, Info, Activity, Search, Palette, Settings2 } from 'lucide-react'
+import { Captions, Cpu, HardDrive, HardDriveDownload, Info, Activity, Search, Palette, Settings2 } from 'lucide-react'
 import MenuBar, { type IMenuProps } from './components/menuBar'
 
 const groups: { name: string; items: IMenuProps[] }[] = [
@@ -14,6 +14,7 @@ const groups: { name: string; items: IMenuProps[] }[] = [
     { id: 'download', name: '视频下载', icon: <HardDriveDownload strokeWidth={1.6} />, path: '/settings/download' },
   ] },
   { name: '应用', items: [
+    { id: 'storage', name: '存储与维护', icon: <HardDrive strokeWidth={1.6} />, path: '/settings/storage' },
     { id: 'monitor', name: '运行状态', icon: <Activity strokeWidth={1.6} />, path: '/settings/monitor' },
     { id: 'about', name: '关于', icon: <Info strokeWidth={1.6} />, path: '/settings/about' },
   ] },
@@ -21,7 +22,7 @@ const groups: { name: string; items: IMenuProps[] }[] = [
 
 export default function Menu() {
   const [search, setSearch] = useState('')
-  const visible = groups.map(group => ({ ...group, items: group.items.filter(item => (item.name + ({ general:'启动页面 快捷键 发送 草稿', appearance:'主题 颜色 强调色 字体 字号 动效 深色 浅色', model:'生成 阅读 整理 模型 API Key 密钥 地址 连接 服务商 联网 搜索 上下文 容量 协议', transcriber:'音频 转录 下载模型 Whisper Groq', download:'视频 Cookie 代理 Proxy', monitor:'运行 内存 cpu 状态', about:'项目 开源 地址' }[item.id] || '')).toLowerCase().includes(search.trim().toLowerCase())) }))
+  const visible = groups.map(group => ({ ...group, items: group.items.filter(item => (item.name + ({ general:'启动页面 快捷键 发送 草稿 语言 缓存 捕获', appearance:'主题 颜色 强调色 字体 字号 动效 深色 浅色', model:'生成 阅读 整理 模型 API Key 密钥 地址 连接 服务商 联网 搜索 上下文 容量 协议', transcriber:'音频 转录 下载模型 Whisper Groq', download:'视频 Cookie 代理 Proxy', storage:'存储 空间 清理 缓存 备份 恢复 zip', monitor:'运行 内存 cpu 状态', about:'项目 开源 地址 更新 版本' }[item.id] || '')).toLowerCase().includes(search.trim().toLowerCase())) }))
   return <div className="settings-menu">
     <h1>设置</h1>
     <label className="settings-search"><Search size={15} strokeWidth={1.6} /><input aria-label="搜索设置" placeholder="搜索设置" value={search} onChange={event => setSearch(event.target.value)} /></label>

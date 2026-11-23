@@ -16,9 +16,10 @@ from app.services.web_page import resolve_public
 MEDIA_SUFFIXES = {'.mp4', '.mkv', '.mov', '.avi', '.webm', '.m4v', '.flv', '.ts',
                   '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.opus', '.wma'}
 SUBTITLE_SUFFIXES = {'.srt', '.vtt'}
-UPLOAD_ALLOWED_SUFFIXES = MEDIA_SUFFIXES | SUBTITLE_SUFFIXES
-COVER_DOMAINS = ('hdslb.com', 'bilibili.com', 'ytimg.com', 'kwimgs.com', 'kwaicdn.com',
-                 'douyinpic.com', 'byteimg.com', 'pstatp.com')
+DOCUMENT_SUFFIXES = {'.pdf', '.md', '.markdown', '.txt'}
+UPLOAD_ALLOWED_SUFFIXES = MEDIA_SUFFIXES | SUBTITLE_SUFFIXES | DOCUMENT_SUFFIXES
+COVER_DOMAINS = ('hdslb.com', 'bilibili.com', 'ytimg.com', 'twimg.com', 'xyzcdn.net', 'xiaoyuzhoufm.com',
+                 'kwimgs.com', 'kwaicdn.com', 'douyinpic.com', 'byteimg.com', 'pstatp.com')
 IMAGE_LIMIT = 8 * 1024 * 1024
 
 
@@ -54,7 +55,7 @@ class UploadBodyLimit:
 async def save_upload(file: UploadFile, directory: str):
     suffix = Path((file.filename or '').replace('\\', '/')).suffix.lower()
     if suffix not in UPLOAD_ALLOWED_SUFFIXES:
-        raise HTTPException(415, '请选择支持的音频、视频或字幕文件（.srt / .vtt）')
+        raise HTTPException(415, '请选择支持的音视频、字幕（.srt / .vtt）或文档文件（.pdf / .md / .txt）')
     limit = int(os.getenv('BILINOTE_UPLOAD_MAX_BYTES', str(4 * 1024 ** 3)))
     if limit <= 0:
         raise HTTPException(503, '上传大小限制配置无效，请检查后台设置')
@@ -83,7 +84,8 @@ async def save_upload(file: UploadFile, directory: str):
         complete = True
         return {'url': f'/uploads/{target.name}',
                 'filename': original,
-                'is_subtitle': suffix in SUBTITLE_SUFFIXES}
+                'is_subtitle': suffix in SUBTITLE_SUFFIXES,
+                'is_document': suffix in DOCUMENT_SUFFIXES}
     finally:
         if created and not complete and target.is_file():
             target.unlink()
@@ -105,12 +107,27 @@ async def fetch_cover(url: str):
         # Keep Host/SNI bound to the original domain, while the connection uses
         # only the validated address. A second DNS lookup cannot rebind it.
         pinned = parsed.copy_with(host=addresses[0], fragment=None)
-        headers = {'Host': host, 'Referer': 'https://www.bilibili.com/',
-                   'User-Agent': 'BiliNote-Studio/1.0', 'Accept-Encoding': 'identity'}
+        headers = {'Host': host, 'User-Agent': 'BiliNote-Studio/1.0', 'Accept-Encoding': 'identity'}
+        if host.endswith(('bilibili.com', 'hdslb.com')):
+            headers['Referer'] = 'https://www.bilibili.com/'
+        proxy_url = None
+        if host.endswith(('twimg.com', 'ytimg.com')):
+            try:
+                from app.services.proxy_config_manager import ProxyConfigManager
+                proxy_url = ProxyConfigManager().get_proxy_url()
+            except Exception:
+                proxy_url = None
         async with asyncio.timeout(max(.01, deadline - time.monotonic())):
-            async with httpx.AsyncClient(timeout=10, follow_redirects=False, trust_env=False) as client:
-                async with client.stream('GET', pinned, headers=headers,
-                                         extensions={'sni_hostname': host}) as response:
+            client_kwargs = dict(timeout=10, follow_redirects=False, trust_env=False)
+            target_url = pinned
+            stream_kwargs = {'headers': headers, 'extensions': {'sni_hostname': host}}
+            if proxy_url:
+                # 配置了显式代理时由代理出口解析目标公网域名，保持白名单校验在前
+                client_kwargs['proxy'] = proxy_url
+                target_url = parsed.copy_with(fragment=None)
+                stream_kwargs = {'headers': {k: v for k, v in headers.items() if k != 'Host'}}
+            async with httpx.AsyncClient(**client_kwargs) as client:
+                async with client.stream('GET', target_url, **stream_kwargs) as response:
                     if response.status_code != 200:
                         raise HTTPException(502, '封面获取失败，请稍后重试')
                     content_type = response.headers.get('content-type', '').split(';')[0].lower()

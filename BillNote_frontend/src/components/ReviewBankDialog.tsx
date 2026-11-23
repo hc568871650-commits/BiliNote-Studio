@@ -1,11 +1,13 @@
-import { type CSSProperties, type KeyboardEvent, useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, type CSSProperties, type KeyboardEvent, useCallback, useEffect, useState } from 'react'
 import {
   AlertTriangle,
   BookMarked,
   Check,
   CheckCircle2,
   ChevronDown,
+  Clock,
   ExternalLink,
+  Layers,
   Loader2,
   RotateCcw,
   X,
@@ -23,13 +25,30 @@ import { useTaskStore } from '@/store/taskStore'
 import { useSourceNavigationStore } from '@/store/sourceNavigationStore'
 import { useNavigate } from 'react-router-dom'
 
+const TopicQuizDialog = lazy(() => import('@/components/TopicQuizDialog'))
+
 type FilterKind = 'all' | 'wrong_quiz' | 'pit'
-type ReviewStatusFilter = 'pending' | 'mastered'
+type ReviewStatusFilter = 'due' | 'pending' | 'mastered'
 
 const FILTER_TABS: readonly FilterKind[] = ['all', 'wrong_quiz', 'pit']
 
 const REVIEW_ACTION_BTN = 'inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-[var(--surface-border)] bg-[color-mix(in_srgb,var(--surface-raised)_82%,transparent)] px-2.5 text-[11.5px] font-medium text-foreground whitespace-nowrap transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-45'
 const REVIEW_ACTION_ACCENT_BTN = 'inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--reading-accent,var(--primary))_38%,transparent)] bg-[color-mix(in_srgb,var(--reading-accent,var(--primary))_12%,transparent)] px-2.5 text-[11.5px] font-medium text-[var(--reading-accent,var(--primary))] whitespace-nowrap transition-colors hover:bg-[color-mix(in_srgb,var(--reading-accent,var(--primary))_20%,transparent)] disabled:opacity-45'
+
+function formatSrsBadge(item: ReviewBankItem): string | null {
+  if (item.mastered) return null
+  if (item.is_due) return '今日到期'
+  if (item.next_review_at) {
+    const ms = Date.parse(item.next_review_at) - Date.now()
+    if (Number.isFinite(ms)) {
+      if (ms <= 0) return '今日到期'
+      const days = Math.max(1, Math.ceil(ms / (24 * 3600 * 1000)))
+      return `${days} 天后复习`
+    }
+  }
+  if (item.interval_days) return `间隔 ${item.interval_days} 天`
+  return null
+}
 
 function itemKeyOf(item: ReviewBankItem, idx: number): string {
   if (item.kind === 'wrong_quiz') {
@@ -38,16 +57,25 @@ function itemKeyOf(item: ReviewBankItem, idx: number): string {
   return `pit:${item.task_id}:${item.section_id}:${item.annotation_id || idx}`
 }
 
-export default function ReviewBankDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+export default function ReviewBankDialog({
+  open,
+  onOpenChange,
+  onStatsChanged,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onStatsChanged?: () => void
+}) {
   const navigate = useNavigate()
   const [kind, setKind] = useState<FilterKind>('all')
-  const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>('pending')
+  const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>('due')
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<ReviewBankResponse | null>(null)
   const [error, setError] = useState('')
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({})
-  const [practicePicked, setPracticePicked] = useState<Record<string, { key: string; isCorrect: boolean }>>({})
+  const [practicePicked, setPracticePicked] = useState<Record<string, { key: string; isCorrect: boolean; nextInterval?: number }>>({})
   const [busyKey, setBusyKey] = useState<string | null>(null)
+  const [topicQuizOpen, setTopicQuizOpen] = useState(false)
 
   const loadBank = useCallback(async (targetStatus: ReviewStatusFilter) => {
     setLoading(true)
@@ -98,14 +126,38 @@ export default function ReviewBankDialog({ open, onOpenChange }: { open: boolean
       })
       setPracticePicked(prev => ({
         ...prev,
-        [itemKey]: { key: optionKey, isCorrect: result.is_correct },
+        [itemKey]: { key: optionKey, isCorrect: result.is_correct, nextInterval: result.interval_days },
       }))
+      if (result.is_correct && result.interval_days) {
+        toast.success(`答对了，已安排 ${result.interval_days} 天后复习`)
+      }
+      onStatsChanged?.()
     } catch {
       const fallbackCorrect = Boolean(item.correct_key && optionKey === item.correct_key)
       setPracticePicked(prev => ({
         ...prev,
         [itemKey]: { key: optionKey, isCorrect: fallbackCorrect },
       }))
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  const handleAdvancePitReview = async (item: ReviewBankItem, itemKey: string) => {
+    if (busyKey || !item.annotation_id) return
+    setBusyKey(itemKey)
+    try {
+      const result = await updateReviewPitStatus({
+        task_id: item.task_id,
+        section_id: item.section_id,
+        annotation_id: item.annotation_id,
+        remembered: true,
+      })
+      toast.success(`已记牢，${result.interval_days || 1} 天后再次复习`)
+      await loadBank(statusFilter)
+      onStatsChanged?.()
+    } catch {
+      toast.error('推进复习计划失败，请稍后重试')
     } finally {
       setBusyKey(null)
     }
@@ -131,6 +183,7 @@ export default function ReviewBankDialog({ open, onOpenChange }: { open: boolean
       }
       toast.success(nextMastered ? '已标为掌握' : '已移回待复习')
       await loadBank(statusFilter)
+      onStatsChanged?.()
     } catch {
       toast.error('更新复习状态失败，请稍后重试')
     } finally {
@@ -165,29 +218,48 @@ export default function ReviewBankDialog({ open, onOpenChange }: { open: boolean
               <BookMarked size={17} strokeWidth={1.6} />
               <span>错题与高频避坑回顾</span>
             </DialogTitle>
-            <div
-              className="inline-flex items-center rounded-full border border-[var(--surface-hairline)] bg-[var(--surface-input)] p-[3px] text-[11px]"
-              role="radiogroup"
-              aria-label="复习状态筛选"
-            >
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                role="radio"
-                aria-checked={statusFilter === 'pending'}
-                className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 leading-none transition-colors ${statusFilter === 'pending' ? 'bg-[var(--surface-raised)] font-medium text-[var(--reading-accent,var(--primary))] shadow-[inset_0_0_0_1px_var(--surface-hairline)]' : 'text-muted-foreground hover:text-foreground'}`}
-                onClick={() => setStatusFilter('pending')}
+                className={REVIEW_ACTION_ACCENT_BTN}
+                onClick={() => setTopicQuizOpen(true)}
               >
-                待复习{typeof data?.pending_total === 'number' ? ` (${data.pending_total})` : ''}
+                <Layers size={12} strokeWidth={1.7} />
+                <span>专题小测</span>
               </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={statusFilter === 'mastered'}
-                className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 leading-none transition-colors ${statusFilter === 'mastered' ? 'bg-[var(--surface-raised)] font-medium text-[var(--reading-accent,var(--primary))] shadow-[inset_0_0_0_1px_var(--surface-hairline)]' : 'text-muted-foreground hover:text-foreground'}`}
-                onClick={() => setStatusFilter('mastered')}
+              <div
+                className="inline-flex items-center rounded-full border border-[var(--surface-hairline)] bg-[var(--surface-input)] p-[3px] text-[11px]"
+                role="radiogroup"
+                aria-label="复习状态筛选"
               >
-                已掌握{typeof data?.mastered_total === 'number' ? ` (${data.mastered_total})` : ''}
-              </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={statusFilter === 'due'}
+                  className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 leading-none transition-colors ${statusFilter === 'due' ? 'bg-[var(--surface-raised)] font-medium text-[var(--reading-accent,var(--primary))] shadow-[inset_0_0_0_1px_var(--surface-hairline)]' : 'text-muted-foreground hover:text-foreground'}`}
+                  onClick={() => setStatusFilter('due')}
+                >
+                  今日到期{typeof data?.due_total === 'number' ? ` (${data.due_total})` : ''}
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={statusFilter === 'pending'}
+                  className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 leading-none transition-colors ${statusFilter === 'pending' ? 'bg-[var(--surface-raised)] font-medium text-[var(--reading-accent,var(--primary))] shadow-[inset_0_0_0_1px_var(--surface-hairline)]' : 'text-muted-foreground hover:text-foreground'}`}
+                  onClick={() => setStatusFilter('pending')}
+                >
+                  待复习{typeof data?.pending_total === 'number' ? ` (${data.pending_total})` : ''}
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={statusFilter === 'mastered'}
+                  className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 leading-none transition-colors ${statusFilter === 'mastered' ? 'bg-[var(--surface-raised)] font-medium text-[var(--reading-accent,var(--primary))] shadow-[inset_0_0_0_1px_var(--surface-hairline)]' : 'text-muted-foreground hover:text-foreground'}`}
+                  onClick={() => setStatusFilter('mastered')}
+                >
+                  已掌握{typeof data?.mastered_total === 'number' ? ` (${data.mastered_total})` : ''}
+                </button>
+              </div>
             </div>
           </div>
           <DialogDescription>
@@ -233,7 +305,22 @@ export default function ReviewBankDialog({ open, onOpenChange }: { open: boolean
           ) : !visibleItems.length ? (
             <div className="flex flex-col items-center justify-center gap-2 py-12 text-center text-muted-foreground">
               <CheckCircle2 size={22} strokeWidth={1.5} className="opacity-60" />
-              <p className="text-xs">{statusFilter === 'pending' ? '当前没有待复习条目' : '暂未标记已掌握条目'}</p>
+              <p className="text-xs">
+                {statusFilter === 'due'
+                  ? '今日到期复习已清空'
+                  : statusFilter === 'pending'
+                    ? '当前没有待复习条目'
+                    : '暂未标记已掌握条目'}
+              </p>
+              {statusFilter === 'due' && (data?.pending_total || 0) > 0 && (
+                <button
+                  type="button"
+                  className={REVIEW_ACTION_BTN}
+                  onClick={() => setStatusFilter('pending')}
+                >
+                  查看全部待复习 ({data?.pending_total})
+                </button>
+              )}
             </div>
           ) : (
             <div className="flex flex-col gap-2.5 pb-1">
@@ -266,6 +353,22 @@ export default function ReviewBankDialog({ open, onOpenChange }: { open: boolean
                           <span className="truncate font-medium text-foreground/85">{item.note_title}</span>
                           {item.section_title && <span className="truncate opacity-75">· {item.section_title}</span>}
                           {item.review_count ? <span className="opacity-65">· 复习 {item.review_count} 次</span> : null}
+                          {(() => {
+                            const srsLabel = formatSrsBadge(item)
+                            if (!srsLabel) return null
+                            return (
+                              <span
+                                className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10.5px] ${
+                                  item.is_due
+                                    ? 'bg-[color-mix(in_srgb,var(--reading-accent,var(--primary))_14%,transparent)] text-[var(--reading-accent,var(--primary))] font-medium'
+                                    : 'bg-[var(--surface-hover)] text-muted-foreground'
+                                }`}
+                              >
+                                <Clock size={10} />
+                                {srsLabel}
+                              </span>
+                            )
+                          })()}
                         </div>
 
                         <div className="flex shrink-0 items-center gap-1.5">
@@ -390,17 +493,30 @@ export default function ReviewBankDialog({ open, onOpenChange }: { open: boolean
                           {item.detail || item.hint}
                         </p>
                         <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                          <span>{item.timestamp_label ? `原片时间点 ${item.timestamp_label}` : '已对照理解后可标记掌握'}</span>
+                          <span>{item.timestamp_label ? `原片时间点 ${item.timestamp_label}` : '对照理解后可推进复习或标为掌握'}</span>
                           {item.annotation_id && (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              className={isMastered ? REVIEW_ACTION_BTN : REVIEW_ACTION_ACCENT_BTN}
-                              onClick={() => void handleToggleMastered(item, key, !isMastered)}
-                            >
-                              <CheckCircle2 size={12} />
-                              <span>{isMastered ? '移回待复习' : '标为已掌握'}</span>
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              {!isMastered && (
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  className={REVIEW_ACTION_BTN}
+                                  onClick={() => void handleAdvancePitReview(item, key)}
+                                >
+                                  <Clock size={12} />
+                                  <span>记住了</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                disabled={busy}
+                                className={isMastered ? REVIEW_ACTION_BTN : REVIEW_ACTION_ACCENT_BTN}
+                                onClick={() => void handleToggleMastered(item, key, !isMastered)}
+                              >
+                                <CheckCircle2 size={12} />
+                                <span>{isMastered ? '移回待复习' : '标为已掌握'}</span>
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -412,6 +528,18 @@ export default function ReviewBankDialog({ open, onOpenChange }: { open: boolean
           )}
         </div>
       </DialogContent>
+      {topicQuizOpen && (
+        <Suspense fallback={null}>
+          <TopicQuizDialog
+            open={topicQuizOpen}
+            onOpenChange={setTopicQuizOpen}
+            onCompleted={() => {
+              void loadBank(statusFilter)
+              onStatsChanged?.()
+            }}
+          />
+        </Suspense>
+      )}
     </Dialog>
   )
 }

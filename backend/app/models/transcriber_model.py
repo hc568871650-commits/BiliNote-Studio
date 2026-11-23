@@ -7,6 +7,7 @@ class TranscriptSegment:
     start: float               # 开始时间（秒）
     end: float                 # 结束时间（秒）
     text: str                  # 该段文字
+    translated_text: Optional[str] = None  # 可选中文译文（外语视频双语字幕缓存）
 
 @dataclass
 class TranscriptResult:

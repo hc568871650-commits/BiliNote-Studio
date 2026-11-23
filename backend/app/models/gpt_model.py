@@ -19,4 +19,6 @@ class GPTSource:
     frame_evidence: Optional[list[dict]] = None
     video_image_ranges: Optional[list[dict]] = None
     structured: bool = False
+    output_language: Optional[str] = "zh-CN"
+    post_context: Optional[str] = None
 

@@ -1,11 +1,13 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import {
@@ -13,6 +15,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  Languages,
+  Loader2,
   Pause,
   PictureInPicture2,
   Play,
@@ -26,7 +30,11 @@ import {
   clampPlaybackRate,
   findSegmentIndexForTime,
   formatMediaTime,
+  hasTranslatedCaptions,
+  hasUntranslatedCaptions,
+  isForeignTranscript,
   nextPlaybackRate,
+  type MediaConcatSegment,
   type OnlineVideoEmbed,
   type PlaybackRate,
   type TranscriptSegmentLike,
@@ -49,8 +57,29 @@ import {
 import './mini-media-player.css'
 
 const CAPTIONS_STORAGE_KEY = 'bilinote-media-captions-v1'
+const CAPTION_LANG_MODE_KEY = 'bilinote-caption-lang-mode-v1'
+type CaptionDisplayMode = 'bilingual' | 'zh' | 'original'
+
+function readCaptionDisplayMode(): CaptionDisplayMode {
+  try {
+    const raw = localStorage.getItem(CAPTION_LANG_MODE_KEY)
+    if (raw === 'bilingual' || raw === 'zh' || raw === 'original') return raw
+  } catch {
+    // 忽略受限存储
+  }
+  return 'bilingual'
+}
+
+function writeCaptionDisplayMode(mode: CaptionDisplayMode): void {
+  try {
+    localStorage.setItem(CAPTION_LANG_MODE_KEY, mode)
+  } catch {
+    // 忽略受限存储
+  }
+}
 const DRAG_THRESHOLD_PX = 4
 const KEYBOARD_STEP_PX = 28
+const CONTROLS_AUTO_HIDE_MS = 2000
 const FRAME_BORDER_PX = 2
 const COLLAPSED_BAR_WIDTH = 248
 const COLLAPSED_STAGE_HEIGHT = 34
@@ -104,9 +133,12 @@ interface MiniMediaPlayerProps {
   synthetic?: boolean
   onlineEmbed?: OnlineVideoEmbed | null
   transcriptSegments?: readonly TranscriptSegmentLike[]
+  spliceSegments?: readonly MediaConcatSegment[]
   durationHint?: number
   seekCommand: MediaSeekCommand | null
   externalUrl?: string | null
+  translatingCaptions?: boolean
+  onTranslateCaptions?: (options?: { force?: boolean }) => void | Promise<void>
   onTimeUpdate?: (seconds: number) => void
   onPlayingChange?: (playing: boolean) => void
   onUnavailable?: () => void
@@ -162,9 +194,12 @@ export default function MiniMediaPlayer({
   synthetic = false,
   onlineEmbed = null,
   transcriptSegments = [],
+  spliceSegments = [],
   durationHint = 0,
   seekCommand,
   externalUrl,
+  translatingCaptions = false,
+  onTranslateCaptions,
   onTimeUpdate,
   onPlayingChange,
   onUnavailable,
@@ -194,11 +229,14 @@ export default function MiniMediaPlayer({
   const [duration, setDuration] = useState(durationHint > 0 ? durationHint : 0)
   const [playbackRate, setPlaybackRate] = useState<PlaybackRate>(1)
   const [muted, setMuted] = useState(false)
-  // 本地音视频默认收起为精简音频进度条，按住顶耳上拉或点击展开为 16:9 视频；在线嵌入直接展开
-  const [videoExpanded, setVideoExpanded] = useState<boolean>(isEmbedMode)
+  // 本地视频与在线嵌入默认直接展开画面（纯音频来源保持精简音频进度条），仍可下拉顶耳收起
+  const defaultExpanded = isEmbedMode || isLocalVideo
+  const [videoExpanded, setVideoExpanded] = useState<boolean>(defaultExpanded)
+  const [layoutReady, setLayoutReady] = useState<boolean>(false)
   const [curtainHeight, setCurtainHeight] = useState<number | null>(null)
   const [embedBarOpen, setEmbedBarOpen] = useState(false)
   const [captionsEnabled, setCaptionsEnabled] = useState<boolean>(() => readCaptionsPreference())
+  const [captionDisplayMode, setCaptionDisplayMode] = useState<CaptionDisplayMode>(() => readCaptionDisplayMode())
   const [embedStartTime, setEmbedStartTime] = useState(0)
   const [embedAutoPlay, setEmbedAutoPlay] = useState(true)
   const [embedNonce, setEmbedNonce] = useState(0)
@@ -221,7 +259,22 @@ export default function MiniMediaPlayer({
   videoExpandedRef.current = videoExpanded
 
   const [interactionMode, setInteractionMode] = useState<'idle' | 'dragging' | 'resizing' | 'curtain'>('idle')
+  const [slidingToDock, setSlidingToDock] = useState(false)
+  const [controlsVisible, setControlsVisible] = useState(false)
+  const slideTimerRef = useRef<number | null>(null)
+  const controlsHideTimerRef = useRef<number | null>(null)
+  const pointerInsideRef = useRef(false)
+  const wasInteractingRef = useRef(false)
   const [liveAnnouncement, setLiveAnnouncement] = useState('')
+
+  const triggerDockSlide = useCallback(() => {
+    setSlidingToDock(true)
+    if (slideTimerRef.current !== null) window.clearTimeout(slideTimerRef.current)
+    slideTimerRef.current = window.setTimeout(() => {
+      setSlidingToDock(false)
+      slideTimerRef.current = null
+    }, 360)
+  }, [])
 
   const onTimeUpdateRef = useRef(onTimeUpdate)
   const onPlayingChangeRef = useRef(onPlayingChange)
@@ -328,6 +381,8 @@ export default function MiniMediaPlayer({
 
   useEffect(() => () => {
     if (liveTimerRef.current !== null) window.clearTimeout(liveTimerRef.current)
+    if (slideTimerRef.current !== null) window.clearTimeout(slideTimerRef.current)
+    if (controlsHideTimerRef.current !== null) window.clearTimeout(controlsHideTimerRef.current)
     if (moveRafRef.current !== null) window.cancelAnimationFrame(moveRafRef.current)
   }, [])
 
@@ -371,18 +426,103 @@ export default function MiniMediaPlayer({
     announce(nextExpanded ? '已展开视频画面' : '已收起为音频进度条')
   }, [announce, currentTotalHeight, displayWidthFor, isLocalVideo])
 
-  // 切换模式时同步默认形态（本地音视频默认收起为音频进度条，在线嵌入默认展开）
-  useEffect(() => {
-    if (!open) return
-    setVideoExpanded(isEmbedMode)
-    setCurtainHeight(null)
-  }, [open, isEmbedMode])
+  const clearControlsHideTimer = useCallback(() => {
+    if (controlsHideTimerRef.current !== null) {
+      window.clearTimeout(controlsHideTimerRef.current)
+      controlsHideTimerRef.current = null
+    }
+  }, [])
 
-  // 监测阅读区容器大小变化，动态收敛尺寸上限与贴边磁吸
+  // 展开态下鼠标移出播放器 2 秒后自动隐藏悬浮播放栏与关闭钮，并清除内部残留焦点（不收起视频画面）
+  const scheduleControlsHide = useCallback(() => {
+    clearControlsHideTimer()
+    if (!open || pointerInsideRef.current || interactionRef.current !== null) {
+      return
+    }
+    controlsHideTimerRef.current = window.setTimeout(() => {
+      controlsHideTimerRef.current = null
+      if (pointerInsideRef.current || interactionRef.current !== null) {
+        return
+      }
+      const activeEl = document.activeElement
+      if (activeEl instanceof HTMLElement && floatingRef.current?.contains(activeEl)) {
+        activeEl.blur()
+      }
+      setControlsVisible(false)
+    }, CONTROLS_AUTO_HIDE_MS)
+  }, [clearControlsHideTimer, open])
+
+  // 打开播放器时短暂展示控制栏 2 秒再自动淡出，方便首眼感知操作区且不常驻遮挡画面
+  useEffect(() => {
+    if (!open) {
+      clearControlsHideTimer()
+      pointerInsideRef.current = false
+      setControlsVisible(false)
+      return
+    }
+    setControlsVisible(true)
+    if (!pointerInsideRef.current) {
+      scheduleControlsHide()
+    }
+  }, [clearControlsHideTimer, open, scheduleControlsHide])
+
   useEffect(() => {
     if (!open) return
+    if (interactionMode !== 'idle') {
+      wasInteractingRef.current = true
+      clearControlsHideTimer()
+      setControlsVisible(true)
+      return
+    }
+    if (wasInteractingRef.current) {
+      wasInteractingRef.current = false
+      if (!pointerInsideRef.current) {
+        scheduleControlsHide()
+      }
+    }
+  }, [clearControlsHideTimer, interactionMode, open, scheduleControlsHide])
+
+  const handleWindowPointerEnter = useCallback(() => {
+    pointerInsideRef.current = true
+    clearControlsHideTimer()
+    setControlsVisible(true)
+  }, [clearControlsHideTimer])
+
+  const handleWindowPointerLeave = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    pointerInsideRef.current = false
+    if (!open) return
+    if (interactionRef.current !== null) return
+    // 若用户按住左键拖拽进度条时短暂滑出边界，待松手后仍在外部再启动 2 秒自动隐藏
+    if (event.buttons !== 0) {
+      const onRelease = () => {
+        window.removeEventListener('pointerup', onRelease)
+        window.removeEventListener('pointercancel', onRelease)
+        if (!pointerInsideRef.current && interactionRef.current === null) {
+          scheduleControlsHide()
+        }
+      }
+      window.addEventListener('pointerup', onRelease)
+      window.addEventListener('pointercancel', onRelease)
+      return
+    }
+    scheduleControlsHide()
+  }, [open, scheduleControlsHide])
+
+  // 打开或切换媒体形态时，在首帧绘制前同步测量容器尺寸并落位，杜绝打开时的长距离飞移与先大后小抖动
+  useLayoutEffect(() => {
+    if (!open) {
+      setLayoutReady(false)
+      return
+    }
+    setLayoutReady(false)
+    setVideoExpanded(defaultExpanded)
+    setCurtainHeight(null)
+
     const host = floatingRef.current?.offsetParent as HTMLElement | null
-    if (!host) return
+    if (!host) {
+      setLayoutReady(true)
+      return
+    }
 
     const syncBounds = (isInitial: boolean) => {
       const rect = host.getBoundingClientRect()
@@ -394,7 +534,7 @@ export default function MiniMediaPlayer({
       }
       setBounds(nextBounds)
       setFloating(prev => {
-        const exp = isInitial ? isEmbedMode : videoExpandedRef.current
+        const exp = isInitial ? defaultExpanded : videoExpandedRef.current
         if (isInitial) {
           const restored = restoreFloatingState(nextBounds, 0)
           const displayW = displayWidthFor(restored.width, exp, null)
@@ -422,10 +562,14 @@ export default function MiniMediaPlayer({
     }
 
     syncBounds(true)
+    const rafId = window.requestAnimationFrame(() => setLayoutReady(true))
     const observer = new ResizeObserver(() => syncBounds(false))
     observer.observe(host)
-    return () => observer.disconnect()
-  }, [open, isEmbedMode, currentTotalHeight, displayWidthFor, extraHeightForClamping])
+    return () => {
+      window.cancelAnimationFrame(rafId)
+      observer.disconnect()
+    }
+  }, [open, defaultExpanded, currentTotalHeight, displayWidthFor, extraHeightForClamping])
 
   useEffect(() => {
     if (durationHint > 0 && duration <= 0) {
@@ -914,6 +1058,7 @@ export default function MiniMediaPlayer({
             ? cur.left + throwX
             : (session.startDockX === 'right' ? session.anchorRight - cur.width : session.startLeft)
           const snapped = snapVideoPosition(baseLeft, targetTop, cur.width, b, extraFull)
+          if (snapped.dockX === 'right') triggerDockSlide()
           setVideoExpanded(true)
           const next: FloatingVideoState = {
             width: cur.width,
@@ -931,6 +1076,7 @@ export default function MiniMediaPlayer({
         const extraCollapsed = extraHeightForClamping(cur.width, false, null)
         const collapsedW = displayWidthFor(cur.width, false, null)
         const snapped = snapVideoPosition(session.startLeft, session.startTop, collapsedW, b, extraCollapsed)
+        if (snapped.dockX === 'right') triggerDockSlide()
         const next: FloatingVideoState = {
           width: cur.width,
           left: snapped.left,
@@ -963,6 +1109,7 @@ export default function MiniMediaPlayer({
           const extraCollapsed = extraHeightForClamping(cur.width, false, null)
           const bottomTop = Math.max(FLOATING_VIDEO_EDGE_MARGIN, b.height - b.bottomClearance - COLLAPSED_BAR_HEIGHT)
           const snapped = snapVideoPosition(cur.left + throwX, bottomTop, collapsedW, b, extraCollapsed)
+          if (snapped.dockX === 'right') triggerDockSlide()
           setVideoExpanded(false)
           const next: FloatingVideoState = {
             width: cur.width,
@@ -983,6 +1130,7 @@ export default function MiniMediaPlayer({
           b.height - b.bottomClearance - currentTotalHeight(cur.width, true, null),
         )
         const snapped = snapVideoPosition(cur.left + throwX, maxTopFull, cur.width, b, extraFull)
+        if (snapped.dockX === 'right') triggerDockSlide()
         const next: FloatingVideoState = {
           width: cur.width,
           left: snapped.left,
@@ -1000,6 +1148,7 @@ export default function MiniMediaPlayer({
       const displayW = displayWidthFor(cur.width, exp, null)
       const extra = extraHeightForClamping(cur.width, exp, null)
       const snapped = snapVideoPosition(cur.left + throwX, cur.top + throwY, displayW, b, extra)
+      if (snapped.dockX === 'right') triggerDockSlide()
       const next: FloatingVideoState = {
         width: cur.width,
         left: snapped.left,
@@ -1016,6 +1165,7 @@ export default function MiniMediaPlayer({
     const cur = liveCur
     const extra = extraHeightForClamping(cur.width, videoExpandedRef.current, null)
     const snapped = snapVideoPosition(cur.left, cur.top, cur.width, boundsRef.current, extra)
+    if (snapped.dockX === 'right') triggerDockSlide()
     const next: FloatingVideoState = {
       width: cur.width,
       left: snapped.left,
@@ -1025,7 +1175,7 @@ export default function MiniMediaPlayer({
     setFloating(next)
     persistFloatingLayout(next, boundsRef.current, extra)
     announce('播放器尺寸已更新')
-  }, [announce, canExpandVideo, cancelPendingMoveFrame, computePointerVelocity, currentTotalHeight, displayWidthFor, extraHeightForClamping, isEmbedMode, isLocalVideo, onClose, resetPhysicsStyle, setExpandedAnchored])
+  }, [announce, canExpandVideo, cancelPendingMoveFrame, computePointerVelocity, currentTotalHeight, displayWidthFor, extraHeightForClamping, isEmbedMode, isLocalVideo, onClose, resetPhysicsStyle, setExpandedAnchored, triggerDockSlide])
 
   const handleEarKeyDown = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -1062,6 +1212,7 @@ export default function MiniMediaPlayer({
     const defaultVideo = createDefaultFloatingState(b, undefined, 0)
     const displayW = displayWidthFor(defaultVideo.width, exp, null)
     const totalH = currentTotalHeight(defaultVideo.width, exp, null)
+    if (floatingStateRef.current.dockX !== 'right') triggerDockSlide()
     const next: FloatingVideoState = {
       width: defaultVideo.width,
       left: Math.max(FLOATING_VIDEO_EDGE_MARGIN, b.width - displayW - FLOATING_VIDEO_EDGE_MARGIN),
@@ -1071,7 +1222,7 @@ export default function MiniMediaPlayer({
     setFloating(next)
     persistFloatingLayout(next, b, extraHeightForClamping(next.width, exp, null))
     announce('播放器已复位至右下角')
-  }, [announce, currentTotalHeight, displayWidthFor, extraHeightForClamping])
+  }, [announce, currentTotalHeight, displayWidthFor, extraHeightForClamping, triggerDockSlide])
 
   const hasTranscriptCaptions = transcriptSegments.length > 0
   const canToggleCaptions = hasTranscriptCaptions || onlineEmbed?.provider === 'youtube'
@@ -1088,7 +1239,77 @@ export default function MiniMediaPlayer({
   }, [hasTranscriptCaptions, baseSegmentIndex, isEmbedMode, embedCaptionOffset, transcriptSegments.length])
 
   const activeCaptionSegment = displaySegmentIndex >= 0 ? transcriptSegments[displaySegmentIndex] : null
-  const activeCaptionText = (activeCaptionSegment?.text || '').trim()
+  const activeCaptionOriginal = (activeCaptionSegment?.text || '').trim()
+  const activeCaptionTranslated = (activeCaptionSegment?.translated_text || '').trim()
+  const captionsTranslated = useMemo(() => hasTranslatedCaptions(transcriptSegments), [transcriptSegments])
+  const captionsPartiallyMissing = useMemo(
+    () => captionsTranslated && hasUntranslatedCaptions(transcriptSegments),
+    [captionsTranslated, transcriptSegments],
+  )
+  const captionsNeedTranslate = useMemo(
+    () => !captionsTranslated && isForeignTranscript(transcriptSegments),
+    [captionsTranslated, transcriptSegments],
+  )
+  const canShowTranslateAction = hasTranscriptCaptions && (captionsTranslated || (captionsNeedTranslate && Boolean(onTranslateCaptions)))
+
+  const activeCaptionPrimary = useMemo(() => {
+    if (activeCaptionTranslated && captionDisplayMode !== 'original') {
+      return activeCaptionTranslated
+    }
+    return activeCaptionOriginal
+  }, [activeCaptionOriginal, activeCaptionTranslated, captionDisplayMode])
+
+  const activeCaptionSecondary = useMemo(() => {
+    if (
+      captionDisplayMode === 'bilingual'
+      && activeCaptionTranslated
+      && activeCaptionOriginal
+      && activeCaptionTranslated !== activeCaptionOriginal
+    ) {
+      return activeCaptionOriginal
+    }
+    return ''
+  }, [activeCaptionOriginal, activeCaptionTranslated, captionDisplayMode])
+
+  const activeCaptionText = activeCaptionPrimary
+
+  const handleTranslateAction = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (translatingCaptions) return
+    if (event.shiftKey && onTranslateCaptions) {
+      void onTranslateCaptions({ force: true })
+      return
+    }
+    if (captionsTranslated) {
+      setCaptionDisplayMode(prev => {
+        const next: CaptionDisplayMode = prev === 'bilingual' ? 'zh' : prev === 'zh' ? 'original' : 'bilingual'
+        writeCaptionDisplayMode(next)
+        announce(next === 'bilingual' ? '字幕：双语' : next === 'zh' ? '字幕：仅中文' : '字幕：原文')
+        return next
+      })
+      return
+    }
+    if (onTranslateCaptions) {
+      void onTranslateCaptions({ force: false })
+    }
+  }, [translatingCaptions, captionsTranslated, onTranslateCaptions, announce])
+
+  const handleTranslateContextMenu = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (!onTranslateCaptions || translatingCaptions) return
+    event.preventDefault()
+    void onTranslateCaptions({ force: !captionsPartiallyMissing })
+  }, [onTranslateCaptions, translatingCaptions, captionsPartiallyMissing])
+
+  const translateActionTitle = translatingCaptions
+    ? '正在翻译字幕…'
+    : captionsTranslated
+      ? `${
+          captionDisplayMode === 'bilingual'
+            ? '双语字幕（点击切仅中文'
+            : captionDisplayMode === 'zh'
+              ? '中文译文（点击切原文'
+              : '原文字幕（点击切双语'
+        }${onTranslateCaptions ? (captionsPartiallyMissing ? ' · 右键补译缺失）' : ' · 右键重译）') : '）'}`
+      : '翻译外语字幕为中文'
 
   const embedIframeSrc = useMemo(() => {
     if (!isEmbedMode || !onlineEmbed) return ''
@@ -1112,16 +1333,40 @@ export default function MiniMediaPlayer({
 
   const effectiveDuration = Math.max(duration, currentTime, durationHint || 0, 1)
   const progressPercent = Math.min(100, Math.max(0, (currentTime / effectiveDuration) * 100))
+  const spliceMarkers = spliceSegments
+    .filter(seg => Number.isFinite(seg.start) && seg.start > 0.5 && seg.start < effectiveDuration - 0.5)
+    .map((seg, idx) => ({
+      key: `${seg.start}-${idx}`,
+      time: seg.start,
+      pct: Math.min(98.5, Math.max(1.5, (seg.start / effectiveDuration) * 100)),
+      label: seg.label || `片段 ${(seg.index || idx + 2)}`,
+    }))
+  const scrubberTitle = spliceMarkers.length > 0
+    ? `拼接分段：${spliceMarkers.map(m => `${formatMediaTime(m.time)} ${m.label}`).join(' · ')}`
+    : undefined
   const isShowingVideo = isEmbedMode || activeStageHeight > COLLAPSED_STAGE_HEIGHT + 12
   const isCollapsedAudioBar = !isEmbedMode && !isShowingVideo
   const showCollapsedTopCaption = isCollapsedAudioBar && interactionMode !== 'curtain' && captionsEnabled && Boolean(activeCaptionText)
   const renderedWidth = displayWidthFor(floating.width, videoExpanded, curtainHeight)
+  const renderedTotalHeight = currentTotalHeight(floating.width, videoExpanded, curtainHeight)
+  const bottomOffset = Math.max(0, Math.round(bounds.height - (floating.top + renderedTotalHeight)))
+  const rightOffset = Math.max(0, Math.round(bounds.width - (floating.left + renderedWidth)))
+  // 静态与展开/收起态按停靠侧直接锚定 bottom + left/right，保证底座与靠边侧 0px 绝对静止、仅对角平滑缩放
+  const anchorRightEdge = floating.dockX === 'right' && interactionMode === 'idle' && !slidingToDock
 
-  const floatingStyle: CSSProperties = {
-    width: `${renderedWidth}px`,
-    left: `${floating.left}px`,
-    top: `${floating.top}px`,
-  }
+  const floatingStyle: CSSProperties = anchorRightEdge
+    ? {
+        width: `${renderedWidth}px`,
+        bottom: `${bottomOffset}px`,
+        right: `${rightOffset}px`,
+        left: 'auto',
+      }
+    : {
+        width: `${renderedWidth}px`,
+        bottom: `${bottomOffset}px`,
+        left: `${floating.left}px`,
+        right: 'auto',
+      }
 
   const stageStyle: CSSProperties | undefined = !isEmbedMode
     ? { height: `${activeStageHeight}px` }
@@ -1145,7 +1390,9 @@ export default function MiniMediaPlayer({
         ref={floatingRef}
         className={[
           'apple-pip-window',
+          !layoutReady ? 'is-opening' : 'is-ready',
           isCollapsedAudioBar ? 'is-audio-bar' : 'is-video-open',
+          controlsVisible ? 'is-controls-visible' : '',
           interactionMode !== 'idle' ? 'is-interacting' : '',
           interactionMode === 'dragging' ? 'is-dragging' : '',
           interactionMode === 'curtain' ? 'is-curtaining' : '',
@@ -1155,15 +1402,25 @@ export default function MiniMediaPlayer({
         style={floatingStyle}
         role="region"
         aria-label={isEmbedMode && onlineEmbed ? `${onlineEmbed.label}悬浮视频` : isCollapsedAudioBar ? '迷你音频进度条' : '画中画视频播放器'}
+        onPointerEnter={handleWindowPointerEnter}
+        onPointerLeave={handleWindowPointerLeave}
         onPointerMove={handlePointerMove}
         onPointerUp={finishInteraction}
         onPointerCancel={finishInteraction}
         onLostPointerCapture={finishInteraction}
       >
-        {/* 收起态音频进度条开启字幕时，默认浮于顶耳正上方；贴近阅读区顶边时自动翻转到底座下方防裁切 */}
+        {/* 收起态音频进度条开启字幕时，默认浮于顶耳正上方；依停靠侧向内舒展自然折行（支持双语主副行），贴顶自动翻转至下方防裁切 */}
         {showCollapsedTopCaption && (
-          <div className={`apple-pip-top-caption ${floating.top < 46 ? 'is-below' : ''}`} aria-live="polite">
-            <span>{activeCaptionText}</span>
+          <div
+            className={`apple-pip-top-caption ${floating.dockX === 'left' ? 'is-dock-left' : 'is-dock-right'} ${floating.top < 78 ? 'is-below' : ''}`}
+            aria-live="polite"
+          >
+            <span className="apple-pip-top-caption-box">
+              <span className="apple-pip-top-caption-primary">{activeCaptionText}</span>
+              {activeCaptionSecondary && (
+                <span className="apple-pip-top-caption-secondary">{activeCaptionSecondary}</span>
+              )}
+            </span>
           </div>
         )}
 
@@ -1293,6 +1550,23 @@ export default function MiniMediaPlayer({
                       <Captions size={12} strokeWidth={1.85} aria-hidden="true" />
                     </button>
                   )}
+                  {canShowTranslateAction && (
+                    <button
+                      type="button"
+                      className={`apple-pip-icon ${captionsTranslated && captionDisplayMode !== 'original' ? 'is-active' : ''}`}
+                      aria-label={translateActionTitle}
+                      title={translateActionTitle}
+                      disabled={translatingCaptions}
+                      onClick={handleTranslateAction}
+                      onContextMenu={handleTranslateContextMenu}
+                    >
+                      {translatingCaptions ? (
+                        <Loader2 size={11.5} className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Languages size={11.5} strokeWidth={1.85} aria-hidden="true" />
+                      )}
+                    </button>
+                  )}
                   {externalUrl && (
                     <a
                       href={externalUrl}
@@ -1380,7 +1654,7 @@ export default function MiniMediaPlayer({
                   </div>
                 )}
 
-                {/* 视频展开态左上角极轻缩小版关闭钮（平时隐身，悬停浮现） */}
+                {/* 视频展开态右上角极轻缩小版关闭钮（平时隐身，悬停浮现，与右上缩放角留出安全间距） */}
                 {isLocalVideo && isShowingVideo && (
                   <div className="apple-pip-stage-top">
                     <button
@@ -1404,10 +1678,15 @@ export default function MiniMediaPlayer({
                   </div>
                 )}
 
-                {/* 视频展开态底部实时字幕 */}
-                {!isEmbedMode && isShowingVideo && captionsEnabled && activeCaptionText && (
+                {/* 视频展开态底部实时字幕（支持双语主副行） */}
+                {!isEmbedMode && isShowingVideo && captionsEnabled && activeCaptionPrimary && (
                   <div className="apple-pip-caption" aria-live="polite">
-                    <span>{activeCaptionText}</span>
+                    <span className="apple-pip-caption-box">
+                      <span className="apple-pip-caption-primary">{activeCaptionPrimary}</span>
+                      {activeCaptionSecondary && (
+                        <span className="apple-pip-caption-secondary">{activeCaptionSecondary}</span>
+                      )}
+                    </span>
                   </div>
                 )}
               </>
@@ -1417,7 +1696,11 @@ export default function MiniMediaPlayer({
           {/* 统一融合控制底座：收起态常驻为精简音频进度条；视频展开态自动融入画面底边悬停浮现 */}
           {!isEmbedMode && (
             <div className={`apple-pip-dock-base ${isCollapsedAudioBar ? 'is-standalone' : 'is-overlay'}`}>
-              <div className="apple-scrubber apple-scrubber--dock" style={{ '--scrubber-pct': `${progressPercent.toFixed(2)}%` } as CSSProperties}>
+              <div
+                className="apple-scrubber apple-scrubber--dock"
+                style={{ '--scrubber-pct': `${progressPercent.toFixed(2)}%` } as CSSProperties}
+                title={scrubberTitle}
+              >
                 <div className="apple-scrubber-track" aria-hidden="true">
                   <div className="apple-scrubber-fill" />
                   <div className="apple-scrubber-thumb" />
@@ -1425,13 +1708,29 @@ export default function MiniMediaPlayer({
                 <input
                   type="range"
                   className="apple-scrubber-input"
-                  aria-label="播放进度"
+                  aria-label={scrubberTitle ? `播放进度（${scrubberTitle}）` : '播放进度'}
                   min={0}
                   max={Math.round(effectiveDuration)}
                   step={1}
                   value={Math.min(Math.round(effectiveDuration), Math.round(currentTime))}
                   onChange={event => seekTo(Number(event.target.value))}
                 />
+                {spliceMarkers.map(marker => (
+                  <button
+                    key={marker.key}
+                    type="button"
+                    className="apple-scrubber-splice-dot"
+                    style={{ left: `${marker.pct.toFixed(2)}%` }}
+                    data-splice-time={marker.time}
+                    title={`跳至 ${formatMediaTime(marker.time)} · ${marker.label}`}
+                    aria-label={`跳至拼接分段 ${marker.label}（${formatMediaTime(marker.time)}）`}
+                    onPointerDown={event => event.stopPropagation()}
+                    onClick={event => {
+                      event.stopPropagation()
+                      seekTo(marker.time)
+                    }}
+                  />
+                ))}
               </div>
 
               <div className="apple-pip-dock-controls">
@@ -1488,6 +1787,23 @@ export default function MiniMediaPlayer({
                       onClick={toggleCaptions}
                     >
                       <Captions size={11} strokeWidth={1.65} aria-hidden="true" />
+                    </button>
+                  )}
+                  {canShowTranslateAction && (
+                    <button
+                      type="button"
+                      className={`apple-pip-dock-btn ${captionsTranslated && captionDisplayMode !== 'original' ? 'is-active' : ''}`}
+                      aria-label={translateActionTitle}
+                      title={translateActionTitle}
+                      disabled={translatingCaptions}
+                      onClick={handleTranslateAction}
+                      onContextMenu={handleTranslateContextMenu}
+                    >
+                      {translatingCaptions ? (
+                        <Loader2 size={10.5} className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Languages size={10.5} strokeWidth={1.65} aria-hidden="true" />
+                      )}
                     </button>
                   )}
                   <button
@@ -1552,7 +1868,8 @@ export default function MiniMediaPlayer({
                   <span className="apple-pip-embed-caption-time">{formatMediaTime(activeCaptionSegment.start)}</span>
                 )}
                 <span className="apple-pip-embed-caption-text">
-                  {activeCaptionText || '当前时间点暂无对应字幕文本'}
+                  {activeCaptionPrimary || '当前时间点暂无对应字幕文本'}
+                  {activeCaptionSecondary ? ` · ${activeCaptionSecondary}` : ''}
                 </span>
               </div>
               <button

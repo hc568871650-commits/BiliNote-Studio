@@ -66,6 +66,7 @@ class VideoRequest(BaseModel):
     video_interval: Optional[int] = 0
     grid_size: Optional[list] = []
     frame_mode: Literal['dynamic', 'fixed'] = 'dynamic'
+    output_language: Literal['zh-CN', 'source'] = 'zh-CN'
     generation_options: GenerationOptions = Field(default_factory=GenerationOptions)
     # 客户端（如浏览器插件）已经在用户浏览器里抓到字幕，直接传给后端复用，
     # 跳过 download_subtitles 和音频转写。形如：
@@ -148,7 +149,8 @@ def _persist_prefetched_transcript(task_id: str, transcript: dict) -> None:
 def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
                   link: bool = False, screenshot: bool = False, model_name: str = None, provider_id: str = None,
                   _format: list = None, style: str = None, extras: str = None, video_understanding: bool = False,
-                  video_interval=0, grid_size=[], frame_mode='dynamic', generation_options=None, request_id=None
+                  video_interval=0, grid_size=[], frame_mode='dynamic', generation_options=None, request_id=None,
+                  output_language: str = 'zh-CN'
                   ):
 
     run_dir = Path("Temp") / "note_jobs" / task_id / uuid.uuid4().hex
@@ -178,6 +180,7 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
             frame_mode=frame_mode,
             generation_options=generation_options,
             request_id=request_id,
+            output_language=output_language,
         )
 
     try:
@@ -408,10 +411,20 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
                 cached_transcript_ready = True
             except (OSError, ValueError, TypeError, KeyError, AttributeError):
                 pass
+        from app.domains.ingestion.document_parser import is_document_path
         from app.domains.ingestion.subtitle_parser import is_subtitle_path
 
         local_subtitle_source = (data.platform == "local") and is_subtitle_path(data.video_url)
-        if not data.prefetched_transcript and not cached_transcript_ready and not local_subtitle_source:
+        local_document_source = (data.platform == "local") and is_document_path(data.video_url)
+        # X 与通用网页文章可直接提取图文正文（免下载免转写），放行由管线按实际形态处理
+        may_be_text_post = data.platform in ("x", "web")
+        if (
+            not data.prefetched_transcript
+            and not cached_transcript_ready
+            and not local_subtitle_source
+            and not local_document_source
+            and not may_be_text_post
+        ):
             from app.services.transcriber_config_manager import TranscriberConfigManager
             readiness = TranscriberConfigManager().is_model_ready()
             if not readiness["ready"]:
@@ -480,7 +493,7 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
             background_tasks.add_task(run_note_task, task_id, data.video_url, data.platform, data.quality, data.link,
                                       data.screenshot, data.model_name, data.provider_id, data.format, data.style,
                                       data.extras, data.video_understanding, data.video_interval, data.grid_size, data.frame_mode,
-                                      getattr(data, 'generation_options', None), data.request_id)
+                                      getattr(data, 'generation_options', None), data.request_id, data.output_language)
         except Exception as admission_error:
             note_diagnostics.record_failure(task_id, admission_error)
             with _active_lock:

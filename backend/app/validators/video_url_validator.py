@@ -9,6 +9,8 @@ SUPPORTED_PLATFORMS = {
     "bilibili": r"^https?://(?:(?:www|m)\.)?bilibili\.com/video/[a-zA-Z0-9]+",
     "youtube": r"^https?://(?:(?:www|m|music)\.)?(?:youtube\.com/(?:watch\?(?:[^#]*&)?v=|shorts/|live/|embed/)|youtu\.be/)[\w\-]{6,}",
     "kuaishou": r"^https?://(?:(?:www|v|m)\.)?(?:kuaishou\.com|gifshow\.com)/",
+    "x": r"^https?://(?:(?:(?:www|m|mobile)\.)?(?:x\.com|twitter\.com|fxtwitter\.com|vxtwitter\.com|fixupx\.com)/(?:[^/?#\s]+/(?:status|statuses|article|articles)/\d+|i/(?:web/)?(?:status|statuses|article|articles)/\d+|i/(?:broadcasts|spaces)/[\w\-]+)|t\.co/[\w\-]+)",
+    "xiaoyuzhou": r"^https?://(?:(?:www|m)\.)?xiaoyuzhoufm\.com/episode/[0-9A-Za-z_-]+",
 }
 
 
@@ -20,6 +22,19 @@ def is_supported_video_url(url: str) -> bool:
     # 检查是否为 Bilibili 的短链接
     if host == "b23.tv" and parsed.path.strip("/"):
         return True
+
+    detected = detect_video_platform(cleaned)
+    if detected in SUPPORTED_PLATFORMS:
+        return bool(re.match(SUPPORTED_PLATFORMS[detected], cleaned, re.IGNORECASE))
+    if detected == "douyin":
+        return False
+    if detected == "web":
+        try:
+            from app.services.web_search import public_page_url
+            public_page_url(cleaned)
+            return True
+        except ValueError:
+            return False
 
     for pattern in SUPPORTED_PLATFORMS.values():
         if re.match(pattern, cleaned, re.IGNORECASE):

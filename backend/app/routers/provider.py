@@ -47,6 +47,7 @@ class PurposePreferencesUpdateRequest(BaseModel):
     generation: Optional[dict] = None
     reading: Optional[dict] = None
     organizer: Optional[dict] = None
+    translation: Optional[dict] = None
 
 
 @router.post("/add_provider")

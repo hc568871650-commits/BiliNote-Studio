@@ -1,10 +1,166 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{Manager, menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState}};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use serde::Serialize;
+use tauri::{Emitter, Manager, menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState}};
 
 // A second launch can arrive while Tauri is still creating its first window.
 // Keep that request until Ready instead of losing it or creating another window.
 static PENDING_SHOW: AtomicBool = AtomicBool::new(false);
+static HOTKEY_THREAD_ID: AtomicU32 = AtomicU32::new(0);
+
+#[derive(Clone, Serialize)]
+pub struct QuickCapturePayload {
+    pub text: String,
+    pub source: &'static str,
+}
+
+#[cfg(target_os = "windows")]
+fn read_windows_clipboard_text() -> Option<String> {
+    use windows_sys::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+    use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+
+    const CF_UNICODETEXT: u32 = 13;
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return None;
+        }
+        let result = (|| {
+            let handle = GetClipboardData(CF_UNICODETEXT);
+            if handle.is_null() {
+                return None;
+            }
+            let ptr = GlobalLock(handle as _) as *const u16;
+            if ptr.is_null() {
+                return None;
+            }
+            let mut len = 0usize;
+            while *ptr.add(len) != 0 && len < 8192 {
+                len += 1;
+            }
+            let slice = std::slice::from_raw_parts(ptr, len);
+            let text = String::from_utf16_lossy(slice);
+            GlobalUnlock(handle as _);
+            Some(text)
+        })();
+        CloseClipboard();
+        result
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn read_windows_clipboard_text() -> Option<String> {
+    None
+}
+
+pub fn emit_quick_capture(app: &tauri::AppHandle, source: &'static str) {
+    let text = read_windows_clipboard_text().unwrap_or_default();
+    let payload = QuickCapturePayload { text, source };
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("quick-capture", payload);
+    } else {
+        let _ = app.emit("quick-capture", payload);
+    }
+}
+
+#[tauri::command]
+pub fn read_clipboard_text() -> Result<String, String> {
+    Ok(read_windows_clipboard_text().unwrap_or_default())
+}
+
+#[cfg(target_os = "windows")]
+fn parse_hotkey_spec(shortcut: &str) -> Option<(u32, u32)> {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT};
+
+    let mut mods: u32 = MOD_NOREPEAT;
+    let mut vk: u32 = 0;
+    for raw in shortcut.split('+') {
+        let token = raw.trim().to_ascii_uppercase();
+        match token.as_str() {
+            "ALT" => mods |= MOD_ALT,
+            "CTRL" | "CONTROL" => mods |= MOD_CONTROL,
+            "SHIFT" => mods |= MOD_SHIFT,
+            t if t.len() == 1 => {
+                let ch = t.as_bytes()[0];
+                if ch.is_ascii_uppercase() || ch.is_ascii_digit() {
+                    vk = ch as u32;
+                }
+            }
+            _ => {}
+        }
+    }
+    if vk == 0 || (mods & !MOD_NOREPEAT) == 0 {
+        return None;
+    }
+    Some((mods, vk))
+}
+
+#[cfg(target_os = "windows")]
+pub fn stop_quick_capture_hotkey() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
+
+    let tid = HOTKEY_THREAD_ID.swap(0, Ordering::SeqCst);
+    if tid != 0 {
+        unsafe {
+            PostThreadMessageW(tid, WM_QUIT, 0, 0);
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn stop_quick_capture_hotkey() {}
+
+#[tauri::command]
+pub fn configure_quick_capture_hotkey(
+    app: tauri::AppHandle,
+    enabled: bool,
+    shortcut: String,
+) -> Result<bool, String> {
+    stop_quick_capture_hotkey();
+    if !enabled {
+        return Ok(false);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WM_HOTKEY};
+
+        let (mods, vk) = parse_hotkey_spec(&shortcut)
+            .ok_or_else(|| format!("不支持的快捷键格式：{shortcut}"))?;
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<u32, String>>(1);
+        let app_handle = app.clone();
+        std::thread::spawn(move || {
+            const HOTKEY_ID: i32 = 0x424E;
+            unsafe {
+                let tid = GetCurrentThreadId();
+                if RegisterHotKey(std::ptr::null_mut(), HOTKEY_ID, mods, vk) == 0 {
+                    let _ = tx.send(Err("全局快捷键注册失败，可能已被其他应用占用".into()));
+                    return;
+                }
+                HOTKEY_THREAD_ID.store(tid, Ordering::SeqCst);
+                let _ = tx.send(Ok(tid));
+                let mut msg: MSG = std::mem::zeroed();
+                while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                    if msg.message == WM_HOTKEY && msg.wParam == HOTKEY_ID as usize {
+                        emit_quick_capture(&app_handle, "hotkey");
+                    }
+                }
+                UnregisterHotKey(std::ptr::null_mut(), HOTKEY_ID);
+                let _ = HOTKEY_THREAD_ID.compare_exchange(tid, 0, Ordering::SeqCst, Ordering::SeqCst);
+            }
+        });
+        match rx.recv() {
+            Ok(Ok(_)) => Ok(true),
+            Ok(Err(err)) => Err(err),
+            Err(_) => Err("快捷键监听线程启动失败".into()),
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, shortcut);
+        Ok(false)
+    }
+}
 
 pub fn show_main(app: &tauri::AppHandle) {
     PENDING_SHOW.store(true, Ordering::SeqCst);
@@ -27,14 +183,16 @@ pub fn show_pending_main(app: &tauri::AppHandle) {
 pub fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let preview = app.config().identifier.ends_with(".preview");
     let show = MenuItem::with_id(app, "show", if preview { "打开 BiliNote Studio 预览版" } else { "打开 BiliNote Studio" }, true, None::<&str>)?;
+    let quick_capture = MenuItem::with_id(app, "quick_capture", "从剪贴板一键蒸馏", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出 BiliNote Studio（停止后台任务）", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &quick_capture, &quit])?;
     let mut tray = TrayIconBuilder::with_id("bilinote")
         .tooltip(if preview { "BiliNote Studio 预览版 · 独立数据" } else { "BiliNote Studio · 点击打开，右键退出" })
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main(app),
+            "quick_capture" => emit_quick_capture(app, "tray"),
             "quit" => app.exit(0),
             _ => {},
         })

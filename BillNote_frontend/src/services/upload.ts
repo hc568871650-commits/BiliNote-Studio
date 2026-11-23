@@ -7,6 +7,7 @@ export interface UploadFileResponse {
   url: string
   filename?: string
   is_subtitle?: boolean
+  is_document?: boolean
 }
 
 export const uploadFile = (formData: FormData, options: UploadOptions = {}): Promise<UploadFileResponse> => {

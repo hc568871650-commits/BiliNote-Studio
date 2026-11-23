@@ -123,6 +123,7 @@ class NoteGenerator:
         frame_mode: str = 'dynamic',
         generation_options=None,
         request_id: Optional[str] = None,
+        output_language: str = "zh-CN",
     ) -> NoteResult | None:
         """
         主流程：按步骤依次下载、转写、GPT 总结、截图/链接处理、存库、返回 NoteResult。
@@ -216,7 +217,12 @@ class NoteGenerator:
             # 2. 下载音频/视频
             # 有字幕时只提取元信息，不下载音视频文件（除非需要截图/视频理解）
             has_transcript = transcript is not None
-            need_full_download = not has_transcript or screenshot or video_understanding
+            is_text_post_source = bool(
+                has_transcript
+                and callable(getattr(downloader, "is_text_post", None))
+                and downloader.is_text_post(video_url)
+            )
+            need_full_download = (not has_transcript or screenshot or video_understanding) and not is_text_post_source
             check_cancel()
             audio_meta = self._download_media(
                 downloader=downloader,
@@ -236,16 +242,34 @@ class NoteGenerator:
             note_storage.update_audio_metadata(task_id, asdict(audio_meta))
             check_cancel()
 
-            # 3. 如果前面没拿到字幕，走转写流程
+            raw_info = audio_meta.raw_info if isinstance(audio_meta.raw_info, dict) else {}
+            media_kind = str(raw_info.get("media_kind") or "video")
+            local_images = raw_info.get("local_images") if isinstance(raw_info.get("local_images"), list) else []
+
+            # 3. 如果前面没拿到字幕，走转写流程（text_post 在极少数二次降级时也从 post_context 构造）
             if transcript is None:
-                transcript = self._get_transcript(
-                    downloader=downloader,
-                    video_url=video_url,
-                    audio_file=audio_meta.file_path,
-                    transcript_cache_file=transcript_cache_file,
-                    status_phase=TaskStatus.TRANSCRIBING,
-                    task_id=task_id,
-                )
+                if media_kind == "text_post":
+                    post_text = str(raw_info.get("post_context") or audio_meta.title or "").strip()
+                    if not post_text:
+                        raise ValueError("未能提取到有效的图文正文内容")
+                    transcript = TranscriptResult(
+                        language="zh",
+                        full_text=post_text,
+                        segments=[TranscriptSegment(start=0.0, end=0.0, text=post_text)],
+                    )
+                    transcript_cache_file.write_text(
+                        json.dumps(asdict(transcript), ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                else:
+                    transcript = self._get_transcript(
+                        downloader=downloader,
+                        video_url=video_url,
+                        audio_file=audio_meta.file_path,
+                        transcript_cache_file=transcript_cache_file,
+                        status_phase=TaskStatus.TRANSCRIBING,
+                        task_id=task_id,
+                    )
 
             check_cancel()
             # Select only after transcription, so operation cues are available.
@@ -253,6 +277,9 @@ class NoteGenerator:
                 self._update_status(task_id, TaskStatus.FORMATTING, message="选取视频证据帧")
                 self._prepare_video_evidence(transcript, task_id, frame_mode, video_interval,
                                              grid_size, video_understanding)
+            elif video_understanding and not self.video_img_urls and local_images:
+                # 纯图文/附带原帖配图场景：直接编码本地化配图传给多模态模型，零 FFmpeg 依赖
+                self._prepare_local_image_evidence(local_images)
 
             # 3. GPT 总结
             check_cancel()
@@ -267,6 +294,7 @@ class NoteGenerator:
                 style=style,
                 extras=extras,
                 video_img_urls=self.video_img_urls,
+                output_language=output_language,
             )
             note_diagnostics.record_event(task_id, 'model_completed')
             check_cancel()
@@ -281,6 +309,19 @@ class NoteGenerator:
                     audio_meta=audio_meta,
                     platform=platform,
                 )
+
+            # 4.5 中文笔记的外语视频顺带翻译字幕并写回本地缓存（失败不阻断笔记主流程）
+            if media_kind != "text_post" and transcript and getattr(transcript, "segments", None):
+                try:
+                    from app.services.transcript_translator import maybe_auto_translate_transcript
+
+                    if maybe_auto_translate_transcript(transcript, gpt, output_language=output_language):
+                        transcript_cache_file.write_text(
+                            json.dumps(asdict(transcript), ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                except Exception as tr_exc:
+                    logger.warning("字幕自动翻译跳过：%s", tr_exc)
 
             markdown = prepend_source_link(markdown, str(video_url))
 
@@ -418,7 +459,6 @@ class NoteGenerator:
         NOTE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         status_file = note_storage.status_path(task_id)
         status_file.parent.mkdir(parents=True, exist_ok=True)
-        print(f"写入状态文件: {status_file} 当前状态: {status}")
         try:
             status_text = status.value if isinstance(status, TaskStatus) else status
             note_storage.write_status(task_id, status_text, message)
@@ -427,8 +467,7 @@ class NoteGenerator:
                 get_job_manager().sync_task_status(task_id, status_text, stage_message=message)
             except Exception:
                 pass
-
-            print(f"状态文件写入成功: {status_file}")
+            logger.debug("状态文件写入成功: task_id=%s status=%s", task_id, status_text)
         except Exception as e:
             logger.error(f"写入状态文件失败 (task_id={task_id})：{e}")
             raise
@@ -490,16 +529,32 @@ class NoteGenerator:
             try:
                 data = json.loads(audio_cache_file.read_text(encoding="utf-8"))
                 cached_audio = AudioDownloadResult(**data)
-                if screenshot or video_understanding:
+                cached_kind = (cached_audio.raw_info or {}).get("media_kind") if isinstance(cached_audio.raw_info, dict) else None
+                if (screenshot or video_understanding) and cached_kind not in ("text_post", "audio"):
                     cached_video = Path(cached_audio.video_path) if cached_audio.video_path else None
-                    self.video_path = cached_video if cached_video and cached_video.is_file() else Path(downloader.download_video(video_url))
-                    cached_audio.video_path = str(self.video_path)
-                    audio_cache_file.write_text(json.dumps(asdict(cached_audio), ensure_ascii=False, indent=2), encoding='utf-8')
+                    if cached_video and cached_video.is_file():
+                        self.video_path = cached_video
+                    else:
+                        video_path_str = downloader.download_video(video_url)
+                        self.video_path = Path(video_path_str) if video_path_str else None
+                    if self.video_path:
+                        cached_audio.video_path = str(self.video_path)
+                        audio_cache_file.write_text(json.dumps(asdict(cached_audio), ensure_ascii=False, indent=2), encoding='utf-8')
                 return cached_audio
             except Exception as e:
                 logger.warning(f"读取音频缓存失败，将重新下载：{e}")
 
-        # 有字幕且不需要截图/视频理解时，只提取元信息不下载文件
+        # 判断是否开启低码率本地回看缓存（仅视频平台生效，不阻断主流程）
+        playback_cache_enabled = False
+        if platform in ("bilibili", "youtube", "x", "kuaishou"):
+            try:
+                from app.services import system_maintenance
+
+                playback_cache_enabled = bool(system_maintenance.get_playback_cache_policy().get("enabled"))
+            except Exception:
+                playback_cache_enabled = False
+
+        # 有字幕且不需要截图/视频理解时，只提取元信息不下载文件（若开启回看缓存则静默补下低码率副本）
         if skip_download:
             logger.info("已有字幕，仅提取视频元信息（不下载音视频）")
             try:
@@ -510,6 +565,18 @@ class NoteGenerator:
                     need_video=False,
                     skip_download=True,
                 )
+                media_kind = (audio.raw_info or {}).get("media_kind") if isinstance(audio.raw_info, dict) else None
+                if playback_cache_enabled and media_kind not in ("text_post", "audio"):
+                    try:
+                        cached_v = downloader.download_video(video_url)
+                        if cached_v:
+                            self.video_path = Path(cached_v)
+                            audio.video_path = str(self.video_path)
+                            from app.services import system_maintenance
+
+                            system_maintenance.enforce_playback_cache_policy()
+                    except Exception as cache_exc:
+                        logger.warning(f"低码率本地回看缓存下载失败（已忽略，不影响笔记生成）：{cache_exc}")
                 audio_cache_file.write_text(
                     json.dumps(asdict(audio), ensure_ascii=False, indent=2),
                     encoding="utf-8",
@@ -520,7 +587,7 @@ class NoteGenerator:
                 logger.warning(f"元信息提取失败，将尝试完整下载: {exc}")
 
         # 判断是否需要下载视频
-        need_video = screenshot or video_understanding
+        need_video = screenshot or video_understanding or playback_cache_enabled
         if video_understanding and not grid_size:
             grid_size = [2, 2]
 
@@ -529,13 +596,30 @@ class NoteGenerator:
                 logger.info("开始下载视频")
                 if not self.video_path or not self.video_path.is_file():
                     video_path_str = downloader.download_video(video_url)
-                    self.video_path = Path(video_path_str)
-                logger.info(f"视频下载完成：{self.video_path}")
+                    if video_path_str:
+                        self.video_path = Path(video_path_str)
+                        logger.info(f"视频下载完成：{self.video_path}")
+                        if playback_cache_enabled:
+                            try:
+                                from app.services import system_maintenance
+
+                                system_maintenance.enforce_playback_cache_policy()
+                            except Exception:
+                                pass
+                    else:
+                        self.video_path = None
+                        logger.info("当前来源无视频流，跳过本地视频下载")
+                else:
+                    logger.info(f"视频下载完成：{self.video_path}")
 
             except Exception as exc:
-                logger.error(f"视频下载失败：{exc}")
-                self._handle_exception(task_id, exc)
-                raise
+                if playback_cache_enabled and not (screenshot or video_understanding):
+                    logger.warning(f"低码率本地回看缓存下载失败（已忽略，继续音频转写）：{exc}")
+                    self.video_path = None
+                else:
+                    logger.error(f"视频下载失败：{exc}")
+                    self._handle_exception(task_id, exc)
+                    raise
 
         # 下载音频
         try:
@@ -579,6 +663,23 @@ class NoteGenerator:
             self.video_image_ranges = []
         self.frame_evidence = reader.evidence
         self.video_duration = reader.duration
+
+    def _prepare_local_image_evidence(self, local_images: list[dict]) -> None:
+        """将纯图文推文等来源的本地化配图直接编码注入多模态输入（零 FFmpeg 依赖）。"""
+        from app.downloaders.x_downloader import encode_local_image_data_url
+
+        encoded_urls: list[str] = []
+        for item in local_images:
+            if not isinstance(item, dict):
+                continue
+            local_path = item.get("local_path")
+            if not local_path:
+                continue
+            data_url = encode_local_image_data_url(local_path)
+            if data_url:
+                encoded_urls.append(data_url)
+        self.video_img_urls = encoded_urls
+        self.video_image_ranges = []
 
 
     def _get_transcript(
@@ -694,7 +795,8 @@ class NoteGenerator:
         formats: List[str],
         style: Optional[str],
         extras: Optional[str],
-            video_img_urls: List[str],
+        video_img_urls: List[str],
+        output_language: str = "zh-CN",
     ) -> str | None:
         """
         调用 GPT 对转写结果进行总结，生成 Markdown 文本并缓存。
@@ -713,10 +815,19 @@ class NoteGenerator:
         task_id = _cache_task_id(markdown_cache_file, "markdown")
         self._update_status(task_id, TaskStatus.SUMMARIZING)
 
+        raw_info = audio_meta.raw_info if isinstance(audio_meta.raw_info, dict) else {}
+        media_kind = str(raw_info.get("media_kind") or "video")
+        # 仅在音视频来源时把原帖正文作为独立背景上下文补充，纯图文来源正文已在 transcript 中
+        post_context = (
+            raw_info.get("post_context")
+            if media_kind != "text_post" and isinstance(raw_info.get("post_context"), str)
+            else None
+        )
+
         source = GPTSource(
             title=audio_meta.title,
             segment=transcript.segments,
-            tags=audio_meta.raw_info.get("tags", []),
+            tags=raw_info.get("tags", []),
             screenshot=screenshot,
             video_img_urls=video_img_urls,
             video_image_ranges=self.video_image_ranges,
@@ -728,6 +839,8 @@ class NoteGenerator:
             frame_evidence=[{key: value for key, value in item.items() if key not in ('path', 'fingerprint')}
                             for item in self.frame_evidence],
             structured=True,
+            output_language=output_language,
+            post_context=post_context,
         )
 
         try:
@@ -762,6 +875,9 @@ class NoteGenerator:
         """
         from app.models.structured_note import extract_structured_note_json
 
+        raw_info = audio_meta.raw_info if isinstance(audio_meta.raw_info, dict) else {}
+        local_images = raw_info.get("local_images") if isinstance(raw_info.get("local_images"), list) else []
+
         structured_doc = extract_structured_note_json(
             markdown,
             fallback_title=audio_meta.title or "",
@@ -771,10 +887,20 @@ class NoteGenerator:
         if structured_doc is not None:
             if "screenshot" in formats and video_path:
                 structured_doc = self._insert_structured_screenshots(structured_doc, video_path)
+            elif "screenshot" in formats and local_images:
+                structured_doc = self._insert_local_post_images(structured_doc, local_images)
             return json.dumps(structured_doc, ensure_ascii=False)
 
         if "screenshot" in formats and video_path:
             markdown = self._insert_screenshots(markdown, video_path)
+        elif "screenshot" in formats and local_images:
+            img_lines = [
+                f"![{item.get('caption') or '原帖配图'}]({item['web_url']})"
+                for item in local_images
+                if isinstance(item, dict) and item.get("web_url")
+            ]
+            if img_lines:
+                markdown = markdown.rstrip() + "\n\n## 原帖配图\n\n" + "\n\n".join(img_lines)
 
         if "link" in formats:
             try:
@@ -783,6 +909,51 @@ class NoteGenerator:
                 logger.warning(f"链接插入失败，跳过该步骤：{e}")
 
         return markdown
+
+    @staticmethod
+    def _insert_local_post_images(doc: dict, local_images: list[dict]) -> dict:
+        """为纯图文/长文结构化笔记安全插入本地化配图（零 FFmpeg 依赖）。"""
+        valid_images = [
+            item for item in local_images
+            if isinstance(item, dict) and str(item.get("web_url") or "").strip()
+        ]
+        if not valid_images:
+            return doc
+
+        used = 0
+        sections = doc.get("sections") or []
+        for section in sections:
+            blocks = section.get("blocks") or []
+            kept_blocks = []
+            for block in blocks:
+                if block.get("type") == "screenshot" and not block.get("image_url"):
+                    if used < len(valid_images):
+                        img = valid_images[used]
+                        used += 1
+                        block["timestamp"] = 0
+                        block["label"] = block.get("label") or f"原帖配图 {used}"
+                        block["image_url"] = str(img["web_url"])
+                        if not block.get("caption"):
+                            block["caption"] = str(img.get("caption") or f"原帖配图 {used}")
+                        kept_blocks.append(block)
+                    # 多余的空截图占位安全移除
+                    continue
+                kept_blocks.append(block)
+            section["blocks"] = kept_blocks
+
+        remaining = valid_images[used:]
+        if remaining and sections:
+            target_section = sections[0]
+            target_blocks = target_section.setdefault("blocks", [])
+            for idx, img in enumerate(remaining, used + 1):
+                target_blocks.append({
+                    "type": "screenshot",
+                    "timestamp": 0,
+                    "label": f"原帖配图 {idx}",
+                    "caption": str(img.get("caption") or f"原帖配图 {idx}"),
+                    "image_url": str(img["web_url"]),
+                })
+        return doc
 
     def _insert_structured_screenshots(self, doc: dict, video_path: Path) -> dict:
         if not self.video_duration:

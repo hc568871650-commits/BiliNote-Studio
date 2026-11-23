@@ -86,6 +86,10 @@ def replace_content_markers(markdown: str, video_id: str, platform: str = 'bilib
             url = f"https://www.bilibili.com/video/{quote(base_id, safe='')}?{urlencode(query)}"
         elif platform == 'youtube':
             url = f"https://www.youtube.com/watch?{urlencode({'v': video_id, 't': str(total_seconds) + 's'})}"
+        elif platform == 'x':
+            url = f"https://x.com/i/status/{quote(video_id, safe='')}"
+        elif platform == 'xiaoyuzhou':
+            url = f"https://www.xiaoyuzhoufm.com/episode/{quote(video_id, safe='')}"
         elif platform == 'douyin':
             url = f"https://www.douyin.com/video/{quote(video_id, safe='')}"
         else:

@@ -19,6 +19,8 @@ interface Props {
   compact?: boolean
   inline?: boolean
   disabled?: boolean
+  allowFollowPrimary?: boolean
+  followLabel?: string
   controls?: AISettings
   onControlsChange?: (value: AISettings) => void
   reasoningModel?: string
@@ -38,7 +40,19 @@ const loadModels = () => {
 }
 const effortLabels: Record<ReasoningEffort, string> = { auto: '自动', none: '关闭', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最高' }
 
-export default function PurposeModelPicker({ value, onChange, label = '模型', compact = false, inline = false, disabled = false, controls, onControlsChange, reasoningModel }: Props) {
+export default function PurposeModelPicker({
+  value,
+  onChange,
+  label = '模型',
+  compact = false,
+  inline = false,
+  disabled = false,
+  allowFollowPrimary = false,
+  followLabel = '跟随主模型（默认）',
+  controls,
+  onControlsChange,
+  reasoningModel,
+}: Props) {
   const protocol = useEffectiveProviderProtocol(value?.provider_id)
   const efforts = requestEffortChoices(reasoningModel || value?.model_name, protocol)
   const providers = useProviderStore(state => state.provider)
@@ -115,10 +129,15 @@ export default function PurposeModelPicker({ value, onChange, label = '模型', 
     </div>, document.body)}
   </div>
   return <div className={`purpose-model-picker ${compact ? 'is-compact' : ''} ${inline ? 'is-inline' : ''}`}>
-    <div className="purpose-model-field"><span className="purpose-model-label">{label}</span><ChoiceSelect label={label} value={selected} disabled={loading || disabled} displayValue={!value ? loading ? '加载中…' : '选择模型' : undefined} onChange={value => {
-      const model = options.find(option => identity(option) === value)
+    <div className="purpose-model-field"><span className="purpose-model-label">{label}</span><ChoiceSelect label={label} value={selected} disabled={loading || disabled} displayValue={!value ? (loading ? '加载中…' : (allowFollowPrimary ? followLabel : '选择模型')) : undefined} onChange={nextVal => {
+      if (allowFollowPrimary && !nextVal) {
+        onChange(null)
+        return
+      }
+      const model = options.find(option => identity(option) === nextVal)
       onChange(model ? { provider_id: String(model.provider_id), model_name: model.model_name } : null)
     }} options={[
+      ...(allowFollowPrimary ? [{ value: '', label: followLabel }] : []),
       ...(notListed ? [{ value: selected, label: `${modelDisplayName(value!)}${missing ? '（配置已不可用）' : ''}`, disabled: true }] : []),
       ...options.map(model => ({ value: identity(model), label: `${modelDisplayName(model)} · ${providers.find(provider => String(provider.id) === String(model.provider_id))?.name || '服务商'}` })),
     ]} /></div>

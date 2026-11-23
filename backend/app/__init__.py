@@ -32,6 +32,8 @@ def create_app(lifespan) -> FastAPI:
     app.include_router(learning_router, prefix="/api")
     from .domains.media.router import router as media_router
     app.include_router(media_router, prefix="/api")
+    from .routers import system_maintenance
+    app.include_router(system_maintenance.router, prefix="/api")
     if not is_quick():
         from .routers import organizer
         app.include_router(organizer.router, prefix="/api")

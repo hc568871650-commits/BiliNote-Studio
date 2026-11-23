@@ -9,7 +9,7 @@ from typing import Any
 
 from app.services import note_storage
 
-VALID_PURPOSES = ("generation", "reading", "organizer")
+VALID_PURPOSES = ("generation", "reading", "organizer", "translation")
 VALID_PROTOCOLS = ("openai-chat", "openai-responses", "anthropic", "gemini")
 _LOCK = threading.RLock()
 
