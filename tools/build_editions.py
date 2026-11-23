@@ -46,6 +46,9 @@ def backend(args, work):
         "uvicorn",
         "fastapi",
         "starlette",
+        "bs4",
+        "lxml",
+        "lxml.etree",
         "PIL.Image",
         "PIL.ImageChops",
         "PIL.ImageStat",
@@ -80,6 +83,10 @@ def backend(args, work):
         "app.services.transcript_translator",
         "app.utils.secret_store",
     ]
+    import importlib.util
+    if importlib.util.find_spec("pypdf") is not None:
+        packages.append("pypdf")
+        hidden.append("pypdf")
     excludes = ["markdown_pdf", "fitz", "pymupdf"] if getattr(args, "installer", False) else []
     if getattr(args, "installer", False):
         excludes += ["app.transcriber.whisper", "app.transcriber.mlx_whisper_transcriber", "faster_whisper", "ctranslate2", "torch", "av"]

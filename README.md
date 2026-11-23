@@ -4,7 +4,7 @@
 
 BiliNote Studio 是基于 [JefferyHcool/BiliNote](https://github.com/JefferyHcool/BiliNote) v2.4.5 独立维护的非官方二次开发桌面版。在保留视频转写、AI 总结、截图、思维导图与导出链路的基础上，全面聚焦**高信噪比结构化阅读、单实体悬浮音视频回看、后台无感蒸馏队列、主动回忆自测复习、课程级批量生产与计划式资料库整理**。
 
-> **版本状态（`v0.3.0`）**：Windows x64 安装包见 [GitHub Releases (`v0.3.0`)](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.3.0)。详细变更见 [0.3.0 发布说明](docs/releases/0.3.0.md) 与 [CHANGELOG.md](CHANGELOG.md)，实测范围与校验摘要见 [0.3.0 验收记录](docs/releases/0.3.0-validation.md)。
+> **版本状态（`v0.4.0`）**：Windows x64 安装包见 [GitHub Releases (`v0.4.0`)](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.4.0)。详细变更见 [0.4.0 发布说明](docs/releases/0.4.0.md) 与 [CHANGELOG.md](CHANGELOG.md)，实测范围与校验摘要见 [0.4.0 验收记录](docs/releases/0.4.0-validation.md)。
 
 ![深色主工作台、结构化阅读器与单实体卷帘悬浮音视频播放器](doc/showcase/studio-0.3.0/01-floating-player-dark.png)
 

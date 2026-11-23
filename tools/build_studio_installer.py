@@ -34,11 +34,16 @@ def dependency_inventory(args, work):
 
 def bundled_notices(args, work):
     collected = set()
+    dep_norm = os.path.normcase(os.path.abspath(str(args.dependencies)))
     def visit(value):
         if isinstance(value, (list, tuple)):
             for item in value:
                 visit(item)
-        elif isinstance(value, str) and ("site-packages" in value or "agent-deps" in value):
+        elif isinstance(value, str) and (
+            "site-packages" in value
+            or "agent-deps" in value
+            or os.path.normcase(os.path.abspath(value)).startswith(dep_norm)
+        ):
             collected.add(os.path.normcase(os.path.abspath(value)))
     visit(ast.literal_eval((work / "backend-work/BiliNoteBackend/Analysis-00.toc").read_text(encoding="utf-8")))
     backend_digest = hashlib.file_digest((work / "backend-dist/BiliNoteBackend/BiliNoteBackend.exe").open("rb"), "sha256").hexdigest()[:12]
@@ -238,6 +243,13 @@ def main():
     args = parser.parse_args()
     args.output = args.output.resolve()
     args.cargo_target = args.cargo_target.resolve()
+    args.dependencies = args.dependencies.resolve()
+    args.toolchains = args.toolchains.resolve()
+    args.node = args.node.resolve()
+    if args.notices:
+        args.notices = args.notices.resolve()
+    if args.ffmpeg:
+        args.ffmpeg = args.ffmpeg.resolve()
     for path in (args.output, args.cargo_target):
         if not path.is_relative_to(ROOT / ".BiliNote-dev"):
             raise RuntimeError("Build outputs must stay in .BiliNote-dev")

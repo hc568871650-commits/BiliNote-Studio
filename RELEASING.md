@@ -1,6 +1,8 @@
 # Studio 源码同步与发行流程
 
-2026-11-21：`v0.3.0` 已作为正式版公开，详见 [0.3.0 发布说明](docs/releases/0.3.0.md) 与 [0.3.0 验收记录](docs/releases/0.3.0-validation.md)。
+2026-11-23：`v0.4.0` 已作为正式版公开，详见 [0.4.0 发布说明](docs/releases/0.4.0.md) 与 [0.4.0 验收记录](docs/releases/0.4.0-validation.md)。
+
+历史记录（2026-11-21）：`v0.3.0` 已作为正式版公开，详见 [0.3.0 发布说明](docs/releases/0.3.0.md) 与 [0.3.0 验收记录](docs/releases/0.3.0-validation.md)。
 
 历史记录（2026-11-18）：`v0.2.0` 正式里程碑版本已公开，详见 [0.2.0 发布说明](docs/releases/0.2.0.md) 与 [0.2.0 验收记录](docs/releases/0.2.0-validation.md)。
 
@@ -20,7 +22,7 @@
 
 ## 版本、身份与构建
 
-以下应用入口统一为 `0.3.0`，只更新应用自身版本，不能全局替换第三方版本：
+以下应用入口统一为 `0.4.0`，只更新应用自身版本，不能全局替换第三方版本：
 
 - `BillNote_frontend/package.json` 及 `package-lock.json` 的根包。
 - `BillNote_frontend/src-tauri/Cargo.toml` 和 `Cargo.lock` 的 `app` 包。
