@@ -482,6 +482,25 @@ class JobManager:
             self.mark_cancelled(job_id, message="已从队列取消")
         return True
 
+    def _reset_note_storage_for_retry(self, task_id: str) -> None:
+        """重试重新入队前重置 note_storage 终态，避免并发满排队期间读取到旧 FAILED 状态。"""
+        if not task_id:
+            return
+        try:
+            from app.services import note_storage
+
+            note_storage.valid_id(task_id)
+            has_stored_note = (
+                note_storage.get_task(task_id) is not None
+                or note_storage.status_path(task_id).is_file()
+            )
+            if not has_stored_note:
+                return
+            note_storage.clear_cancellation(task_id)
+            note_storage.write_status(task_id, "PENDING", "已重新排队，等待执行")
+        except Exception as exc:
+            logger.debug("重试前同步重置 note_storage 状态失败 task_id=%s: %s", task_id, exc)
+
     def retry(self, job_id: str) -> JobRecord:
         with self._lock:
             entry = self._entries.get(job_id)
@@ -494,6 +513,7 @@ class JobManager:
             spec = entry.spec
             runner = entry.runner
             on_cancel = entry.on_cancel
+        self._reset_note_storage_for_retry(spec.task_id)
         return self.enqueue(spec, runner, on_cancel=on_cancel)
 
     def clear_finished(self) -> int:

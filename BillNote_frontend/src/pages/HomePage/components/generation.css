@@ -688,7 +688,7 @@
 .generation-progress-detail { margin-top: 24px; padding: 18px; border: 1px solid var(--surface-border); border-radius: 16px; background: var(--surface-panel); }
 .generation-progress-detail > p { font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .generation-progress-meta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 10px; font-size: 11px; color: var(--surface-description); }
-.generation-progress-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 16px; }
+.generation-progress-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 14px; margin-top: 16px; }
 .generation-progress-actions span { font-size: 11px; color: var(--surface-description); }
 .generation-progress-actions button { display: flex; align-items: center; gap: 5px; padding: 7px 10px; border: 1px solid var(--surface-border); border-radius: 7px; font-size: 11px; white-space: nowrap; }
 .generation-progress-error { color: var(--destructive); font-size: 12px; margin-top: 10px; }

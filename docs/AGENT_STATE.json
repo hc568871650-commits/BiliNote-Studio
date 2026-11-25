@@ -1,14 +1,14 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-11-23",
+  "updated_at": "2026-11-25",
   "timezone": "America/Los_Angeles",
   "product": "BiliNote Studio",
-  "consolidated_version": "0.4.0",
+  "consolidated_version": "0.4.1",
   "source": {
     "branch": "main",
-    "base_release_commit": "8898059",
-    "desktop_code_level": "0.4.0",
-    "backend_code_level": "0.4.0",
+    "base_release_commit": "ca84625",
+    "desktop_code_level": "0.4.1",
+    "backend_code_level": "0.4.1",
     "version_fields_aligned": true,
     "workspaces": [
       "E:/codex/bilinote",

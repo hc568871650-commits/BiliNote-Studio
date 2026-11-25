@@ -342,7 +342,7 @@ class NoteGenerator:
                 frames.append(clean)
             screenshot_evidence = self.run_dir / 'screenshot_evidence.json' if self.run_dir else None
             evidence = dict(schema_version=1, frame_mode=frame_mode, duration=self.video_duration,
-                            video_image_ranges=self.video_image_ranges,
+                            video_image_ranges=list(self.video_image_ranges or []),
                             frames=frames, screenshots=json.loads(screenshot_evidence.read_text(encoding='utf-8'))
                             if screenshot_evidence and screenshot_evidence.is_file() else [])
             if recorder and owns_recorder:
@@ -656,7 +656,10 @@ class NoteGenerator:
                              frame_dir=str(run_dir / 'frames'), grid_dir=str(run_dir / 'grids'),
                              manifest_path=str(run_dir / 'frame_evidence.json'))
         if video_understanding:
-            self.video_img_urls = reader.run()
+            urls = reader.run()
+            if not urls:
+                raise ValueError("未取得视频画面，无法执行视频视觉理解；请检查视频文件是否有效或关闭视频理解后重试")
+            self.video_img_urls = list(urls)
             self.video_image_ranges = reader.grouped_ranges
         else:
             reader.extract_frames()
@@ -679,7 +682,7 @@ class NoteGenerator:
             if data_url:
                 encoded_urls.append(data_url)
         self.video_img_urls = encoded_urls
-        self.video_image_ranges = []
+        self.video_image_ranges = None if encoded_urls else []
 
 
     def _get_transcript(

@@ -1,7 +1,6 @@
 'use client'
 
-import { AlignLeft, BookMarked, BookOpen, GitFork, MessageSquare, SlidersHorizontal } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { AlignLeft, BookMarked, BookOpen, Clock3, GitFork, Loader2, MessageSquare, SlidersHorizontal, TriangleAlert } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { formatVersionLabel } from '@/utils/versionLabel'
@@ -9,7 +8,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import { createPortal } from 'react-dom'
 import { useTaskStore } from '@/store/taskStore'
 import { fetchReviewBank } from '@/services/note'
-import toast from 'react-hot-toast'
+import { hasReadableContent } from '@/utils/readingStatus'
 import { ReaderToolbarContext, useToolbarFocusGroup, useWorkspaceTopbar } from '@/layouts/WorkspaceTopbarContext'
 import '@/layouts/topbar.css'
 
@@ -18,6 +17,8 @@ const ReviewBankDialog = lazy(() => import('@/components/ReviewBankDialog'))
 
 interface VersionNote {
   ver_id: string
+  content?: string
+  structured?: unknown
   model_name?: string
   style?: string
   created_at?: string
@@ -34,6 +35,11 @@ interface NoteHeaderProps {
   setCurrentVerId: (id: string) => void
   modelName: string
   title?: string
+  hasReadableBody?: boolean
+  hasAnyReadableVersion?: boolean
+  canUseMindmap?: boolean
+  canUseTranscript?: boolean
+  canUseChat?: boolean
   showTranscribe: boolean
   setShowTranscribe: (show: boolean) => void
   showChat?: false | 'half' | 'full'
@@ -50,6 +56,11 @@ export function MarkdownHeader({
   setCurrentVerId,
   modelName,
   title,
+  hasReadableBody = true,
+  hasAnyReadableVersion,
+  canUseMindmap,
+  canUseTranscript = true,
+  canUseChat = true,
   showTranscribe,
   setShowTranscribe,
   showChat,
@@ -67,7 +78,13 @@ export function MarkdownHeader({
   const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null)
   const [hasReaderToolbar, setHasReaderToolbar] = useState(false)
   const toolbarRef = useRef<HTMLDivElement | null>(null)
+
+  const effectiveHasAnyReadable = hasAnyReadableVersion ?? hasReadableContent(task ?? currentTask)
+  const mindmapEnabled = canUseMindmap ?? hasReadableBody
   const failed = task?.status === 'FAILED'
+  const submissionUnknown = task?.status === 'SUBMISSION_UNKNOWN'
+  const runningInBackground = Boolean(task && task.status !== 'SUCCESS' && !failed && !submissionUnknown)
+  const showCompactStatusPill = Boolean(effectiveHasAnyReadable && task && task.status !== 'SUCCESS')
 
   const refreshDueCount = useCallback(() => {
     void fetchReviewBank({ kind: 'all', status: 'due', limit: 1 })
@@ -126,26 +143,47 @@ export function MarkdownHeader({
         </Select>
       )}
       <div ref={setStatusSlot} className="workspace-topbar-status" />
-      {failed && (
-        <>
-          <span className="shrink-0 text-xs text-destructive">{task.cancelled ? '已取消生成' : '本次生成未完成'}</span>
-          <Button variant="outline" size="sm" className="h-7 shrink-0 px-2 text-xs" onClick={() => setDiagnosticsId(task.id)}>诊断与恢复</Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 shrink-0 px-2 text-xs"
-            title="重新调用模型生成笔记，可能产生费用"
-            disabled={Boolean(task.archived_at) || task.submissionInFlight}
-            onClick={() => {
-              void useTaskStore.getState().retryTask(task.id).catch((error: unknown) => {
-                const failure = error as { msg?: string; message?: string }
-                toast.error(failure?.msg || failure?.message || '提交失败，请检查任务状态')
-              })
-            }}
+      {showCompactStatusPill && task && (
+        failed ? (
+          <button
+            type="button"
+            className="workspace-topbar-status-pill is-failed"
+            aria-label={task.cancelled ? '已取消生成，诊断与恢复' : '本次生成未完成，诊断与恢复'}
+            title={task.cancelled ? '已取消生成 · 诊断与恢复' : '本次生成未完成 · 诊断与恢复'}
+            onClick={() => setDiagnosticsId(task.id)}
           >
-            重新生成
-          </Button>
-        </>
+            <TriangleAlert className="h-3.5 w-3.5 shrink-0" strokeWidth={1.85} aria-hidden="true" />
+            <span className="topbar-pill-label">
+              <span className="topbar-pill-extra">{task.cancelled ? '已取消 · ' : '生成未完成 · '}</span>
+              <span>恢复</span>
+            </span>
+          </button>
+        ) : submissionUnknown ? (
+          <button
+            type="button"
+            className="workspace-topbar-status-pill is-pending"
+            aria-label="提交结果待确认，诊断与恢复"
+            title="提交结果待确认 · 诊断与恢复"
+            onClick={() => setDiagnosticsId(task.id)}
+          >
+            <Clock3 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.85} aria-hidden="true" />
+            <span className="topbar-pill-label">
+              <span className="topbar-pill-extra">提交</span>
+              <span>待确认</span>
+            </span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="workspace-topbar-status-pill is-running"
+            aria-label="正在后台重新生成，查看进度与详情"
+            title="正在后台重新生成 · 查看进度或取消"
+            onClick={() => setDiagnosticsId(task.id)}
+          >
+            <Loader2 className="h-3.5 w-3.5 shrink-0 generation-spin" strokeWidth={1.85} aria-hidden="true" />
+            <span className="topbar-pill-label">生成中…</span>
+          </button>
+        )
       )}
     </>
   )
@@ -162,10 +200,14 @@ export function MarkdownHeader({
       <div role="group" aria-label="视图与面板" className="workspace-topbar-group">
         <button
           type="button"
-          onClick={() => setViewMode(viewMode === 'preview' ? 'map' : 'preview')}
+          disabled={!mindmapEnabled}
+          onClick={() => {
+            if (!mindmapEnabled) return
+            setViewMode(viewMode === 'preview' ? 'map' : 'preview')
+          }}
           className="workspace-topbar-btn"
-          aria-pressed={viewMode === 'map'}
-          title={viewMode === 'preview' ? '思维导图' : '返回正文'}
+          aria-pressed={mindmapEnabled && viewMode === 'map'}
+          title={!mindmapEnabled ? '暂无可读正文' : viewMode === 'preview' ? '思维导图' : '返回正文'}
           aria-label={viewMode === 'preview' ? '思维导图' : '返回正文'}
         >
           {viewMode === 'preview' ? <GitFork className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" /> : <BookOpen className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />}
@@ -173,10 +215,14 @@ export function MarkdownHeader({
         </button>
         <button
           type="button"
-          onClick={() => setShowTranscribe(!showTranscribe)}
+          disabled={!canUseTranscript}
+          onClick={() => {
+            if (!canUseTranscript) return
+            setShowTranscribe(!showTranscribe)
+          }}
           className="workspace-topbar-btn"
-          aria-pressed={showTranscribe}
-          title="原文参照"
+          aria-pressed={canUseTranscript && showTranscribe}
+          title={canUseTranscript ? '原文参照' : '暂无可读原文'}
           aria-label="原文参照"
         >
           <AlignLeft className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
@@ -185,10 +231,14 @@ export function MarkdownHeader({
         {setShowChat && (
           <button
             type="button"
-            onClick={() => setShowChat(showChat ? false : 'half')}
+            disabled={!canUseChat}
+            onClick={() => {
+              if (!canUseChat) return
+              setShowChat(showChat ? false : 'half')
+            }}
             className="workspace-topbar-btn"
-            aria-pressed={Boolean(showChat)}
-            title="AI 问答（Ctrl+.）"
+            aria-pressed={canUseChat && Boolean(showChat)}
+            title={canUseChat ? 'AI 问答（Ctrl+.）' : '暂无可用于问答的内容'}
             aria-label="AI 问答"
           >
             <MessageSquare className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
@@ -262,7 +312,9 @@ export function MarkdownHeader({
             taskId={task.id}
             versionId={currentVerId}
             modelName={task.formData?.model_name || modelName}
-            initialTab="diagnostics"
+            noteTitle={title}
+            initialTab={runningInBackground ? 'overview' : 'diagnostics'}
+            pollGenerationRuns={runningInBackground}
             allowComparison={false}
             onClose={() => setDiagnosticsId(null)}
           />

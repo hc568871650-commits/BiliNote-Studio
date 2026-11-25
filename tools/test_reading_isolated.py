@@ -12,7 +12,16 @@ import unittest
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dependencies', required=True)
-    parser.add_argument('tests', nargs='*', default=['tests.test_reading_stream', 'tests.test_reading_protocols', 'tests.test_ai_updates'])
+    parser.add_argument(
+        'tests',
+        nargs='*',
+        default=[
+            'tests.test_reading_stream',
+            'tests.test_reading_protocols',
+            'tests.test_ai_updates',
+            'tests.test_static_image_pipeline_regression',
+        ],
+    )
     args = parser.parse_args()
     workspace = Path(__file__).resolve().parents[1]
     sys.path[:0] = [str(workspace / 'backend'), str(Path(args.dependencies).resolve())]

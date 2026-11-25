@@ -51,6 +51,7 @@ export function mergeTaskSnapshot(local: Task | undefined, remote: Task): Task {
   const terminal = ['FAILED', 'SUCCESS'].includes(remote.status)
   return {
     ...local, ...remote,
+    cancelled: terminal ? Boolean(remote.cancelled ?? (local.status === remote.status ? local.cancelled : false)) : false,
     audioMeta: { ...local.audioMeta, ...remote.audioMeta, title: remote.audioMeta?.title || local.audioMeta?.title || '' },
     statusMessage: remote.statusMessage || (terminal && local.status === remote.status ? local.statusMessage : undefined),
     last_active_status: remote.last_active_status || (isKnownActivePhase(remote.status) ? remote.status : local.last_active_status || (isKnownActivePhase(local.status) ? local.status : undefined)),

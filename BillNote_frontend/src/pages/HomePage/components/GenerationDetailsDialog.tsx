@@ -7,6 +7,10 @@ import { clearPendingComparison, comparisonBound, exportGenerationReport, format
 import { useModelStore } from '@/store/modelStore'
 import { modelDisplayName } from '@/utils/modelDisplay'
 import ChoiceSelect from '@/components/ChoiceSelect'
+import { CancelGenerationDialog } from '@/components/RegenerateConfirmDialog'
+import { cancelGeneration } from '@/services/note'
+import { useTaskStore } from '@/store/taskStore'
+import { generationPhase } from '@/utils/taskProgress'
 import NoteDiagnosticsPanel from './NoteDiagnosticsPanel'
 
 const errorText = (error: unknown) => { const item = error as { msg?: string; message?: string }; return item?.msg || item?.message || '暂时无法读取记录' }
@@ -65,11 +69,40 @@ export default function GenerationDetailsDialog({ taskId, versionId, modelName, 
   const [cancelId, setCancelId] = useState('')
   const [pollError, setPollError] = useState('')
   const [generationPollError, setGenerationPollError] = useState('')
+  const [confirmCancelRun, setConfirmCancelRun] = useState(false)
+  const [cancellingRun, setCancellingRun] = useState(false)
+  const [cancelRunRequested, setCancelRunRequested] = useState(false)
+  const [cancelRunError, setCancelRunError] = useState('')
   const guard = useRef(false)
   const uncertainPayload = useRef<Parameters<typeof createGenerationComparison>[0] | null>(readPendingComparison(taskId, versionId))
   const alive = useRef(true)
+  const task = useTaskStore(state => state.tasks.find(item => item.id === taskId))
   const models = useModelStore(state => state.modelList)
   const loadModels = useModelStore(state => state.loadEnabledModels)
+  const isTaskRunning = Boolean(task && !['SUCCESS', 'FAILED', 'SUBMISSION_UNKNOWN'].includes(task.status))
+  const runningPhase = task ? generationPhase(task) : null
+  const attemptKey = `${taskId}:${task?.formData?.request_id || ''}`
+  useEffect(() => {
+    setConfirmCancelRun(false)
+    setCancellingRun(false)
+    setCancelRunRequested(false)
+    setCancelRunError('')
+  }, [attemptKey])
+  const handleCancelCurrentTask = async () => {
+    if (!task) return
+    setCancellingRun(true)
+    setCancelRunError('')
+    try {
+      const response = await cancelGeneration(task.id, task.formData?.request_id)
+      if (!alive.current) return
+      setCancelRunRequested(Boolean(response.cancel_requested))
+      window.dispatchEvent(new Event('bilinote-refresh-task'))
+    } catch {
+      if (alive.current) setCancelRunError('取消结果暂未确认，请稍后重试。')
+    } finally {
+      if (alive.current) setCancellingRun(false)
+    }
+  }
   const currentReports = reports.filter(run => !versionId || !run.version_id || run.version_id === versionId)
   const sourceReport = currentReports.find(run => run.model_name === modelName) || currentReports[0]
   const currentComparisons = comparisons.filter(run => run.version_id === versionId)
@@ -187,6 +220,24 @@ export default function GenerationDetailsDialog({ taskId, versionId, modelName, 
   return <Dialog open onOpenChange={open => { if (!open) onClose() }}><DialogContent className="generation-details-panel"><DialogHeader><DialogTitle>生成详情</DialogTitle><DialogDescription className="truncate">{noteTitle || (allowComparison ? '当前版本的使用量、生成参数与独立对照测试' : '这篇任务的使用量、HTTP 尝试与生成参数记录')}</DialogDescription></DialogHeader>
     <div className="generation-details-tabs" role="tablist" aria-label="生成详情"><button type="button" role="tab" id="generation-overview-tab" aria-selected={tab === 'overview'} aria-controls="generation-overview" onClick={() => setTab('overview')}>概览</button><button type="button" role="tab" id="generation-diagnostics-tab" aria-selected={tab === 'diagnostics'} aria-controls="generation-diagnostics" onClick={() => setTab('diagnostics')}>诊断</button>{allowComparison && <button type="button" role="tab" id="generation-comparison-tab" aria-selected={tab === 'comparison'} aria-controls="generation-comparison" onClick={() => setTab('comparison')}>对照测试</button>}</div>
     <div className="generation-details-body">
+      {isTaskRunning && task && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs">
+          <span className="text-foreground">
+            {runningPhase?.title || '正在生成'}
+            {task.formData?.model_name ? ` · ${task.formData.model_name}` : ''}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={cancelRunRequested || cancellingRun || task.status === 'SAVING'}
+            onClick={() => setConfirmCancelRun(true)}
+          >
+            {cancelRunRequested ? '正在取消…' : '取消生成'}
+          </Button>
+          {cancelRunError && <p role="alert" className="w-full text-destructive">{cancelRunError}</p>}
+        </div>
+      )}
       {tab !== 'diagnostics' && <div className="generation-details-actions"><Button variant="outline" size="sm" onClick={() => void (tab === 'comparison' ? loadComparisons() : load())} disabled={tab === 'comparison' ? comparisonLoading : loading}>刷新记录</Button>{allowComparison && tab === 'comparison' && <Button variant="outline" size="sm" disabled={busy || comparisonLoading || !comparisonLoaded || !versionId || Boolean(uncertainRequest)} onClick={prepare}>新建对照</Button>}<span className="generation-details-muted">{versionId ? `版本 ${versionId.slice(-8)}` : '尚未保存新版本'}{pollGenerationRuns && ' · 每 3 秒更新记录'}</span></div>}
       {tab === 'diagnostics' && <NoteDiagnosticsPanel key={taskId} taskId={taskId} />}
       {tab === 'overview' && <section className="generation-tab-content" id="generation-overview" role={allowComparison ? 'tabpanel' : undefined} aria-labelledby={allowComparison ? 'generation-overview-tab' : undefined}>
@@ -215,5 +266,11 @@ export default function GenerationDetailsDialog({ taskId, versionId, modelName, 
       {currentComparisons.map(run => <section key={run.id} className="generation-report"><div className="generation-report-heading"><strong>对照测试 · {statusLabel(run.status)}</strong>{active(run.status) ? <Button variant="outline" size="sm" disabled={cancelId === run.id} onClick={() => void cancel(run.id)}>{cancelId === run.id ? '正在取消…' : '停止后续请求'}</Button> : <Button variant="ghost" size="sm" onClick={() => void readOutput(run.id)}>读取测试输出</Button>}</div><p className="generation-details-muted">独立记录 {run.id.slice(-8)}{run.source?.fingerprint ? ` · 来源 ${run.source.fingerprint.slice(0, 12)}` : ''}{run.source?.image_count != null ? ` · ${run.source.image_count} 张画面` : ''}</p><div className="generation-comparison-columns">{run.variants.map((variant, index) => <div className="generation-comparison-card" key={index}><strong>方案 {index === 0 ? 'A' : 'B'} · {variant.model_name}</strong>{variant.report ? <RunReport run={variant.report} /> : <p className="generation-details-muted">{statusLabel(variant.status || run.status)} · 尚无用量记录</p>}{variant.error && <p className="generation-report-error">{variant.error}</p>}{variant.markdown && <details><summary>查看测试输出</summary><pre>{variant.markdown}</pre></details>}</div>)}</div></section>)}
       </section>}
     </div>
+    <CancelGenerationDialog
+      open={confirmCancelRun}
+      onOpenChange={setConfirmCancelRun}
+      disabled={cancellingRun || cancelRunRequested}
+      onConfirm={handleCancelCurrentTask}
+    />
   </DialogContent></Dialog>
 }

@@ -198,7 +198,7 @@ class RequestChunker:
                     continue
 
                 if self._messages_size([], [image], **kwargs) > self.max_bytes:
-                    raise ValueError("单张视频图片超过请求预算，未降级为无图")
+                    raise ValueError("单张图片超过请求预算，未降级为无图；请压缩图片尺寸或提高请求预算后手动重试")
                 chunks.append(ChunkPayload(segments=[], image_urls=[image]))
             return chunks
 
@@ -220,7 +220,7 @@ class RequestChunker:
                 continue
 
             if self._messages_size([], [image], **kwargs) > self.max_bytes:
-                raise ValueError("单张视频图片超过请求预算，未降级为无图")
+                raise ValueError("单张图片超过请求预算，未降级为无图；请压缩图片尺寸或提高请求预算后手动重试")
             chunks.append(ChunkPayload(segments=[], image_urls=[image]))
 
         return chunks

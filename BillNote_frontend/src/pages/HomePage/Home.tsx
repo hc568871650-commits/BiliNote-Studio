@@ -125,7 +125,7 @@ export const HomePage: FC = () => {
       onConfigure={() => setView('configure')}
       NoteForm={<><div hidden={effectiveView === 'configure'}><NoteForm creating onSubmitted={submitted} /></div>{null}</>}
       ConfigureForm={<NoteForm onSubmitted={submitted} />}
-      Preview={currentTask ? <MarkdownViewer status={status} /> : <div className="workspace-empty">
+      Preview={currentTask ? <MarkdownViewer key={currentTask.id} status={status} /> : <div className="workspace-empty">
         <h1>暂时没有笔记</h1>
         <p>点击左上角的新建笔记图标，整理你的第一篇视频笔记。</p>
         <button type="button" className="workspace-toolbar-button" onClick={createNote}>创建第一篇笔记</button>

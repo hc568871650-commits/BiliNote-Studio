@@ -19,7 +19,7 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-APP_VERSION = os.getenv("APP_VERSION", "0.4.0")
+APP_VERSION = os.getenv("APP_VERSION", "0.4.1")
 GITHUB_RELEASES_API = "https://api.github.com/repos/hc568871650-commits/BiliNote-Studio/releases/latest"
 POLICY_LOCK = threading.RLock()
 
@@ -538,7 +538,7 @@ def check_latest_release(*, current_version: str | None = None, timeout: float =
     import httpx
     from app.services.proxy_config_manager import ProxyConfigManager
 
-    curr = (current_version or APP_VERSION).strip() or "0.4.0"
+    curr = (current_version or APP_VERSION).strip() or "0.4.1"
     proxy = ProxyConfigManager().get_proxy_url()
     client_kwargs: dict[str, Any] = {
         "timeout": timeout,

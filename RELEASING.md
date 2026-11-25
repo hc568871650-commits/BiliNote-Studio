@@ -1,6 +1,8 @@
 # Studio 源码同步与发行流程
 
-2026-11-23：`v0.4.0` 已作为正式版公开，详见 [0.4.0 发布说明](docs/releases/0.4.0.md) 与 [0.4.0 验收记录](docs/releases/0.4.0-validation.md)。
+2026-11-25：`v0.4.1` 已完成源码定版与本机正式版无损实装（待后续公开发行），详见 [0.4.1 发布说明](docs/releases/0.4.1.md) 与 [隔离环境真实验收报告](docs/0.4.0-fix-validation-2026-11-25/VALIDATION_REPORT.md)。
+
+历史记录（2026-11-23）：`v0.4.0` 已作为正式版公开，详见 [0.4.0 发布说明](docs/releases/0.4.0.md) 与 [0.4.0 验收记录](docs/releases/0.4.0-validation.md)。
 
 历史记录（2026-11-21）：`v0.3.0` 已作为正式版公开，详见 [0.3.0 发布说明](docs/releases/0.3.0.md) 与 [0.3.0 验收记录](docs/releases/0.3.0-validation.md)。
 
@@ -22,11 +24,12 @@
 
 ## 版本、身份与构建
 
-以下应用入口统一为 `0.4.0`，只更新应用自身版本，不能全局替换第三方版本：
+以下应用入口统一为 `0.4.1`，只更新应用自身版本，不能全局替换第三方版本：
 
 - `BillNote_frontend/package.json` 及 `package-lock.json` 的根包。
 - `BillNote_frontend/src-tauri/Cargo.toml` 和 `Cargo.lock` 的 `app` 包。
 - `BillNote_frontend/src-tauri/tauri.conf.json`。
+- `BillNote_frontend/src/pages/SettingPage/about.tsx` 兜底版本字符串与 `backend/app/services/system_maintenance.py` 的 `APP_VERSION` 常量及兜底值。
 - `tools/build_editions.py` 的 `VERSION`；安装构建工具从此导入。
 
 公开发行提供单一 Windows x64 安装版，入口为 `tools/build_studio_installer.py`。按 `--help` 提供专用依赖、工具链和 Node 路径；公共脚本不使用维护者机器的绝对路径。安装配置覆盖为 `com.bilinote.studio`、后端端口 38484，用户数据为 `%LOCALAPPDATA%\BiliNoteStudio`。普通源码默认 `.full` 身份不能代替安装配置。

@@ -231,6 +231,7 @@ function createDistillQueueStore() {
     },
 
     cancel: async (jobId) => {
+      if (get().busyJobIds[jobId]) return
       set(state => ({ busyJobIds: { ...state.busyJobIds, [jobId]: true } }))
       try {
         await cancelJob(jobId)
@@ -248,9 +249,34 @@ function createDistillQueueStore() {
     },
 
     retry: async (jobId) => {
+      if (get().busyJobIds[jobId]) return
       set(state => ({ busyJobIds: { ...state.busyJobIds, [jobId]: true } }))
       try {
-        await retryJob(jobId)
+        const retried = await retryJob(jobId)
+        const targetTaskId = retried?.task_id
+          || get().recentJobs.find(item => item.job_id === jobId)?.task_id
+          || get().activeJobs.find(item => item.job_id === jobId)?.task_id
+        if (targetTaskId) {
+          const taskStore = useTaskStore.getState()
+          const existing = taskStore.tasks.find(item => item.id === targetTaskId)
+          if (existing) {
+            taskStore.updateTaskContent(targetTaskId, {
+              status: 'PENDING',
+              cancelled: false,
+              last_active_status: 'PENDING',
+              started_at: undefined,
+              finished_at: undefined,
+              status_updated_at: undefined,
+              statusMessage: '',
+              pollingError: undefined,
+              submissionError: undefined,
+              lastStatusAt: undefined,
+              attemptStartedAt: Date.now(),
+              phaseStartedAt: Date.now(),
+            })
+          }
+          scheduleNoteSync(targetTaskId)
+        }
         toast.success('已重新加入蒸馏队列')
       } catch (error) {
         const msg = (error as { msg?: string; message?: string })?.msg || '重试任务失败'

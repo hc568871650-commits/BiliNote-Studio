@@ -6,7 +6,7 @@ import studioMark from '@/assets/studio-mark.svg?raw'
 import '@/components/startup.css'
 
 const studioMarkMarkup = studioMark.replaceAll('#fff', 'currentColor')
-const CURRENT_VERSION = String(import.meta.env.VITE_APP_VERSION || '0.4.0')
+const CURRENT_VERSION = String(import.meta.env.VITE_APP_VERSION || '0.4.1')
 
 export default function AboutPage() {
   const [checking, setChecking] = useState(false)

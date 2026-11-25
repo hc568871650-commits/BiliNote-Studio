@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { HairlineCloseIcon } from '@/pages/HomePage/components/StructuredNoteReader/AnnotationIcons'
+import { CancelGenerationDialog, RegenerateConfirmDialog } from '@/components/RegenerateConfirmDialog'
 import { useDistillQueueStore } from '@/store/distillQueueStore'
 import { useTaskStore } from '@/store/taskStore'
 import type { DistillJobRecord, DistillNotificationMode, JobKind } from '@/utils/distillNotifications'
@@ -57,6 +58,8 @@ export default function DistillQueuePanel({
   const clearFinished = useDistillQueueStore(state => state.clearFinished)
 
   const [nowMs, setNowMs] = useState(() => Date.now())
+  const [confirmRetryJobId, setConfirmRetryJobId] = useState<string | null>(null)
+  const [confirmCancelJobId, setConfirmCancelJobId] = useState<string | null>(null)
 
   useEffect(() => {
     if (activeJobs.length === 0) return
@@ -163,7 +166,7 @@ export default function DistillQueuePanel({
                               type="button"
                               className="distill-job-action-btn"
                               disabled={busy}
-                              onClick={() => void cancel(job.job_id)}
+                              onClick={() => setConfirmCancelJobId(job.job_id)}
                             >
                               {busy ? '取消中…' : '取消'}
                             </button>
@@ -245,7 +248,7 @@ export default function DistillQueuePanel({
                                     type="button"
                                     className="distill-job-action-btn"
                                     disabled={busy}
-                                    onClick={() => void retry(job.job_id)}
+                                    onClick={() => setConfirmRetryJobId(job.job_id)}
                                   >
                                     {busy ? '重试中…' : '重试'}
                                   </button>
@@ -275,6 +278,24 @@ export default function DistillQueuePanel({
           </>
         )}
       </div>
+      <RegenerateConfirmDialog
+        open={Boolean(confirmRetryJobId)}
+        onOpenChange={open => { if (!open) setConfirmRetryJobId(null) }}
+        disabled={Boolean(confirmRetryJobId && busyJobIds[confirmRetryJobId])}
+        onConfirm={async () => {
+          if (!confirmRetryJobId) return
+          await retry(confirmRetryJobId)
+        }}
+      />
+      <CancelGenerationDialog
+        open={Boolean(confirmCancelJobId)}
+        onOpenChange={open => { if (!open) setConfirmCancelJobId(null) }}
+        disabled={Boolean(confirmCancelJobId && busyJobIds[confirmCancelJobId])}
+        onConfirm={async () => {
+          if (!confirmCancelJobId) return
+          await cancel(confirmCancelJobId)
+        }}
+      />
     </section>
   )
 }

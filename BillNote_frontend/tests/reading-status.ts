@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import request from '@/utils/request'
 import { defaultLibraryEntry, useLibraryStore } from '@/store/libraryStore'
-import { hasReadableContent } from '@/utils/readingStatus'
+import { findPreferredReadableVersion, hasReadableContent, hasReadableTranscript, isReadableMarkdownContent, isReadableVersion } from '@/utils/readingStatus'
 import { filterAndSortLibraryTasks, defaultLibraryFilters } from '@/utils/libraryFilters'
 import type { Task } from '@/store/taskStore'
+import type { StructuredNoteDocument } from '@/types/structuredNote'
 import type { NoteLibraryEntry } from '@/services/noteLibrary'
 
 let remote: Record<string, NoteLibraryEntry> = {}
@@ -28,10 +29,30 @@ const reset = (status: 'unread' | 'learning' | 'done') => {
   hold = undefined
 }
 async function run() {
+  assert.equal(isReadableMarkdownContent(''), false)
+  assert.equal(isReadableMarkdownContent('   '), false)
+  assert.equal(isReadableMarkdownContent('loading'), false)
+  assert.equal(isReadableMarkdownContent('empty'), false)
+  assert.equal(isReadableMarkdownContent('# A real note'), true)
   assert.equal(hasReadableContent({ markdown: '' }), false)
   assert.equal(hasReadableContent({ markdown: '  ' }), false)
   assert.equal(hasReadableContent({ markdown: 'loading' }), false)
   assert.equal(hasReadableContent({ markdown: '# A real note' }), true)
+  const structuredDoc: StructuredNoteDocument = {
+    schema_version: 1,
+    note_style: 'tutorial',
+    title: '结构化笔记',
+    sections: [{ id: 's1', title: '一、核心', level: 2, time_ranges: [], core_takeaways: [], blocks: [], annotations: [], quiz: null }],
+  }
+  assert.equal(isReadableVersion({ content: '', structured: structuredDoc }), true, 'structured-only version counts as readable')
+  assert.equal(hasReadableContent({ markdown: [{ ver_id: 'v-struct', content: '', structured: structuredDoc, style: 'tutorial', model_name: 'm', created_at: '' }] }), true)
+  const preferred = findPreferredReadableVersion([
+    { ver_id: 'v-empty', content: '   ', style: 'tutorial', model_name: 'm', created_at: '2026-10-02' },
+    { ver_id: 'v-old-ok', content: '# 旧版可读', style: 'tutorial', model_name: 'm', created_at: '2026-10-01' },
+  ])
+  assert.equal(preferred?.ver_id, 'v-old-ok', 'falls back to nearest readable version when latest is empty')
+  assert.equal(hasReadableTranscript({ transcript: { full_text: '', language: '', raw: null, segments: [{ start: 0, end: 1, text: '   ' }] } }), false)
+  assert.equal(hasReadableTranscript({ transcript: { full_text: '', language: '', raw: null, segments: [{ start: 0, end: 1, text: 'hello' }] } }), true)
   const readable = { id: 'readable', markdown: '# Note', status: 'SUCCESS', createdAt: '2026-10-01', audioMeta: { title: 'Note' } } as Task
   const failed = { ...readable, id: 'failed', status: 'FAILED', markdown: '' }
   assert.deepEqual(filterAndSortLibraryTasks([failed, readable], {}, { ...defaultLibraryFilters, learningStatus: 'unread' }).map(task => task.id), ['readable'], 'Reading filters exclude failed tasks without content')

@@ -177,3 +177,73 @@ def test_jobs_router_snapshot_and_sse_no_historical_replay(tmp_path: Path):
     finally:
         reset_job_manager()
         manager.shutdown()
+
+
+def test_job_manager_retry_resets_note_storage_status_while_queued(tmp_path: Path, monkeypatch):
+    """验证并发满排队期间重试作业会先将 note_storage 状态重置为 PENDING，清空旧 FAILED 终态。"""
+    from app.jobs.manager import JobManager
+    from app.jobs.models import JobKind, JobSpec, JobStatus
+    from app.services import note_storage
+
+    notes_dir = tmp_path / "notes"
+    monkeypatch.setattr(note_storage, "ROOT", notes_dir)
+
+    task_id = "retry-queued-note"
+    note_storage.save_task({
+        "id": task_id,
+        "status": "PENDING",
+        "markdown": "",
+        "audioMeta": {"title": "排队重试笔记", "video_id": "", "platform": "bilibili"},
+        "transcript": {"full_text": "", "segments": []},
+        "formData": {"video_url": "https://www.bilibili.com/video/BV1xx", "platform": "bilibili"},
+    })
+    note_storage.request_cancellation(task_id, "req-old")
+    note_storage.write_status(task_id, "FAILED", "旧失败错误", cancelled=True)
+
+    failed_snapshot = note_storage.get_task(task_id)
+    assert failed_snapshot is not None
+    assert failed_snapshot["status"] == "FAILED"
+    assert failed_snapshot["cancelled"] is True
+    assert failed_snapshot["finished_at"] is not None
+
+    manager = JobManager(max_concurrency=1, state_file=tmp_path / "jobs_state.json")
+    blocker_started = threading.Event()
+    release_blocker = threading.Event()
+    retry_attempts = {"count": 0}
+
+    def blocking_worker(record, token, update):
+        blocker_started.set()
+        release_blocker.wait(timeout=3.0)
+        return {"ok": True}
+
+    def flaky_worker(record, token, update):
+        retry_attempts["count"] += 1
+        if retry_attempts["count"] == 1:
+            raise RuntimeError("首次执行失败")
+        return {"ok": True}
+
+    try:
+        j_fail = manager.enqueue(JobSpec(task_id=task_id, kind=JobKind.GENERATE, title="排队重试笔记"), flaky_worker)
+        assert _wait_until(lambda: manager.get_job(j_fail.job_id).status == JobStatus.FAILED)
+
+        # 占满唯一并发槽，使接下来的重试停留在 QUEUED 状态
+        manager.enqueue(JobSpec(task_id="blocker-task", kind=JobKind.GENERATE, title="占位任务"), blocking_worker)
+        assert blocker_started.wait(timeout=3.0)
+
+        retried = manager.retry(j_fail.job_id)
+        assert retried.status == JobStatus.QUEUED
+
+        # 排队期间拉取 note_storage 不得再看到旧 FAILED / cancelled / finished_at
+        queued_snapshot = note_storage.get_task(task_id)
+        assert queued_snapshot is not None
+        assert queued_snapshot["status"] == "PENDING"
+        assert queued_snapshot["cancelled"] is False
+        assert queued_snapshot["finished_at"] is None
+        assert "旧失败错误" not in (queued_snapshot.get("statusMessage") or "")
+        assert not note_storage.status_path(task_id).with_suffix(".cancel.json").exists()
+
+        release_blocker.set()
+        assert _wait_until(lambda: manager.get_job(retried.job_id).status == JobStatus.SUCCESS)
+    finally:
+        release_blocker.set()
+        manager.shutdown()

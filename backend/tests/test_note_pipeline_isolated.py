@@ -38,7 +38,15 @@ def load_pipeline():
     namespace['note_diagnostics'] = Mock()
     source = ROOT / 'app/services/note.py'
     tree = ast.parse(source.read_text(encoding='utf-8-sig'), filename=str(source))
-    methods = {'generate', '_download_media', '_get_transcript', '_transcribe_audio', '_prepare_video_evidence', '_summarize_text'}
+    methods = {
+        'generate',
+        '_download_media',
+        '_get_transcript',
+        '_transcribe_audio',
+        '_prepare_video_evidence',
+        '_prepare_local_image_evidence',
+        '_summarize_text',
+    }
     selected = [ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0)]
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in {'_cache_task_id', '_read_transcript_cache'}:
@@ -264,6 +272,131 @@ class PipelineRegressionTests(unittest.TestCase):
         self.reader.return_value.extract_frames.assert_called_once()
         self.reader.return_value.run.assert_not_called()
         self.assertEqual(self.generator.video_img_urls, [])
+
+    def _make_tiny_png(self, name: str) -> Path:
+        import base64
+        path = self.root / name
+        path.write_bytes(base64.b64decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jfasAAAAASUVORK5CYII='
+        ))
+        return path
+
+    def test_same_generator_switches_between_video_and_static_text_post_without_leaking_ranges(self):
+        png_path = self._make_tiny_png('post_img_1.png')
+        post_transcript = PIPELINE['TranscriptResult'](
+            'zh', '图文正文', [PIPELINE['TranscriptSegment'](0.0, 0.0, '图文正文')]
+        )
+        post_meta = PIPELINE['AudioDownloadResult'](
+            '', 'X 图文测试', 0.0, None, 'x', 'x-post-1',
+            {
+                'media_kind': 'text_post',
+                'local_images': [{'local_path': str(png_path), 'web_url': '/static/screenshots/x_1.png', 'caption': '配图1'}],
+            },
+            None,
+        )
+
+        # 1) 视频（开启 video_understanding）-> 产出带时间范围的视频图
+        video_res = self.generate(video_understanding=True)
+        self.assertIsNotNone(video_res)
+        self.assertEqual(self.generator.video_img_urls, ['mock-grid.jpg'])
+        self.assertEqual(self.generator.video_image_ranges, [{'start': 1, 'end': 1}])
+        self.assertEqual(video_res.evidence['video_image_ranges'], [{'start': 1, 'end': 1}])
+
+        # 清理缓存后，同一实例紧接着处理带静态图的图文
+        for path in self.paths.values():
+            path.unlink(missing_ok=True)
+        post_downloader = Mock()
+        post_downloader.download_subtitles.return_value = post_transcript
+        post_downloader.is_text_post.return_value = True
+        post_downloader.download.return_value = post_meta
+        self.generator._get_downloader.return_value = post_downloader
+
+        post_res = self.generator.generate(
+            'https://x.com/demo/status/1', 'x', task_id='test', output_path=str(self.root / 'run'),
+            video_understanding=True,
+        )
+        self.assertIsNotNone(post_res)
+        self.assertEqual(len(self.generator.video_img_urls), 1)
+        self.assertTrue(self.generator.video_img_urls[0].startswith('data:image/'))
+        self.assertIsNone(self.generator.video_image_ranges)
+        # 落盘 evidence 维持数组形状 []
+        self.assertEqual(post_res.evidence['video_image_ranges'], [])
+
+        # 3) 反向顺序：同一实例再处理视频，状态不串
+        for path in self.paths.values():
+            path.unlink(missing_ok=True)
+        self.generator._get_downloader.return_value = self.downloader
+        video_res_2 = self.generate(video_understanding=True)
+        self.assertIsNotNone(video_res_2)
+        self.assertEqual(self.generator.video_img_urls, ['mock-grid.jpg'])
+        self.assertEqual(self.generator.video_image_ranges, [{'start': 1, 'end': 1}])
+        self.assertEqual(video_res_2.evidence['video_image_ranges'], [{'start': 1, 'end': 1}])
+
+    def test_local_image_evidence_producer_to_real_chunker_short_long_and_all_failed(self):
+        from app.gpt.request_chunker import RequestChunker
+        from app.models.gpt_model import GPTSource
+
+        png_path = self._make_tiny_png('single_static.png')
+        self.generator._prepare_local_image_evidence([
+            {'local_path': str(png_path), 'web_url': '/static/screenshots/single.png'},
+        ])
+        self.assertEqual(len(self.generator.video_img_urls), 1)
+        self.assertIsNone(self.generator.video_image_ranges)
+
+        def builder(segs, imgs, **_):
+            return [{'role': 'user', 'content': ''.join(s.text for s in segs) + '|'.join(imgs)}]
+
+        # 短文本与超长文本均须通过真实 RequestChunker
+        for segments in (
+            [PIPELINE['TranscriptSegment'](0.0, 0.0, '短图文')],
+            [PIPELINE['TranscriptSegment'](0.0, 0.0, f'段落{i}' * 120) for i in range(10)],
+        ):
+            src = GPTSource(
+                segment=segments, title='静态图测试', tags='',
+                video_img_urls=list(self.generator.video_img_urls),
+                video_image_ranges=self.generator.video_image_ranges,
+            )
+            chunker = RequestChunker(builder, max_bytes=1024 * 1024, max_text_chars=500)
+            chunks = chunker.chunk(src.segment, src.video_img_urls, video_image_ranges=src.video_image_ranges)
+            self.assertGreaterEqual(len(chunks), 1)
+            self.assertEqual([img for c in chunks for img in c.image_urls], src.video_img_urls)
+
+        # 文件缺失或空文件导致编码全部失败 -> urls=[] 且 ranges=[]，可通过分块器
+        empty_file = self.root / 'empty.png'
+        empty_file.write_bytes(b'')
+        self.generator._prepare_local_image_evidence([
+            {'local_path': str(self.root / 'missing.png')},
+            {'local_path': str(empty_file)},
+        ])
+        self.assertEqual(self.generator.video_img_urls, [])
+        self.assertEqual(self.generator.video_image_ranges, [])
+        chunker = RequestChunker(builder, max_bytes=1024 * 1024, max_text_chars=500)
+        chunks = chunker.chunk(
+            [PIPELINE['TranscriptSegment'](0.0, 0.0, '仅文本')],
+            self.generator.video_img_urls,
+            video_image_ranges=self.generator.video_image_ranges,
+        )
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(chunks[0].image_urls, [])
+
+    def test_video_understanding_empty_frames_raises_explicit_error(self):
+        self.reader.return_value.run.return_value = []
+        self.reader.return_value.grouped_ranges = []
+        self.generator.video_path = self.video
+        with self.assertRaisesRegex(ValueError, '未取得视频画面'):
+            self.generator._prepare_video_evidence(
+                self.transcript, 'test', frame_mode='dynamic', video_understanding=True
+            )
+        # 完整 generate 链路也必须失败收敛，不得静默进入总结
+        result = self.generate(video_understanding=True)
+        self.assertIsNone(result)
+        self.generator._summarize_text.assert_not_called()
+        failed_calls = [
+            call for call in self.generator._update_status.call_args_list
+            if len(call.args) >= 2 and call.args[1] == PIPELINE['TaskStatus'].FAILED
+        ]
+        self.assertTrue(failed_calls)
+        self.assertIn('未取得视频画面', failed_calls[-1].kwargs.get('message', ''))
 
 
 if __name__ == '__main__':

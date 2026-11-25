@@ -102,4 +102,9 @@ releasePost({ task_id: 'saved' })
 await resumed
 assert.equal(store.getState().tasks[0].status, 'PENDING', 'never-accepted request has a safe explicit recovery')
 assert.equal(store.getState().tasks[0].formData.request_id, uncertainId)
-console.log('generation store: versions preserved / progress refresh / retry errors propagate / single submission / fresh ID passed')
+store.getState().updateTaskContent('saved', { status: 'FAILED', cancelled: true, statusMessage: '已取消' })
+request.post = (async (_path: string, body: any) => ({ task_id: body.task_id })) as typeof request.post
+await store.getState().retryTask('saved', { provider_id: 'p', model_name: 'm', request_id: 'after-cancel' })
+assert.equal(store.getState().tasks[0].cancelled, false, 'new retry clears stale cancelled flag')
+assert.equal(store.getState().tasks[0].status, 'PENDING')
+console.log('generation store: versions preserved / progress refresh / retry errors propagate / single submission / fresh ID / cancelled reset passed')

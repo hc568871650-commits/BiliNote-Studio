@@ -215,7 +215,7 @@ export default function NoteForm({ onSubmitted, creating = false }: { onSubmitte
     const selectedBefore = store.currentTaskId
     if (!store.tasks.some(task => task.id === payload.task_id)) store.addPendingTask(payload.task_id!, payload.platform, payload)
     else {
-      store.updateTaskContent(payload.task_id!, { status: 'PENDING', last_active_status: 'PENDING', started_at: undefined, finished_at: undefined, status_updated_at: undefined, formData: payload as Task['formData'], attemptStartedAt: Date.now(), phaseStartedAt: Date.now(), submissionError: undefined, pollingError: undefined, statusMessage: '已接收，等待处理' })
+      store.updateTaskContent(payload.task_id!, { status: 'PENDING', cancelled: false, last_active_status: 'PENDING', started_at: undefined, finished_at: undefined, status_updated_at: undefined, formData: payload as Task['formData'], attemptStartedAt: Date.now(), phaseStartedAt: Date.now(), submissionError: undefined, pollingError: undefined, statusMessage: '已接收，等待处理' })
       store.setCurrentTask(payload.task_id!)
     }
     const added = useTaskStore.getState().tasks.find(task => task.id === payload.task_id)

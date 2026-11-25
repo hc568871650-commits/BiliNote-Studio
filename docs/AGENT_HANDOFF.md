@@ -1,19 +1,16 @@
 # BiliNote Studio：Agent 接手说明
 
-整理日期：2026-11-23（America/Los_Angeles）。
+整理日期：2026-11-25（America/Los_Angeles）。
 
 ## 当前仓库状态与版本口径
 
-- **主开发工作区与本地正式版**：`e:\agy work\bilinote studio` 已完成 **`0.4.0` 全四阶段（Milestone 4A ~ 4D）及桌面端深度体验打磨**，并经用户明确授权已无损实装并热更新至 **`E:\AI-Tools\BiliNote`**（桌面 `0.4.0` + 后端 `0.4.0` + 内置纯 Python BSD `pypdf 7.1.1`，默认 `8483` 端口），已完成全量自动化测试与真实运行核验。
-- **`0.4.0` 已落地核心能力与验收结论**：
-  - **Milestone 4A（URL 解耦 + 默认简体中文 + X/Twitter 双通道与多视频无缝拼接）**：URL 识别解耦；默认简体中文输出（支持“跟随原视频语言”切换）；X/Twitter 图文+视频双通道与短多视频/引用视频 FFmpeg 无缝拼接及音轨零网络秒抽。
-  - **Milestone 4B（多源输入扩展）**：新增小宇宙播客单集、通用技术文章网页（`bs4`/`lxml`）与本地 PDF/MD/TXT 文档（零 AGPL 依赖，使用 BSD-3-Clause `pypdf`）解析直出。
-  - **Milestone 4C（深度阅读与学习闭环）**：正文划词句末个人/助手批注持久化、复习库 SRS 间隔重复调度、专题综合自测（`TopicQuizDialog`）与相关笔记语义推荐（`RelatedNotesSection`）。
-  - **Milestone 4D（桌面原生效率与数据主权）**：全局快捷键捕获 + 托盘一键蒸馏、`Ctrl+K` 命令面板、存储占用 macOS 风格自适应分布条与临时缓存（含 `.clips.json`）清理、整库 `.zip` 备份恢复与 GitHub Releases 检查更新。
-  - **体验打磨与排障增强**：外语双语字幕自动/手动翻译（含专用翻译模型 `purpose_preferences.translation`、增量补译防锁死、二分拆批防截断与原文面板/播放器一键重译）、拼接进度条可点击截断白点、播放器默认展开首帧零飞移、底座与靠边侧 0px 静止纯对角缩放、左下角毛玻璃速开圆钮、右上角零重叠关闭钮、收起态双语自然折行悬浮字幕，以及鼠标移出播放器 2 秒自动淡出悬浮播放栏（不收起视频画面）。
-  - **全量验证报告**：见 [4A 验收报告](0.4.0-m4a-validation-2026-11-22/VALIDATION_REPORT.md)、[4B 验收报告](0.4.0-m4b-validation-2026-11-22/VALIDATION_REPORT.md)、[4C+4D 验收报告](0.4.0-m4cd-validation-2026-11-22/VALIDATION_REPORT.md) 与 [0.4.0 总计划](plans/2026-11-22-studio-0.4.0-master-plan.md)。
-- **版本字段现状**：`BillNote_frontend/package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`、`backend/app/__init__.py`、`tools/build_editions.py` 均已统一对齐为 `0.4.0`。
-- **本地回滚备份**：原始 `0.3.0 → 0.4.0` 全量实装备份与一键回滚脚本保存在 `e:\agy work\bilinote studio\.BiliNote-dev\local-release-0.4.0`（保留 `backup/`、`Rollback.ps1`、`deploy_helper.py`、`extra-deps/` 与验收回执 JSON；过期历史构建缓存与中间热更新备份已清理）。
+- **主开发工作区与本地正式版**：`e:\agy work\bilinote studio` 已定版 **`0.4.1`**（在 `0.4.0` 全四阶段能力基础上完成静态配图多模态视觉分块修复、阅读/失败状态机加固、顶栏单行防裁切与付费重生成确认守卫），并经用户明确授权已无损实装并热更新至 **`E:\AI-Tools\BiliNote`**（桌面 `0.4.1` + 后端 `0.4.1` + 内置纯 Python BSD `pypdf 7.1.1`，默认 `8483` 端口），已完成全量自动化回归与真实运行核验。
+- **`0.4.1` 核心修复与验收结论**：
+  - **静态配图视觉分块与有时轴视频双通道修复**：`_prepare_local_image_evidence` 对无时间轴静态配图将 `video_image_ranges` 置 `None` 改走预算顺序分块（落盘规范化为 `[]`），彻底消除带图 X Article 开启画面理解时的错配报错；有时轴视频 `VideoReader` 动态抽帧与时间范围对齐完整保留。
+  - **阅读/失败状态机、顶栏防裁切与确认守卫**：首次无正文失败态与有历史可读正文重生成失败态状态机加固、顶栏 `1000px~1280px` 零裁切零重叠（756 组矩阵通过）、单入口恢复与 `save_recovery` 零模型请求重试保存、新增 `RegenerateConfirmDialog` 与蒸馏队列付费/取消确认守卫。
+  - **真实验收报告**：见 [0.4.1 发布说明](releases/0.4.1.md) 与 [隔离环境真实验收报告](0.4.0-fix-validation-2026-11-25/VALIDATION_REPORT.md)；`0.4.0` 历史分阶段验收报告仍保留于 [4A](0.4.0-m4a-validation-2026-11-22/VALIDATION_REPORT.md) / [4B](0.4.0-m4b-validation-2026-11-22/VALIDATION_REPORT.md) / [4C+4D](0.4.0-m4cd-validation-2026-11-22/VALIDATION_REPORT.md)。
+- **版本字段现状**：`BillNote_frontend/package.json`、`BillNote_frontend/package-lock.json`（根包）、`BillNote_frontend/src-tauri/Cargo.toml`、`BillNote_frontend/src-tauri/Cargo.lock`（`app` 包）、`BillNote_frontend/src-tauri/tauri.conf.json`、`BillNote_frontend/src/pages/SettingPage/about.tsx`、`backend/app/services/system_maintenance.py`、`tools/build_editions.py` 均已统一对齐为 `0.4.1`。
+- **本地回滚备份**：本次 `0.4.0 → 0.4.1` 全量实装备份与一键回滚脚本保存在 `e:\agy work\bilinote studio\.BiliNote-dev\local-release-0.4.1`（含 `backup/`、`Rollback.ps1`、`deploy_helper.py`、`extra-deps/` 与验收回执 JSON）；历史 `0.3.0 → 0.4.0` 备份仍保留于 `.BiliNote-dev\local-release-0.4.0`。
 
 ## 必须先读的文件
 
@@ -25,7 +22,7 @@
 
 ## 正式环境与运行边界
 
-- **受保护正式安装**：`E:\AI-Tools\BiliNote`（当前运行桌面 `0.4.0` + 后端 `0.4.0`，默认 `8483` 端口，含真实数据库 `bili_note.db`、`data`、`note_results`、`uploads`、`WebView2` 等）绝对受保护，后续开发未经另行明确授权不得修改、停止、重启或覆盖。
+- **受保护正式安装**：`E:\AI-Tools\BiliNote`（当前运行桌面 `0.4.1` + 后端 `0.4.1`，默认 `8483` 端口，含真实数据库 `bili_note.db`、`data`、`note_results`、`uploads`、`WebView2` 等）绝对受保护，后续开发未经另行明确授权不得修改、停止、重启或覆盖。
 - **其他外部保护目录**：`E:\AI-Tools\BiliNote-Learning-Preview`、`E:\AI-Tools\_Launchers`、`E:\AI-Tools\BiliNote-build`、`E:\codex\github仓库管理和发布` 与 `E:\codex\bilinote-backup-20261115`。
 - **开发必须完全隔离**：不要直接运行未隔离的 `pnpm dev`、`backend/main.py` 或 Tauri 桌面端（默认指向 `8483` 正式端口）；开发或真实业务验收必须同时隔离前后端端口、`VITE_API_BASE_URL`、应用标识、数据库、笔记/截图/上传目录、缓存目录及浏览器 origin。
 

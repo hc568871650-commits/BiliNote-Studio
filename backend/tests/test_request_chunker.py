@@ -131,8 +131,31 @@ class TestRequestChunker(unittest.TestCase):
             chunker.chunk([DummySeg(0, 1, 'a')], ['TOO-LARGE-IMAGE'], video_image_ranges=[{'start': 0, 'end': 1}])
         with self.assertRaisesRegex(ValueError, '数量不一致'):
             chunker.chunk([], ['I'], video_image_ranges=[])
+        with self.assertRaisesRegex(ValueError, '数量不一致'):
+            chunker.chunk([DummySeg(0, 1, 'a')], [], video_image_ranges=[{'start': 0, 'end': 1}])
         with self.assertRaisesRegex(ValueError, '时间范围无效'):
             chunker.chunk([], ['I'], video_image_ranges=[{'start': float('nan'), 'end': 1}])
+
+    def test_empty_images_with_empty_ranges_passes_aligned_path(self):
+        chunker = RequestChunker(build_messages, 16, size_estimator)
+        chunks = chunker.chunk([DummySeg(0, 5, 'hello')], [], video_image_ranges=[])
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(chunks[0].image_urls, [])
+        self.assertEqual(chunks[0].video_image_ranges, [])
+
+    def test_unaligned_static_images_overflow_and_single_oversized_image_error(self):
+        # 预算仅够每块放正文或单张图，装不下的静态图应溢出到后续纯图块
+        chunker = RequestChunker(build_messages, 8, size_estimator)
+        chunks = chunker.chunk([DummySeg(0, 0, 'aaaaaa')], ['11111', '22222'], video_image_ranges=None)
+        self.assertEqual([c.image_urls for c in chunks], [[], ['11111'], ['22222']])
+        self.assertEqual([c.segments for c in chunks[1:]], [[], []])
+        self.assertTrue(all(c.video_image_ranges is None for c in chunks))
+
+        # 单张图本身超预算（带文本与无文本两个分支）均须在发请求前报清晰可操作错误
+        for segs in ([DummySeg(0, 0, 'a')], []):
+            with self.subTest(has_segments=bool(segs)):
+                with self.assertRaisesRegex(ValueError, '单张图片超过请求预算.*未降级为无图.*请求预算'):
+                    chunker.chunk(segs, ['TOO-LARGE-STATIC'], video_image_ranges=None)
 
 
 if __name__ == "__main__":

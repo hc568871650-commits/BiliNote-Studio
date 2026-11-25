@@ -17,7 +17,7 @@ export interface AudioMeta {
   duration: number
   file_path: string
   platform: string
-  raw_info: any
+  raw_info: Record<string, unknown> | null
   title: string
   video_id: string
 }
@@ -32,7 +32,7 @@ export interface Segment {
 export interface Transcript {
   full_text: string
   language: string
-  raw: any
+  raw: unknown
   segments: Segment[]
 }
 export interface Markdown {
@@ -81,10 +81,12 @@ export interface Task {
   }
 }
 
+type TaskSubmissionPayload = Partial<Task['formData']> & Record<string, unknown>
+
 interface TaskStore {
   tasks: Task[]
   currentTaskId: string | null
-  addPendingTask: (taskId: string, platform: string, formData: any) => void
+  addPendingTask: (taskId: string, platform: string, formData: TaskSubmissionPayload) => void
   updateTaskContent: (id: string, data: Partial<Omit<Task, 'id' | 'createdAt'>>) => void
   archiveTask: (id: string) => Promise<void>
   restoreTask: (id: string) => Promise<void>
@@ -94,7 +96,7 @@ interface TaskStore {
   clearTasks: () => void
   setCurrentTask: (taskId: string | null) => void
   getCurrentTask: () => Task | null
-  retryTask: (id: string, payload?: any) => Promise<void>
+  retryTask: (id: string, payload?: TaskSubmissionPayload) => Promise<void>
   resumeSubmission: (id: string) => Promise<void>
 }
 
@@ -107,19 +109,19 @@ export const useTaskStore = create<TaskStore>()(
       tasks: [],
       currentTaskId: null,
 
-      addPendingTask: (taskId: string, platform: string, formData: any) =>
+      addPendingTask: (taskId: string, platform: string, formData: TaskSubmissionPayload) =>
 
         set(state => ({
           tasks: [
             {
-              formData: formData,
+              formData: formData as Task['formData'],
               id: taskId,
               status: 'PENDING',
+              cancelled: false,
               last_active_status: 'PENDING',
               phaseStartedAt: Date.now(),
               attemptStartedAt: Date.now(),
               markdown: '',
-              platform: platform,
               transcript: {
                 full_text: '',
                 language: '',
@@ -133,7 +135,7 @@ export const useTaskStore = create<TaskStore>()(
                 file_path: '',
                 platform: '',
                 raw_info: null,
-                title: platform === 'local' ? formData.video_url?.split(/[\\/]/).pop() || '' : formData.title || '',
+                title: platform === 'local' ? String(formData.video_url || '').split(/[\\/]/).pop() || '' : String(formData.title || ''),
                 video_id: '',
               },
             },
@@ -149,7 +151,8 @@ export const useTaskStore = create<TaskStore>()(
 
               // Repeated SUCCESS must not append duplicate versions, but still refresh progress.
               if (task.status === 'SUCCESS' && data.status === 'SUCCESS' && typeof data.markdown === 'string') {
-                const { markdown: _markdown, ...metadata } = data
+                const metadata = { ...data }
+                delete metadata.markdown
                 return { ...task, ...metadata }
               }
 
@@ -199,7 +202,7 @@ export const useTaskStore = create<TaskStore>()(
         const currentTaskId = get().currentTaskId
         return get().tasks.find(task => task.id === currentTaskId) || null
       },
-      retryTask: async (id: string, payload?: any) => {
+      retryTask: async (id: string, payload?: TaskSubmissionPayload) => {
 
         if (!id){
           toast.error('任务不存在')
@@ -214,11 +217,16 @@ export const useTaskStore = create<TaskStore>()(
           throw new Error('请先恢复归档笔记再重新生成')
         }
 
-        const { resume_submission: _resume, ...submissionData } = payload || task.formData
-        const newFormData = { ...submissionData, request_id: payload?.request_id || uuidv4() }
+        const submissionData: TaskSubmissionPayload = { ...(payload || task.formData) }
+        delete submissionData.resume_submission
+        const newFormData = {
+          ...submissionData,
+          request_id: typeof payload?.request_id === 'string' && payload.request_id ? payload.request_id : uuidv4(),
+        } as Task['formData']
         submittingTasks.add(id)
         get().updateTaskContent(id, {
           formData: newFormData, status: 'SUBMISSION_UNKNOWN', submissionInFlight: true,
+          cancelled: false,
           statusMessage: '提交结果尚未确认，正在自动核对同一请求；请勿重复提交。',
           ...(resuming ? {} : { last_active_status: undefined, started_at: undefined, finished_at: undefined, status_updated_at: undefined, lastStatusAt: undefined, pollingError: undefined, attemptStartedAt: Date.now() }),
         })
@@ -226,10 +234,11 @@ export const useTaskStore = create<TaskStore>()(
           // Save the idempotency key before network I/O so a crash cannot lose this attempt.
           await taskStorage.flush()
           await generateNote({
-            ...newFormData,
+            ...(newFormData as unknown as Parameters<typeof generateNote>[0]),
             task_id: id,
           }, { suppressToast: true })
-        } catch (e: any) {
+        } catch (err: unknown) {
+          const e = err as { code?: number; msg?: string; message?: string }
           console.error('重试任务失败：', e)
           const uncertain = !e?.code || e.code === -1 || e.code >= 500
           const current = get().tasks.find(t => t.id === id)
@@ -263,6 +272,7 @@ export const useTaskStore = create<TaskStore>()(
                     ...t,
                     formData: newFormData, // ✅ 显式更新 formData
                     status: 'PENDING',
+                    cancelled: false,
                     last_active_status: 'PENDING',
                     started_at: undefined,
                     finished_at: undefined,
