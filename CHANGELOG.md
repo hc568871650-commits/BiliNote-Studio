@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.2] — 2026-11-27
+
+围绕**长文/多段知识笔记二次合并（Pass 2）与教程合并结构化 JSON 渲染稳定性**完成的紧急质量修复版，详见 [0.4.2 发布说明](docs/releases/0.4.2.md)。
+
+### Fixed
+
+- **结构化合并与修复 Prompt 补全 Schema v1 模板**：抽取统一 `STRUCTURED_NOTE_SCHEMA_TEMPLATE`，同步接入 `STRUCTURED_NOTE_INSTRUCTIONS`、`KNOWLEDGE_CONSOLIDATE_PASS2_INSTRUCTIONS`、`TUTORIAL_STRUCTURED_MERGE_INSTRUCTIONS` 与 `_repair_json_once`，并补齐 Pass 2 / 教程合并开启 `screenshot` 时的截图标注约束，消除长文合并阶段模型自行编造 `chapters` / `concept_block` / `comparison_table` 等非标准字段导致结构化渲染退化的问题。
+- **非标准变体 JSON 幂等无损适配**：`structured_note` 新增 `_coerce_variant_document` / `_coerce_variant_section` 幂等适配器，可将模型偶发输出的 `chapters`、`summary`、`concept_block`、`comparison_table`/`param_table`/`troubleshooting_table`、字典/单串箭头 `flow_chain`、嵌套局部批注及顶层单/多道 `quiz` 无损转换为标准 Schema v1 文档；`_normalize_quiz` 升级为三阶段答案匹配（完整正文全等 → 独立/带分隔符标号 → 唯一无歧义子串），避免首字符碰撞与反义子串误判。
+- **损坏裸 JSON 落盘拦截红线**：`UniversalGPT._parse_or_fallback_structured` 新增 `_looks_like_unparsed_structured_json` 守卫，拦截无法解析的损坏/截断结构化 JSON（含未闭合 ```` ```json ```` 代码块与带前导语截断 JSON）直接落盘当普通正文渲染，同时继续放行合法纯文本 Markdown。
+
 ## [0.4.1] — 2026-11-25
 
 围绕**带图长文（X Article / 静态配图）多模态视觉理解分块稳定性、阅读/失败状态机一致性、付费重生成与蒸馏队列确认守卫及阅读顶栏防裁切**完成的专项质量修复版，详见 [0.4.1 发布说明](docs/releases/0.4.1.md) 与 [隔离环境真实验收报告](docs/0.4.0-fix-validation-2026-11-25/VALIDATION_REPORT.md)。

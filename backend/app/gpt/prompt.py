@@ -76,6 +76,42 @@ MERGE_PROMPT = '''
 - 不发明新内容、外部知识或视觉观察，只输出 Markdown 正文，不用代码块包裹全文。
 '''
 
+STRUCTURED_NOTE_SCHEMA_TEMPLATE = '''输出 JSON Schema（严格遵守以下顶层与嵌套字段名，严禁发明 chapters / comparison_table / param_table / concept_block 等非标准字段）：
+{
+  "schema_version": 1,
+  "note_style": "tutorial 或 knowledge",
+  "title": "视频主题标题",
+  "sections": [
+    {
+      "id": "sec-1",
+      "title": "章节标题（不带 # 和时间戳）",
+      "level": 2,
+      "time_ranges": [{"start": "01:20", "end": "03:45"}],
+      "core_takeaways": [
+        {"spans": [{"text": "核心结论", "emphasis": "hl", "annotation_id": "a1"}]}
+      ],
+      "blocks": [
+        {"type": "paragraph", "spans": [{"text": "主干短句", "emphasis": "plain", "annotation_id": null}]},
+        {"type": "table", "table_kind": "params", "columns": ["核心参数", "推荐值", "作用与改错后果"], "rows": [[{"text": "timeout", "emphasis": "code"}], [{"text": "3000 ms", "emphasis": "code"}], [{"text": "连接等待上限"}]]},
+        {"type": "flow_chain", "steps": [[{"text": "步骤A"}], [{"text": "步骤B"}]]},
+        {"type": "list", "ordered": true, "items": [[{"text": "第一步操作"}]]},
+        {"type": "checklist", "title": "环境准备自查", "items": [{"id": "c1", "spans": [{"text": "已安装 ", "emphasis": "plain"}, {"text": "Node.js 22", "emphasis": "code"}], "checked": false}]},
+        {"type": "code_block", "language": "bash", "code": "echo ok"}
+      ],
+      "annotations": [
+        {"id": "a1", "kind": "why", "short_hint": "单行预览提示", "full_detail": "完整原理解析", "timestamp": "01:45"}
+      ],
+      "quiz": {
+        "short_prompt": "18-24字核心场景短问？",
+        "full_question": "完整实战问题？",
+        "options": [{"key": "A", "text": "选项A"}, {"key": "B", "text": "选项B"}, {"key": "C", "text": "选项C"}],
+        "correct_key": "B",
+        "explanation": "两句话以内的根因与做法解析。"
+      }
+    }
+  ]
+}'''
+
 STRUCTURED_NOTE_INSTRUCTIONS = '''
 你正在为 BiliNote-Studio 生成「结构化 JSON 笔记（Schema v1）」。仅输出单个合法 JSON 对象，严禁输出 Markdown 文本或 ```json 代码块围栏。
 语言规则：默认使用简体中文撰写标题、主干正文、表格、详注与自测题；代码、命令、API/参数名、产品专有名词与英文界面原菜单项保留原文（若下方的输出语言规则或用户整理偏好指定了其他语言，则以其为准）。
@@ -112,42 +148,7 @@ STRUCTURED_NOTE_INSTRUCTIONS = '''
   - correct_key："A" | "B" | "C"
   - explanation：<=2 句精炼解析
 
-输出 JSON Schema：
-{
-  "schema_version": 1,
-  "note_style": "tutorial 或 knowledge",
-  "title": "视频主题标题",
-  "sections": [
-    {
-      "id": "sec-1",
-      "title": "章节标题（不带 # 和时间戳）",
-      "level": 2,
-      "time_ranges": [{"start": "01:20", "end": "03:45"}],
-      "core_takeaways": [
-        {"spans": [{"text": "核心结论", "emphasis": "hl", "annotation_id": "a1"}]}
-      ],
-      "blocks": [
-        {"type": "paragraph", "spans": [{"text": "主干短句", "emphasis": "plain", "annotation_id": null}]},
-        {"type": "table", "table_kind": "params", "columns": ["核心参数", "推荐值", "作用与改错后果"], "rows": [[{"text": "timeout", "emphasis": "code"}], [{"text": "3000 ms", "emphasis": "code"}], [{"text": "连接等待上限"}]]},
-        {"type": "flow_chain", "steps": [[{"text": "步骤A"}], [{"text": "步骤B"}]]},
-        {"type": "list", "ordered": true, "items": [[{"text": "第一步操作"}]]},
-        {"type": "checklist", "title": "环境准备自查", "items": [{"id": "c1", "spans": [{"text": "已安装 ", "emphasis": "plain"}, {"text": "Node.js 22", "emphasis": "code"}], "checked": false}]},
-        {"type": "code_block", "language": "bash", "code": "echo ok"}
-      ],
-      "annotations": [
-        {"id": "a1", "kind": "why", "short_hint": "单行预览提示", "full_detail": "完整原理解析", "timestamp": "01:45"}
-      ],
-      "quiz": {
-        "short_prompt": "18-24字核心场景短问？",
-        "full_question": "完整实战问题？",
-        "options": [{"key": "A", "text": "选项A"}, {"key": "B", "text": "选项B"}, {"key": "C", "text": "选项C"}],
-        "correct_key": "B",
-        "explanation": "两句话以内的根因与做法解析。"
-      }
-    }
-  ]
-}
-'''
+''' + STRUCTURED_NOTE_SCHEMA_TEMPLATE + '\n'
 
 STRUCTURED_SCREENSHOT_RULES = '''
 视觉配图规则（已启用截图）：
@@ -189,8 +190,9 @@ KNOWLEDGE_CONSOLIDATE_PASS2_INSTRUCTIONS = '''
 2. 严禁生成“来源分段 1 / 来源分段 2”之类的流水账章节标题！章节按知识体系逻辑排序（先概念原理与对比，后调优参数与避坑）。
 3. 将该主题关联的所有原片时间段按顺序写入该章节的 time_ranges（例如 [{"start": "12:08", "end": "14:30"}, {"start": "34:10", "end": "35:20"}]）；正文句中严禁穿插时间戳。
 4. 若后半段对前文做法进行了纠错，只保留最终正确做法并把纠错缘由记入 pit 详注。
-5. 严格遵守 Schema v1 规范（三档内容分流、最多 4 列/单格<=30字表格与单行箭头链、why/case/pit 详注、克制实战 quiz），仅输出单个合法 StructuredNoteDocument JSON 对象（"note_style": "knowledge"）。
-'''
+5. 严格遵守下方 Schema v1 规范（三档内容分流、最多 4 列/单格<=30字表格与单行箭头链、why/case/pit 详注、克制实战 quiz，knowledge 笔记禁止 checklist），仅输出单个合法 JSON 对象（严禁 Markdown 或 ```json 代码块围栏），其中 "note_style" 固定为 "knowledge"。
+
+''' + STRUCTURED_NOTE_SCHEMA_TEMPLATE + '\n'
 
 KNOWLEDGE_CARD_BATCH_MERGE_INSTRUCTIONS = '''
 将多批知识原子素材卡按 topic 合并压缩同类条目：保留全部精确时间戳（start/end）、数值参数、对照数据、实例与避坑细节，删除完全重复条目，保留纠错关系；默认使用简体中文表达（代码、参数名与专有名词保留原文，遵循本次语言设定）；输出合并后的 {"cards": [...]} JSON，不要丢弃来源时间。
@@ -201,8 +203,9 @@ TUTORIAL_STRUCTURED_MERGE_INSTRUCTIONS = '''
 要求：
 1. 严格保持教程原片实操先后顺序，保证第 N 步与前序环境状态连贯；严禁插入“来源分段 N”标题。
 2. 保留各章节的具体菜单路径、参数与单位、有序步骤列表、环境准备自查（checklist，合并并去重同类前置环境项）、表格、箭头短链、why/case/pit 详注及合理精简的自测题（整篇保留核心章节的精简 quiz 即可，去重同质题目）。
-3. 合并相邻同主题冗余包装标题，保留跨片段纠错的最终正确做法与依据；默认使用简体中文撰写（代码、命令、参数名、专有名词及英文界面原菜单项保留原文，遵循本次语言设定）；仅输出单个合法 StructuredNoteDocument JSON 对象（"note_style": "tutorial"）。
-'''
+3. 合并相邻同主题冗余包装标题，保留跨片段纠错的最终正确做法与依据；默认使用简体中文撰写（代码、命令、参数名、专有名词及英文界面原菜单项保留原文，遵循本次语言设定）；仅输出单个合法 JSON 对象（严禁 Markdown 或 ```json 代码块围栏），其中 "note_style" 固定为 "tutorial"。
+
+''' + STRUCTURED_NOTE_SCHEMA_TEMPLATE + '\n'
 
 STRUCTURED_REFINEMENT_INSTRUCTIONS = '''
 你是结构化笔记局部修订助手。仅依据本次提供的原始字幕与真实画面，按用户自定义重整要求重算选中的章节，仅输出单个合法 JSON 对象（严禁输出 Markdown 文本或 ```json 代码块围栏）：

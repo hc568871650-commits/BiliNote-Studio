@@ -609,17 +609,25 @@ class UniversalGPT(GPT):
         doc = sn.extract_structured_note_json(
             cleaned, fallback_title=source.title or "视频笔记", default_style=note_style
         )
-        # 仅当输出形态疑似残缺 JSON 时发起单轮无损修复，避免对纯 Markdown 浪费额外请求。
-        looks_like_json = "{" in cleaned or '"sections"' in cleaned
+        # 仅当输出形态疑似残缺或偏航 JSON 时发起单轮带完整 Schema 模板的无损修复，避免对纯 Markdown 浪费额外请求。
+        looks_like_json = "{" in cleaned or '"sections"' in cleaned or '"chapters"' in cleaned
         if doc is None and looks_like_json:
-            repaired = self._repair_json_once(cleaned, "包含 title 与 sections 数组")
+            schema_hint = getattr(
+                prompt_contract,
+                'STRUCTURED_NOTE_SCHEMA_TEMPLATE',
+                '包含 schema_version=1、note_style、title 与 sections 数组（每节含 id/title/level/time_ranges/core_takeaways/blocks/annotations/quiz）',
+            )
+            repaired = self._repair_json_once(cleaned, schema_hint)
             doc = sn.extract_structured_note_json(
                 repaired, fallback_title=source.title or "视频笔记", default_style=note_style
             )
         if doc is not None:
             return doc
-        # Deterministic structured fallback so valid prose is never discarded.
+        # Deterministic structured fallback so valid prose is never discarded,
+        # but never dump raw unparsed JSON source straight into reader paragraphs.
         fallback_text = cleaned or raw_text.strip()
+        if self._looks_like_unparsed_structured_json(fallback_text):
+            raise ValueError("模型输出的结构化 JSON 格式异常，未能解析为可读笔记，请重试或切换模型")
         paragraphs = [p.strip() for p in re.split(r"\n{2,}", fallback_text) if p.strip()]
         blocks = [{"type": "paragraph", "spans": [{"text": p, "emphasis": "plain", "annotation_id": None}]} for p in paragraphs]
         return sn.normalize_structured_note(
@@ -641,6 +649,22 @@ class UniversalGPT(GPT):
             fallback_title=source.title or "视频笔记",
             default_style=note_style,
         )
+
+    @staticmethod
+    def _looks_like_unparsed_structured_json(text: str) -> bool:
+        """识别未成功解析的原始/截断结构化 JSON（含未闭合 ```json 围栏或前导说明），避免误伤普通 Markdown。"""
+        stripped = (text or "").lstrip()
+        if not stripped:
+            return False
+        # 剥离未闭合的 ```json 围栏头
+        unfenced = re.sub(r"^```(?:json|jsonc)\s*\r?\n?", "", stripped, flags=re.IGNORECASE).lstrip()
+        if re.match(r"^\{\s*\"[^\"]+\"\s*:", unfenced) or re.match(r"^\[\s*\{\s*\"[^\"]+\"\s*:", unfenced):
+            return True
+        if re.search(r"```(?:json|jsonc)\b", stripped, flags=re.IGNORECASE) and "{" in stripped:
+            return True
+        if re.search(r'"(?:schema_version|note_style|sections|chapters)"\s*:', stripped):
+            return True
+        return False
 
     def _parse_knowledge_cards(self, raw_text: str, segments: List[TranscriptSegment], title: str) -> list[dict]:
         sn = self._structured_module()
@@ -691,6 +715,10 @@ class UniversalGPT(GPT):
         lang_rule = prompt_contract.get_output_language_rule(getattr(source, 'output_language', None)) if callable(getattr(prompt_contract, 'get_output_language_rule', None)) else ''
         batch_prompt = getattr(prompt_contract, 'KNOWLEDGE_CARD_BATCH_MERGE_INSTRUCTIONS', MERGE_PROMPT)
         pass2_prompt = getattr(prompt_contract, 'KNOWLEDGE_CONSOLIDATE_PASS2_INSTRUCTIONS', MERGE_PROMPT)
+        if "screenshot" in (source._format or []):
+            screenshot_rules = getattr(prompt_contract, 'STRUCTURED_SCREENSHOT_RULES', '')
+            if screenshot_rules and screenshot_rules not in pass2_prompt:
+                pass2_prompt = pass2_prompt + "\n" + screenshot_rules
         if lang_rule:
             batch_prompt = batch_prompt + "\n" + lang_rule
             pass2_prompt = pass2_prompt + "\n" + lang_rule
@@ -775,6 +803,10 @@ class UniversalGPT(GPT):
         if len(docs) == 1:
             return json.dumps(docs[0], ensure_ascii=False)
         merge_inst = getattr(prompt_contract, 'TUTORIAL_STRUCTURED_MERGE_INSTRUCTIONS', MERGE_PROMPT)
+        if "screenshot" in (source._format or []):
+            screenshot_rules = getattr(prompt_contract, 'STRUCTURED_SCREENSHOT_RULES', '')
+            if screenshot_rules and screenshot_rules not in merge_inst:
+                merge_inst = merge_inst + "\n" + screenshot_rules
         lang_rule = prompt_contract.get_output_language_rule(getattr(source, 'output_language', None)) if callable(getattr(prompt_contract, 'get_output_language_rule', None)) else ''
         if lang_rule:
             merge_inst = merge_inst + "\n" + lang_rule

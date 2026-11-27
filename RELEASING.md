@@ -1,6 +1,8 @@
 # Studio 源码同步与发行流程
 
-2026-11-25：`v0.4.1` 已完成源码定版、本机正式版无损实装与公开 Windows x64 安装包构建验收（待后续公开发行），详见 [0.4.1 发布说明](docs/releases/0.4.1.md)、[0.4.1 验收记录](docs/releases/0.4.1-validation.md) 与 [隔离环境真实验收报告](docs/0.4.0-fix-validation-2026-11-25/VALIDATION_REPORT.md)。
+2026-11-27：`v0.4.2` 已完成源码定版（长文知识/教程合并结构化 JSON 渲染修复），详见 [0.4.2 发布说明](docs/releases/0.4.2.md)。
+
+历史记录（2026-11-25）：`v0.4.1` 已完成源码定版、本机正式版无损实装与公开 Windows x64 安装包构建验收（待后续公开发行），详见 [0.4.1 发布说明](docs/releases/0.4.1.md)、[0.4.1 验收记录](docs/releases/0.4.1-validation.md) 与 [隔离环境真实验收报告](docs/0.4.0-fix-validation-2026-11-25/VALIDATION_REPORT.md)。
 
 历史记录（2026-11-23）：`v0.4.0` 已作为正式版公开，详见 [0.4.0 发布说明](docs/releases/0.4.0.md) 与 [0.4.0 验收记录](docs/releases/0.4.0-validation.md)。
 
@@ -24,7 +26,7 @@
 
 ## 版本、身份与构建
 
-以下应用入口统一为 `0.4.1`，只更新应用自身版本，不能全局替换第三方版本：
+以下应用入口统一为 `0.4.2`，只更新应用自身版本，不能全局替换第三方版本：
 
 - `BillNote_frontend/package.json` 及 `package-lock.json` 的根包。
 - `BillNote_frontend/src-tauri/Cargo.toml` 和 `Cargo.lock` 的 `app` 包。

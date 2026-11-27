@@ -1,6 +1,6 @@
 # 本工作区的开发边界
 
-- 默认用简洁中文沟通；主开发工作区 `e:\agy work\bilinote studio` 当前已定版 **`0.4.1`** 并实装本机正式版（历史双同步工作区为 `E:\codex\bilinote`）。先阅读 `DEVELOPMENT.md`。
+- 默认用简洁中文沟通；主开发工作区 `e:\agy work\bilinote studio` 当前已定版 **`0.4.2`** 并实装本机正式版（历史双同步工作区为 `E:\codex\bilinote`）。先阅读 `DEVELOPMENT.md`。
 - 最新版本接手摘要见 `docs/AGENT_HANDOFF.md`，按任务查代码与测试见 `docs/AGENT_MAP.md`；机器可读状态见 `docs/AGENT_STATE.json`。这些摘要不替代当前源码、实际运行核验或本文件权限边界。
 - 正式版 `E:\AI-Tools\BiliNote` 及其启动器、数据、配置、数据库、进程不得因开发任务而被修改、停止、重启或覆盖；除非用户另行明确授权正式部署。
 - 预览安装 `E:\AI-Tools\BiliNote-Learning-Preview`、构建备份目录 `E:\AI-Tools\BiliNote-build` 与本地历史备份 `E:\codex\bilinote-backup-20261115` 不属于当前开发改动目标，未经明确授权不得删除或改写。

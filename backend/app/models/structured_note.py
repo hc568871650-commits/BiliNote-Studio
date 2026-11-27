@@ -219,7 +219,7 @@ def _normalize_annotations(raw: Any, section_index: int) -> list[dict[str, Any]]
     for idx, item in enumerate(raw, 1):
         if not isinstance(item, dict):
             continue
-        full = str(item.get("full_detail") or item.get("detail") or item.get("content") or "").strip()
+        full = str(item.get("full_detail") or item.get("detail") or item.get("content") or item.get("text") or "").strip()
         hint = str(item.get("short_hint") or item.get("hint") or item.get("summary") or "").strip()
         if not full and not hint:
             continue
@@ -367,7 +367,14 @@ def _normalize_block(raw: Any, valid_anno_ids: set[str]) -> dict[str, Any] | Non
         return _normalize_checklist(raw, valid_anno_ids)
     if btype in ("flow_chain", "chain", "flow"):
         raw_steps = raw.get("steps") or raw.get("items") or []
+        if isinstance(raw_steps, str):
+            raw_steps = [raw_steps]
         steps = [s for s in (_normalize_spans(step, valid_anno_ids) for step in raw_steps) if s]
+        if len(steps) == 1:
+            plain_step = _spans_plain_text(steps[0])
+            split_parts = [p.strip() for p in re.split(r"\s*(?:->|→|➡|=>)\s*", plain_step) if p.strip()]
+            if len(split_parts) >= 2:
+                steps = [[{"text": part, "emphasis": "plain", "annotation_id": None}] for part in split_parts]
         if len(steps) >= 2:
             return {"type": "flow_chain", "steps": steps}
         if len(steps) == 1:
@@ -403,6 +410,12 @@ def _normalize_block(raw: Any, valid_anno_ids: set[str]) -> dict[str, Any] | Non
 
 
 def _normalize_quiz(raw: Any) -> dict[str, Any] | None:
+    if isinstance(raw, list):
+        for candidate in raw:
+            normalized = _normalize_quiz(candidate)
+            if normalized is not None:
+                return normalized
+        return None
     if not isinstance(raw, dict):
         return None
     full_q = str(raw.get("full_question") or raw.get("question") or "").strip()
@@ -427,8 +440,29 @@ def _normalize_quiz(raw: Any) -> dict[str, Any] | None:
     if len(options) < 2:
         return None
     valid_keys = {opt["key"] for opt in options}
-    correct_key = str(raw.get("correct_key") or raw.get("answer") or "").strip().upper()[:1]
-    if correct_key not in valid_keys:
+    raw_answer = str(raw.get("correct_key") or raw.get("answer") or "").strip()
+    cleaned_answer = _strip_inline_time_markers(raw_answer)
+    correct_key = ""
+    # 1. 优先精确匹配完整选项正文，避免以 A/B/C/D 开头的正文（如 "API 批量合并"）与选项标号碰撞。
+    for opt in options:
+        if cleaned_answer and opt["text"] == cleaned_answer:
+            correct_key = opt["key"]
+            break
+    # 2. 仅当 answer 明确为独立标号或带分隔符标号（如 "B"、"B."、"B、"）时按标号解析。
+    if not correct_key and raw_answer:
+        key_match = re.match(r"^([A-Da-d])(?:\s*$|\s*[.:：、\)）])", raw_answer)
+        if key_match and key_match.group(1).upper() in valid_keys:
+            correct_key = key_match.group(1).upper()
+    # 3. 仍未命中时仅在唯一子串匹配时采纳，存在多个候选（歧义）则放弃。
+    if not correct_key and cleaned_answer:
+        partial_hits = [
+            opt["key"]
+            for opt in options
+            if cleaned_answer in opt["text"] or opt["text"] in cleaned_answer
+        ]
+        if len(partial_hits) == 1:
+            correct_key = partial_hits[0]
+    if not correct_key:
         return None
     if not short_q:
         short_q = full_q[:24] + ("…" if len(full_q) > 24 else "")
@@ -662,9 +696,9 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
         if parsed is not None:
             return parsed
 
-    # 按平衡大括号优先扫描合法顶层对象（优先取包含 sections/cards 或最长的对象）
+    # 按平衡大括号优先扫描合法顶层对象（优先取包含 sections/chapters/cards 或最长的对象）
     balanced = _extract_balanced_json_slices(candidate)
-    balanced.sort(key=lambda s: (('"sections"' in s or '"cards"' in s), len(s)), reverse=True)
+    balanced.sort(key=lambda s: (('"sections"' in s or '"chapters"' in s or '"cards"' in s), len(s)), reverse=True)
     for fragment in balanced:
         parsed = _loads_json_dict(fragment)
         if parsed is not None:
@@ -677,6 +711,163 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
+_VARIANT_TABLE_FIELDS = (
+    ("comparison_table", "comparison"),
+    ("param_table", "params"),
+    ("params_table", "params"),
+    ("troubleshooting_table", "troubleshooting"),
+    ("table", None),
+)
+
+
+def _coerce_variant_section(sec: dict[str, Any], section_index: int) -> dict[str, Any]:
+    """将模型偶发偏航的 chapter/concept_block/comparison_table 等结构无损规整为 Schema v1 section。"""
+    if not isinstance(sec, dict):
+        return {}
+    has_variant_fields = any(
+        key in sec for key in (
+            "summary", "body", "comparison_table", "param_table", "params_table",
+            "troubleshooting_table", "table", "tables", "flow_chain", "sections",
+        )
+    )
+    if not has_variant_fields:
+        return sec
+
+    out = dict(sec)
+    annotations: list[Any] = list(out.get("annotations") or []) if isinstance(out.get("annotations"), list) else []
+    used_anno_ids: set[str] = {
+        str(item.get("id")).strip()
+        for item in annotations
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+    blocks: list[Any] = list(out.get("blocks") or []) if isinstance(out.get("blocks"), list) else []
+    takeaways: list[Any] = list(out.get("core_takeaways") or []) if isinstance(out.get("core_takeaways"), list) else []
+
+    def _normalize_variant_flow_chain(fc: Any) -> dict[str, Any]:
+        if isinstance(fc, dict):
+            fc_block = dict(fc)
+            fc_block.setdefault("type", "flow_chain")
+            return fc_block
+        return {"type": "flow_chain", "steps": fc}
+
+    if not takeaways and out.get("summary"):
+        summary_val = out.get("summary")
+        if isinstance(summary_val, str) and summary_val.strip():
+            takeaways.append({"spans": [{"text": summary_val.strip(), "emphasis": "hl"}]})
+        elif isinstance(summary_val, list):
+            for item in summary_val[:2]:
+                if isinstance(item, str) and item.strip():
+                    takeaways.append({"spans": [{"text": item.strip(), "emphasis": "hl"}]})
+
+    sec_title = str(out.get("title") or "").strip()
+    if isinstance(out.get("body"), str) and out["body"].strip():
+        blocks.append({"type": "paragraph", "spans": [{"text": out["body"].strip(), "emphasis": "plain"}]})
+
+    # 兼容嵌套 sections（如 concept_block）
+    nested_sections = out.get("sections")
+    if isinstance(nested_sections, list):
+        for sub_idx, sub in enumerate(nested_sections, 1):
+            if not isinstance(sub, dict):
+                continue
+            sub_anno_ids: list[str] = []
+            if isinstance(sub.get("annotations"), list):
+                for a_idx, raw_anno in enumerate(sub["annotations"], 1):
+                    if not isinstance(raw_anno, dict):
+                        continue
+                    anno_copy = dict(raw_anno)
+                    candidate_id = str(anno_copy.get("id") or "").strip()
+                    if not candidate_id or candidate_id in used_anno_ids:
+                        candidate_id = f"s{section_index}-sub{sub_idx}-a{a_idx}"
+                        suffix = 1
+                        while candidate_id in used_anno_ids:
+                            suffix += 1
+                            candidate_id = f"s{section_index}-sub{sub_idx}-a{a_idx}_{suffix}"
+                    used_anno_ids.add(candidate_id)
+                    anno_copy["id"] = candidate_id
+                    sub_anno_ids.append(candidate_id)
+                    annotations.append(anno_copy)
+
+            sub_title = str(sub.get("title") or "").strip()
+            sub_body = str(sub.get("body") or sub.get("content") or sub.get("text") or "").strip()
+            if sub_body:
+                spans: list[dict[str, Any]] = []
+                if sub_title and sub_title != sec_title:
+                    spans.append({"text": f"{sub_title}：", "emphasis": "ul", "annotation_id": None})
+                first_anno = sub_anno_ids[0] if sub_anno_ids else None
+                spans.append({"text": sub_body, "emphasis": "plain", "annotation_id": first_anno})
+                for extra_anno in sub_anno_ids[1:]:
+                    spans.append({"text": "", "emphasis": "plain", "annotation_id": extra_anno})
+                blocks.append({"type": "paragraph", "spans": spans})
+            if isinstance(sub.get("blocks"), list):
+                blocks.extend(sub["blocks"])
+            elif not sub_body and sub.get("type"):
+                blocks.append(sub)
+
+            for field_name, table_kind in _VARIANT_TABLE_FIELDS:
+                tbl = sub.get(field_name)
+                if isinstance(tbl, dict):
+                    tbl_block = dict(tbl)
+                    tbl_block["type"] = "table"
+                    if table_kind and not tbl_block.get("table_kind"):
+                        tbl_block["table_kind"] = table_kind
+                    blocks.append(tbl_block)
+            if sub.get("flow_chain"):
+                blocks.append(_normalize_variant_flow_chain(sub.get("flow_chain")))
+
+    for field_name, table_kind in _VARIANT_TABLE_FIELDS:
+        tbl = out.get(field_name)
+        if isinstance(tbl, dict):
+            tbl_block = dict(tbl)
+            tbl_block["type"] = "table"
+            if table_kind and not tbl_block.get("table_kind"):
+                tbl_block["table_kind"] = table_kind
+            blocks.append(tbl_block)
+    if isinstance(out.get("tables"), list):
+        for tbl in out["tables"]:
+            if isinstance(tbl, dict):
+                tbl_block = dict(tbl)
+                tbl_block["type"] = "table"
+                blocks.append(tbl_block)
+    if out.get("flow_chain"):
+        blocks.append(_normalize_variant_flow_chain(out.get("flow_chain")))
+
+    out["core_takeaways"] = takeaways
+    out["blocks"] = blocks
+    out["annotations"] = annotations
+    for consumed in (
+        "summary", "body", "sections", "comparison_table", "param_table",
+        "params_table", "troubleshooting_table", "table", "tables", "flow_chain",
+    ):
+        out.pop(consumed, None)
+    return out
+
+
+def _coerce_variant_document(obj: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(obj, dict):
+        return obj
+    coerced = dict(obj)
+    raw_sections = coerced.get("sections")
+    if isinstance(raw_sections, list) and raw_sections:
+        coerced_sections = [dict(s) if isinstance(s, dict) else s for s in raw_sections]
+    else:
+        chapters = coerced.get("chapters")
+        if not isinstance(chapters, list) or not chapters:
+            return obj
+        coerced_sections = [dict(ch) for ch in chapters if isinstance(ch, dict)]
+
+    top_quiz = coerced.get("quiz")
+    if coerced_sections and top_quiz:
+        quizzes = [q for q in (top_quiz if isinstance(top_quiz, list) else [top_quiz]) if isinstance(q, dict)]
+        empty_slots = [s for s in coerced_sections if isinstance(s, dict) and not s.get("quiz")]
+        if quizzes and empty_slots:
+            # 保持多道顶层 quiz 的原有顺序，依次挂载到靠后的空槽章节。
+            chosen_slots = empty_slots[-len(quizzes):]
+            for slot, q in zip(chosen_slots, quizzes):
+                slot["quiz"] = q
+    coerced["sections"] = coerced_sections
+    return coerced
+
+
 def extract_structured_note_json(
     text: str,
     *,
@@ -687,8 +878,16 @@ def extract_structured_note_json(
     video_id: str = "",
 ) -> dict[str, Any] | None:
     obj = extract_json_object(text)
-    if not isinstance(obj, dict) or not isinstance(obj.get("sections"), list):
+    if not isinstance(obj, dict):
         return None
+    obj = _coerce_variant_document(obj)
+    if not isinstance(obj.get("sections"), list):
+        return None
+    obj = dict(obj)
+    obj["sections"] = [
+        _coerce_variant_section(sec, idx) if isinstance(sec, dict) else sec
+        for idx, sec in enumerate(obj["sections"], 1)
+    ]
     normalized = normalize_structured_note(
         obj,
         fallback_title=fallback_title,
