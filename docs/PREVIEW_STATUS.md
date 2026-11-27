@@ -24,8 +24,8 @@
 
 ## 正式安装环境
 
-- **正式安装**：`E:\AI-Tools\BiliNote` 经用户明确授权已于 2026-11-25 原子热更新实装至 **`0.4.1`**（`local-release-0.4.1`，桌面 `0.4.1` + 后端 `0.4.1` + 内置纯 Python BSD 许可 `pypdf 7.1.1`，默认 `127.0.0.1:8483`；经 `Shell.Application` 脱离命令会话 Job Object 拉起常驻运行 `BiliNoteStudio.exe` 与 `BiliNoteStudioBackend.exe`，独立搜索服务 `BiliNote-Search` 未受影响，动态进程 PID 以实时系统查询为准）。已完成跨会话存活与启动核验：`GET /api/sys_health`（`backend/ffmpeg/db` 全部 `ok`）、`GET /api/system/check-update` 返回 `current_version: "0.4.1"`、`_internal/build-info.json` 为 `"0.4.1"` 且 `pypdf_bundled: true`、**`13/13` 篇**既有笔记全部可读无损、`/api/jobs` / `/api/learning/review-bank?status=due` / `/api/ai_purposes` / `/api/system/storage` / `/api/system/playback-cache` / `/api/organizer/sessions` 均在线、全部 **`3,153` 个受保护文件**（含 `_internal/.env`）SHA256 零变动、SQLite `PRAGMA integrity_check` 为 `ok`。
+- **正式安装**：`E:\AI-Tools\BiliNote` 经用户明确授权已于 2026-11-27 原子热更新实装至 **`0.4.2`**（`local-release-0.4.2`，桌面 `0.4.2` + 后端 `0.4.2` + 内置纯 Python BSD 许可 `pypdf 7.1.1`，默认 `127.0.0.1:8483`；通过 `cua-driver` `launch_app` 在用户主桌面 `WinSta0\Default` 拉起 `Start-BiliNote-Studio.cmd`，主窗口 `BiliNote Studio` 与单实例 IPC 窗均已确认可见，独立搜索服务 `BiliNote-Search` 未受影响，动态进程 PID 以实时系统查询为准）。已完成全量启动核验：`GET /api/sys_health`（`backend/ffmpeg/db` 全部 `ok`）、`GET /api/system/check-update` 返回 `current_version: "0.4.2"`、`_internal/build-info.json` 为 `"0.4.2"` 且 `pypdf_bundled: true`、**`14/14` 篇**既有笔记全部可读无损（含免费无损重排的历史异常版本 `94bce453`，原目录已先备份至 `.BiliNote-dev/local-release-0.4.2/note-repair-backup/`；实装阶段 3,195/3,195 受保护文件零变动，重排后仅目标 3 个文件更新、其余 3,192 个受保护文件 SHA256 零变动）、SQLite `PRAGMA integrity_check` 为 `ok`。
 - **回滚备份**：
-  - 本次 `0.4.0 → 0.4.1` 全量实装备份与一键回滚脚本：`e:\agy work\bilinote studio\.BiliNote-dev\local-release-0.4.1\backup`（及经 PowerShell 语法校验通过的 `Rollback.ps1`）。
-  - 历史 `0.3.0 → 0.4.0` 实装备份留存：`e:\agy work\bilinote studio\.BiliNote-dev\local-release-0.4.0\backup`（及 `Rollback.ps1`）。
+  - 本次 `0.4.1 → 0.4.2` 全量实装备份与一键回滚脚本：`e:\agy work\bilinote studio\.BiliNote-dev\local-release-0.4.2\backup`（及 `Rollback.ps1`、`note-repair-backup/`）。
+  - 历史 `0.4.0 → 0.4.1` 与 `0.3.0 → 0.4.0` 实装备份留存：`e:\agy work\bilinote studio\.BiliNote-dev\local-release-0.4.1\backup` 与 `.BiliNote-dev\local-release-0.4.0\backup`。
 - 后续开发未经另行明确授权仍不得修改、停止、重启或覆盖 `E:\AI-Tools\BiliNote`。
