@@ -23,7 +23,7 @@
 
 ## 正式环境与运行边界
 
-- **受保护正式安装**：`E:\AI-Tools\BiliNote`（当前运行桌面 `0.4.1` + 后端 `0.4.1`，默认 `8483` 端口，含真实数据库 `bili_note.db`、`data`、`note_results`、`uploads`、`WebView2` 等）绝对受保护，后续开发未经另行明确授权不得修改、停止、重启或覆盖。
+- **受保护正式安装**：`E:\AI-Tools\BiliNote`（当前运行桌面 `0.4.2` + 后端 `0.4.2`，默认 `8483` 端口，含真实数据库 `bili_note.db`、`data`、`note_results`、`uploads`、`WebView2` 等）绝对受保护，后续开发未经另行明确授权不得修改、停止、重启或覆盖。
 - **其他外部保护目录**：`E:\AI-Tools\BiliNote-Learning-Preview`、`E:\AI-Tools\_Launchers`、`E:\AI-Tools\BiliNote-build`、`E:\codex\github仓库管理和发布` 与 `E:\codex\bilinote-backup-20261115`。
 - **开发必须完全隔离**：不要直接运行未隔离的 `pnpm dev`、`backend/main.py` 或 Tauri 桌面端（默认指向 `8483` 正式端口）；开发或真实业务验收必须同时隔离前后端端口、`VITE_API_BASE_URL`、应用标识、数据库、笔记/截图/上传目录、缓存目录及浏览器 origin。
 

@@ -1,6 +1,6 @@
 # Studio 源码同步与发行流程
 
-2026-11-27：`v0.4.2` 已完成源码定版、本机正式版无损实装、历史异常版本无损重排与公开 Windows x64 安装包构建验收（待后续公开发行），详见 [0.4.2 发布说明](docs/releases/0.4.2.md) 与 [0.4.2 验收记录](docs/releases/0.4.2-validation.md)。
+2026-11-27：[`v0.4.2` 已作为正式版公开](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.4.2)（含本机正式版无损实装、公开 Windows x64 安装包构建与匿名下载核验），详见 [0.4.2 发布说明](docs/releases/0.4.2.md) 与 [0.4.2 验收记录](docs/releases/0.4.2-validation.md)。
 
 历史记录（2026-11-25）：`v0.4.1` 已完成源码定版、本机正式版无损实装与公开 Windows x64 安装包构建验收（待后续公开发行），详见 [0.4.1 发布说明](docs/releases/0.4.1.md)、[0.4.1 验收记录](docs/releases/0.4.1-validation.md) 与 [隔离环境真实验收报告](docs/0.4.0-fix-validation-2026-11-25/VALIDATION_REPORT.md)。
 
