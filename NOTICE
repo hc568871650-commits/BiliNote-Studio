@@ -1,0 +1,14 @@
+BiliNote Studio
+Copyright (c) 2026 wuchan1232 (https://github.com/hc568871650-commits/BiliNote-Studio)
+
+Scope & Licensing Notice:
+- BiliNote Studio (additions, modifications, and the combined work) is licensed
+  under the PolyForm Noncommercial License 1.0.0 (see LICENSE). Commercial use
+  is not permitted without separate written permission from wuchan1232.
+- This project is an independent derivative based on JefferyHcool/BiliNote
+  (v2.4.5). Original unmodified upstream code retains its original MIT License
+  and copyright notice (Copyright (c) 2024 Jeffery Huang), preserved in full at
+  licenses/UPSTREAM-BiliNote-MIT-LICENSE.txt.
+- Historical BiliNote Studio releases published prior to the license change
+  (v0.4.2 and earlier) remain available under the MIT License terms under which
+  they were originally distributed.
