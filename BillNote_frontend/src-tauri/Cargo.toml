@@ -2,8 +2,8 @@
 name = "app"
 version = "0.4.2"
 description = "BiliNote Studio video learning workspace"
-authors = ["BiliNote Studio contributors"]
-license = "MIT"
+authors = ["wuchan1232", "BiliNote Studio contributors"]
+license-file = "../../LICENSE"
 repository = ""
 edition = "2021"
 rust-version = "1.77.2"

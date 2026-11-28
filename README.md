@@ -94,11 +94,11 @@ https://github.com/user-attachments/assets/6b312937-4a66-4b2c-b808-c16d896c64bf
 
 ### 1. Windows 安装（推荐）
 
-前往 [GitHub Releases (`v0.3.0`)](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.3.0) 下载单一 Windows x64 安装包 `BiliNote-Studio-0.3.0-windows-x64-setup.exe`（`74,612,531` 字节）及校验文件 `SHA256SUMS.txt`，核对 SHA-256（`f86a02d549d3e6290ab2390aa7f3dda72e59ea3e34cd408c0005f9c2c3ca95cc`）后运行安装。
+前往 [GitHub Releases (`v0.4.2`)](https://github.com/hc568871650-commits/BiliNote-Studio/releases/tag/v0.4.2) 下载单一 Windows x64 安装包 `BiliNote-Studio-0.4.2-windows-x64-setup.exe`（`79,516,566` 字节）及校验文件 `SHA256SUMS.txt`，核对 SHA-256（`30b955c30d6abb98b7308f65f5d504d6517d8c6c7c93cc388af1159c21232fd3`）后运行安装。
 
-- **独立身份与数据分离**：公开安装版应用标识 `com.bilinote.studio`，后端端口 `38484`，用户数据位于 `%LOCALAPPDATA%\BiliNoteStudio`，不覆盖原版 BiliNote，也不会自动导入旧数据库；Studio `0.2.0 → 0.3.0` 覆盖安装自动保留数据。
-- **外部依赖说明**：首次使用视频生成功能需本机已安装 FFmpeg 并配置转写与大模型服务；仅阅读、管理资料或导入 `.srt/.vtt` 字幕不需要 FFmpeg。
-- **公开包裁剪范围**：保留全部阅读/自测/整理与 4 格式导出功能；不内置 FFmpeg、PDF 导出（PyMuPDF）、本地 Whisper 或抖音链接下载。详细说明见 [用户指南](docs/studio/USER_GUIDE.md)。
+- **独立身份与数据分离**：公开安装版应用标识 `com.bilinote.studio`，后端端口 `38484`，用户数据位于 `%LOCALAPPDATA%\BiliNoteStudio`，不覆盖原版 BiliNote，也不会自动导入旧数据库；Studio `0.2.0 / 0.3.0 / 0.4.x` 覆盖安装自动保留数据。
+- **外部依赖说明**：首次使用视频生成功能需本机已安装 FFmpeg 并配置转写与大模型服务；仅阅读、管理资料或导入 `.srt/.vtt` 字幕及本地文档不需要 FFmpeg。
+- **公开包裁剪范围**：保留全部阅读/自测/整理与 4 格式导出功能（内置纯 Python BSD `pypdf 7.1.1` 解析本地 PDF）；不内置 FFmpeg、PDF 导出（PyMuPDF）、本地 Whisper 或抖音链接下载。详细说明见 [用户指南](docs/studio/USER_GUIDE.md)。
 
 ### 2. 零配置体验 0.3.0 独立 UI 预览
 
@@ -132,18 +132,19 @@ pnpm dev:warm
 
 ## 文档与上游致谢
 
-- [0.3.0 发布说明](docs/releases/0.3.0.md) 与 [0.3.0 验收记录](docs/releases/0.3.0-validation.md)
-- [变更记录（含 `0.3.0` 全量说明）](CHANGELOG.md)
+- [0.4.2 发布说明](docs/releases/0.4.2.md) 与 [0.4.2 验收记录](docs/releases/0.4.2-validation.md)
+- [0.4.0 发布说明](docs/releases/0.4.0.md) 与 [0.4.0 验收记录](docs/releases/0.4.0-validation.md)
+- [变更记录（全版本说明）](CHANGELOG.md)
 - [0.3.0 隔离环境真实流程验收报告](docs/0.3.0-real-flow-validation-2026-11-20/VALIDATION_REPORT.md)
-- [0.2.0 发布说明](docs/releases/0.2.0.md) 与 [0.2.0 验收记录](docs/releases/0.2.0-validation.md)
 - [用户指南](docs/studio/USER_GUIDE.md)
 - [源码同步与发行流程](RELEASING.md)
 - [UI/UX 设计规范](docs/ui-design-guide.md)
+- [贡献指南](CONTRIBUTING.md)
 - [第三方许可与来源](THIRD_PARTY_NOTICES.md)
 - [上游项目 JefferyHcool/BiliNote](https://github.com/JefferyHcool/BiliNote)
 
 ## 许可证
 
-本项目遵循 [MIT License](LICENSE)，保留 Jeffery Huang 的原始版权声明与上游许可证。感谢上游作者及所有贡献者。
-
-BiliNote Studio 为独立维护的非官方二次开发版本；第三方依赖、大模型服务与视频素材分别遵循其各自许可证与服务条款。
+- **BiliNote Studio**（`Copyright (c) 2026 wuchan1232`）现采用 **[PolyForm Noncommercial License 1.0.0](LICENSE)**（源码公开 · 非商业许可）：允许个人学习、研究与非营利组织免费使用、修改与非商业分发，**未经作者书面授权禁止任何商业用途**（含打包售卖、收费套壳、商业 SaaS 或企业盈利场景部署）。
+- 本项目基于 [JefferyHcool/BiliNote](https://github.com/JefferyHcool/BiliNote)（v2.4.5）独立维护，原始上游未修改代码保留其 **MIT License** 与 `Copyright (c) 2024 Jeffery Huang` 声明，完整原文留存于 [licenses/UPSTREAM-BiliNote-MIT-LICENSE.txt](licenses/UPSTREAM-BiliNote-MIT-LICENSE.txt)。感谢上游作者及所有贡献者。
+- 本次协议变更前已公开发布的历史版本（`v0.4.2` 及更早版本）仍沿用其发布时的 MIT 许可条款；第三方依赖、大模型服务与视频素材分别遵循其各自许可证与服务条款。

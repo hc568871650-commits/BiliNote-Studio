@@ -18,7 +18,7 @@
 
 公开仓库从清理后的源码快照建立，不导入开发工作区的私人 Git 历史。后续在独立发布 checkout 逐文件对比应用源码、新增模块、依赖锁文件、必要测试和合成预览入口，不能整目录覆盖。
 
-保留公开用户指南、首发验证资料、MIT 与上游版权声明、完整许可原文及 `licenses/`。当前公共配图位于 `doc/showcase/studio-0.2.0/`（并保留历史 `doc/showcase/studio-20261012/`），来源说明随图片保留。
+保留公开用户指南、首发验证资料、根目录 `PolyForm Noncommercial 1.0.0` 许可（`LICENSE`）、上游 MIT 版权声明与原文（`licenses/UPSTREAM-BiliNote-MIT-LICENSE.txt`）及 `licenses/`。当前公共配图位于 `doc/showcase/studio-0.2.0/`（并保留历史 `doc/showcase/studio-20261012/`），来源说明随图片保留。
 
 不同步配置、Cookie、密钥、数据库、真实笔记、上传文件、缓存、日志、WebView2 数据、备份、构建产物、内部历史和本机部署截图。忽略规则不会移除已跟踪文件；检查实际 `BillNote_frontend` 拼写、已跟踪和新增文件。
 

@@ -1,6 +1,6 @@
 # Third-party components and sources
 
-Studio source retains the upstream MIT license and copyright. This does not replace licenses of third-party components, icons, fonts, or user-provided media.
+BiliNote Studio (Copyright (c) 2026 wuchan1232) is licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE), while retaining the upstream JefferyHcool/BiliNote MIT license and copyright (see licenses/UPSTREAM-BiliNote-MIT-LICENSE.txt). This does not replace licenses of third-party components, icons, fonts, or user-provided media.
 
 ## Frontend
 
@@ -14,6 +14,6 @@ The initial installer does not distribute FFmpeg executables. Obtain FFmpeg sepa
 
 ## Assets
 
-See UPSTREAM.md for provenance. Third-party brand icons do not imply endorsement. Demonstration screenshots are for illustrating the application; video content and tutorial excerpts are not relicensed under MIT.
+See UPSTREAM.md for provenance. Third-party brand icons do not imply endorsement. Demonstration screenshots are for illustrating the application; video content and tutorial excerpts are not relicensed under PolyForm Noncommercial 1.0.0 or MIT.
 
 Exact supplemental license texts and version-specific source URLs are in licenses/Extra/SOURCES.json and licenses/Extra/Rust/SOURCES.json. The excluded gmssl entry is provenance only, not a shipped dependency. For seahash 4.1.0, the original manifest identifies MIT and the authors; the standard MIT terms are explicitly labeled because the original author GitLab endpoint could not be retrieved. No copyright year was invented. MPL-covered selectors and other MPL crate sources can be obtained using the exact crate download URLs in those notices.
